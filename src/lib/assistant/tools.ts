@@ -19,11 +19,10 @@ import { sanitizeAssistantHtml } from "./sanitize-html";
  * The fixed, reviewed tools the assistant reaches for first — a small set of
  * parameterized queries covering what an owner actually asks, where every
  * number a card shows was computed by our own code, never guessed by the
- * model. agent.ts additionally offers the paribelle-oms-db MCP server's
- * get_schema/run_sql for questions these don't cover (read-only, guarded —
- * see mcp/sql-guard.ts) and, in custom-page display mode, renderHtmlTool
- * below for the model to design its own presentation instead of one of the
- * fixed cards.
+ * model. agent.ts additionally offers the freeform get_schema/run_sql tools
+ * (db-tools.ts) for questions these don't cover (read-only, guarded — see
+ * sql-guard.ts) and, in custom-page display mode, renderHtmlTool below for
+ * the model to design its own presentation instead of one of the fixed cards.
  */
 
 const RANGE = z

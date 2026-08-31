@@ -213,7 +213,16 @@ export class AmazonAdapter implements ChannelAdapter {
       }
     } while (nextToken);
 
-    const toProcess = collected.slice(0, limit);
+    // Drop orders Amazon hasn't finalised yet. A just-placed order sits at
+    // "Pending" until payment clears — no buyer address, no line items, and
+    // Seller Central doesn't list it as actionable either. Ingesting it would
+    // put a row in the pack queue that the seller can't act on and that isn't
+    // yet a confirmed sale. It gets picked up on the next sync once it turns
+    // "Unshipped" (the 72h rolling window re-scans it), or never, if Amazon
+    // auto-cancels it.
+    const toProcess = collected
+      .slice(0, limit)
+      .filter((o) => !AMAZON_PENDING_STATUSES.has(o.OrderStatus));
     const orders: CanonicalOrder[] = [];
     for (const [i, o] of toProcess.entries()) {
       orders.push(await this.toCanonical(o, unchangedSince));
@@ -569,9 +578,18 @@ function mapAmazonStatus(o: AmazonOrder): OrderStatus {
   if (o.OrderStatus === "Unfulfillable") return "rto";
   if (ez === "Delivered") return "delivered";
   if (o.OrderStatus === "Shipped") return "shipped";
-  // "Pending", "Unshipped", "PartiallyShipped", "PendingAvailability", …
+  // "Unshipped", "PartiallyShipped". "Pending"/"PendingAvailability" are
+  // filtered out before they reach here (see AMAZON_PENDING_STATUSES) — if one
+  // ever slips through, "new" is the safe fallback.
   return "new";
 }
+
+/**
+ * Amazon order statuses that mean "not a confirmed sale yet". Filtered in
+ * fetchOrders so they never enter the pack queue; they'll be ingested on a
+ * later sync once the order moves to "Unshipped".
+ */
+const AMAZON_PENDING_STATUSES = new Set(["Pending", "PendingAvailability"]);
 
 /**
  * The All Orders flat-file report spells its statuses differently from the JSON
@@ -581,11 +599,15 @@ function mapAmazonStatus(o: AmazonOrder): OrderStatus {
  */
 function mapFlatFileStatus(s: string): OrderStatus {
   const t = s.trim();
-  // Live data shows "Pending", "Pending - Waiting for Pick Up", "Unshipped", …
-  if (t.startsWith("Pending") || t === "Unshipped" || t === "Partially Shipped") return "new";
+  if (t === "Unshipped" || t === "Partially Shipped") return "new";
   if (t === "Cancelled" || t === "Canceled") return "cancelled";
   if (["Shipped", "Shipping", "InTransit", "Delivered"].includes(t)) return "shipped";
-  return "new";
+  // Everything else — a blank cell, "Pending", or a value this report spells a
+  // way we haven't seen — defaults to "shipped", NOT "new". This is historical
+  // data: an order that's days or weeks old is far more likely already gone
+  // than waiting to be packed, and a backfill must never inflate the pack
+  // queue. A later live sync corrects any order that's genuinely still open.
+  return "shipped";
 }
 
 /**
