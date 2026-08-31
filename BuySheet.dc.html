@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;background:#8ba0b0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#0f2536;-webkit-font-smoothing:antialiased}
+    .page{width:900px;margin:28px auto;background:#fff;padding:36px 40px 44px;box-shadow:0 20px 50px -20px rgba(0,0,0,.4)}
+    .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f2536;padding-bottom:12px}
+    .top h1{margin:0;font-size:22px;font-weight:700}
+    .top .date{font-size:13px;color:#5c7386;margin-top:3px}
+    .top .brand{font-size:13px;color:#5c7386;text-align:right}
+    .top .brand b{display:block;font-size:15px;color:#0f2536}
+
+    .grp{margin-top:22px}
+    .grp h2{margin:0 0 2px;font-size:15px;font-weight:700}
+    .grp .sub{font-size:11.5px;color:#8ba0b0;margin-bottom:8px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th{background:#eef6fa;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#8ba0b0;text-align:left;padding:7px 10px;border-bottom:1px solid #cfe0e8}
+    th.r,td.r{text-align:right}
+    td{padding:8px 10px;border-bottom:1px solid #e2edf3}
+    td.qty{font-weight:700;font-variant-numeric:tabular-nums;font-size:15px}
+    tr:nth-child(even) td{background:#f7fbfd}
+    .gtot{font-weight:700}
+    .gtot td{border-top:1.5px solid #cfe0e8;background:#fff}
+
+    .grand{margin-top:26px;display:flex;justify-content:space-between;align-items:center;background:#0f2536;color:#fff;padding:14px 20px;border-radius:10px}
+    .grand .lbl{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;opacity:.8}
+    .grand .v{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+    .foot{margin-top:16px;font-size:10.5px;color:#8ba0b0}
+  </style>
+</helmet>
+
+<div class="page">
+  <div class="top">
+    <div>
+      <h1>Buy list — wholesaler run</h1>
+      <div class="date">2 September 2026</div>
+    </div>
+    <div class="brand"><b>Paribelle</b>Restock buy list</div>
+  </div>
+
+  <div class="grp">
+    <h2>3 Piece Cotton Co-Ord Set with Embroidered Coat</h2>
+    <div class="sub">Cotton · from “Paribelle 3 Piece Cotton Co-Ord Set with Embroidered Coat (…)”</div>
+    <table>
+      <thead><tr><th style="width:26%">Colour</th><th style="width:26%">Size</th><th class="r" style="width:16%">Need</th><th class="r" style="width:16%">Have</th><th class="r" style="width:16%">Buy</th></tr></thead>
+      <tbody>
+        <tr><td>Brown</td><td>M</td><td class="r">2</td><td class="r">1</td><td class="r qty">1</td></tr>
+        <tr><td>Brown</td><td>L</td><td class="r">3</td><td class="r">0</td><td class="r qty">3</td></tr>
+        <tr><td>Brown</td><td>2XL</td><td class="r">2</td><td class="r">0</td><td class="r qty">2</td></tr>
+        <tr><td>White</td><td>M</td><td class="r">1</td><td class="r">0</td><td class="r qty">1</td></tr>
+        <tr><td>White</td><td>L</td><td class="r">2</td><td class="r">0</td><td class="r qty">2</td></tr>
+        <tr class="gtot"><td colspan="4" class="r">Subtotal</td><td class="r qty">9</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grp">
+    <h2>Women's Cotton Ajrakh Print Kurta Set with Dupatta</h2>
+    <div class="sub">Cotton · from “Paribelle Women's Cotton Ajrakh Print Kurta Set with Dupatta (…)”</div>
+    <table>
+      <thead><tr><th style="width:26%">Colour</th><th style="width:26%">Size</th><th class="r" style="width:16%">Need</th><th class="r" style="width:16%">Have</th><th class="r" style="width:16%">Buy</th></tr></thead>
+      <tbody>
+        <tr><td>Maroon</td><td>M</td><td class="r">1</td><td class="r">0</td><td class="r qty">1</td></tr>
+        <tr><td>Maroon</td><td>L</td><td class="r">1</td><td class="r">0</td><td class="r qty">1</td></tr>
+        <tr><td>Maroon</td><td>2XL</td><td class="r">2</td><td class="r">0</td><td class="r qty">2</td></tr>
+        <tr class="gtot"><td colspan="4" class="r">Subtotal</td><td class="r qty">4</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grp">
+    <h2>Women's Cotton Floral Print Kurta with Palazzo Co-ord Set</h2>
+    <div class="sub">Cotton · from “Paribelle Women's Cotton Floral Print Kurta with Palazzo Co-ord Set (…)”</div>
+    <table>
+      <thead><tr><th style="width:26%">Colour</th><th style="width:26%">Size</th><th class="r" style="width:16%">Need</th><th class="r" style="width:16%">Have</th><th class="r" style="width:16%">Buy</th></tr></thead>
+      <tbody>
+        <tr><td>Red</td><td>M</td><td class="r">2</td><td class="r">0</td><td class="r qty">2</td></tr>
+        <tr><td>Red</td><td>L</td><td class="r">3</td><td class="r">1</td><td class="r qty">2</td></tr>
+        <tr><td>Red</td><td>2XL</td><td class="r">1</td><td class="r">0</td><td class="r qty">1</td></tr>
+        <tr><td>Pink</td><td>3XL</td><td class="r">1</td><td class="r">0</td><td class="r qty">1</td></tr>
+        <tr class="gtot"><td colspan="4" class="r">Subtotal</td><td class="r qty">6</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grand">
+    <span class="lbl">Total pieces to buy</span>
+    <span class="v">41</span>
+  </div>
+  <div class="foot">Generated 2 Sep 2026, 10:40 am from 8 open orders · Paribelle OMS · “have” quantities entered by hand after a shelf check.</div>
+</div>
+</x-dc>
+</body>
+</html>

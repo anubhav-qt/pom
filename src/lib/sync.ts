@@ -1,0 +1,756 @@
+import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { after } from "next/server";
+
+import { adapterFor } from "@/channels";
+import { AmazonAdapter } from "@/channels/amazon";
+import type { CanonicalOrder, CanonicalReturn } from "@/channels/types";
+import { isChannelEnabled } from "@/config/features";
+import { db } from "@/db";
+import {
+  catalogImages,
+  channelAccounts,
+  channelListings,
+  inventory,
+  orderItems,
+  orders,
+  orderStatusEvents,
+  products,
+  returns,
+  shipments,
+  syncRuns,
+  type ChannelAccount,
+  type OrderStatus,
+} from "@/db/schema";
+
+/** Statuses that mean the parcel had physically left us — a transition out of
+ *  one of these into cancelled/RTO leaves something to receive back, so it
+ *  needs a human check-in. Anything else auto-resolves. */
+const SHIPPED_ISH: OrderStatus[] = ["packed", "manifested", "shipped", "delivered"];
+
+/**
+ * How far a status is through the pipeline. Used so a channel that still thinks
+ * an order is "new" cannot drag it back from "packed" — the warehouse floor is
+ * ahead of the marketplace between packing and manifesting, and losing that
+ * would make someone pack the same parcel twice.
+ */
+const STATUS_RANK: Record<OrderStatus, number> = {
+  new: 0,
+  ready_to_pack: 1,
+  packed: 2,
+  manifested: 3,
+  shipped: 4,
+  delivered: 5,
+  cancelled: 99,
+  rto: 99,
+  returned: 99,
+};
+
+/** Channel-declared endings always win, whatever the floor thinks. */
+const TERMINAL: OrderStatus[] = ["cancelled", "rto", "returned"];
+
+export function reconcileStatus(current: OrderStatus, incoming: OrderStatus): OrderStatus {
+  if (TERMINAL.includes(incoming)) return incoming;
+  if (TERMINAL.includes(current)) return current;
+  return STATUS_RANK[incoming] > STATUS_RANK[current] ? incoming : current;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Ingest                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export interface IngestResult {
+  seen: number;
+  written: number;
+  unmappedSkus: string[];
+}
+
+/**
+ * Write canonical orders into the database. Idempotent — re-running with the
+ * same input is a no-op, which is what makes the deliberately-overlapping sync
+ * cursors safe.
+ */
+export async function ingestOrders(
+  account: ChannelAccount,
+  incoming: CanonicalOrder[],
+  opts: { syncRunId?: number } = {},
+): Promise<IngestResult> {
+  if (incoming.length === 0) return { seen: 0, written: 0, unmappedSkus: [] };
+
+  // Resolve every channel SKU to one of our products in a single query. Orders
+  // the adapter flagged `itemsKnownCurrent` bring no items and leave the
+  // existing rows untouched, so they contribute nothing to resolve here.
+  const skus = [
+    ...new Set(
+      incoming.filter((o) => !o.itemsKnownCurrent).flatMap((o) => o.items.map((i) => i.externalSku)),
+    ),
+  ];
+  const listings = skus.length
+    ? await db
+        .select()
+        .from(channelListings)
+        .where(
+          and(
+            eq(channelListings.channelAccountId, account.id),
+            inArray(channelListings.externalSku, skus),
+          ),
+        )
+    : [];
+  const skuToProduct = new Map(listings.map((l) => [l.externalSku, l.productId]));
+  const unmappedSkus = skus.filter((s) => !skuToProduct.has(s));
+
+  // Snapshot the current status of every incoming order in one query, so a
+  // transition into a terminal state (or any real status change) can be
+  // recorded as its own row in order_status_events on this same run.
+  const priorRows = await db
+    .select({ externalOrderId: orders.externalOrderId, status: orders.status })
+    .from(orders)
+    .where(
+      and(
+        eq(orders.channelAccountId, account.id),
+        inArray(orders.externalOrderId, incoming.map((o) => o.externalOrderId)),
+      ),
+    );
+  const priorStatus = new Map(priorRows.map((r) => [r.externalOrderId, r.status]));
+  const isTerminal = (s: OrderStatus) => s === "cancelled" || s === "rto" || s === "returned";
+  const statusEvents: (typeof orderStatusEvents.$inferInsert)[] = [];
+
+  let written = 0;
+
+  for (const o of incoming) {
+    const [row] = await db
+      .insert(orders)
+      .values({
+        channelAccountId: account.id,
+        channel: account.channel,
+        externalOrderId: o.externalOrderId,
+        status: o.status,
+        orderedAt: o.orderedAt,
+        buyerName: o.buyerName ?? null,
+        shipCity: o.shipCity ?? null,
+        shipState: o.shipState ?? null,
+        shipPincode: o.shipPincode ?? null,
+        totalAmount: o.totalAmount ?? null,
+        isCod: o.isCod ?? false,
+        dispatchBy: o.dispatchBy ?? null,
+        channelUpdatedAt: o.channelUpdatedAt ?? null,
+        easyshipStatus: o.easyshipStatus ?? null,
+        raw: o.raw,
+      })
+      .onConflictDoUpdate({
+        target: [orders.channelAccountId, orders.externalOrderId],
+        set: {
+          // Status reconciliation happens in SQL so concurrent syncs cannot
+          // read-then-write a stale value.
+          status: sql`
+            CASE
+              WHEN excluded.status IN ('cancelled','rto','returned') THEN excluded.status
+              WHEN ${orders.status} IN ('cancelled','rto','returned') THEN ${orders.status}
+              WHEN ${statusRankSql("excluded.status")} > ${statusRankSql(`"orders"."status"`)}
+                THEN excluded.status
+              ELSE ${orders.status}
+            END
+          `,
+          dispatchBy: sql`COALESCE(excluded.dispatch_by, ${orders.dispatchBy})`,
+          totalAmount: sql`COALESCE(excluded.total_amount, ${orders.totalAmount})`,
+          channelUpdatedAt: sql`COALESCE(excluded.channel_updated_at, ${orders.channelUpdatedAt})`,
+          easyshipStatus: sql`COALESCE(excluded.easyship_status, ${orders.easyshipStatus})`,
+          raw: o.raw,
+          updatedAt: new Date(),
+        },
+      })
+      .returning({ id: orders.id, status: orders.status });
+
+    if (!row) continue;
+    written++;
+
+    // Record the transition, if there was one. `priorStatus` is null for an
+    // order we had never seen — for those we only log an arrival that is
+    // already terminal (an order that showed up cancelled), not a routine new
+    // order. The unique index on (order_id, to_status) makes this idempotent,
+    // so two overlapping syncs racing on the same change is harmless.
+    const before = priorStatus.get(o.externalOrderId) ?? null;
+    if ((before !== null && before !== row.status) || (before === null && isTerminal(row.status))) {
+      // `rto` is only ever set from Amazon's `ReturnedToSeller` — the parcel is
+      // physically back and needs a "received & shelved" check-in, even the
+      // first time we see the order. A `cancelled`/`returned` order needs a
+      // check-in only if it had actually shipped; one cancelled before dispatch
+      // (or first seen already cancelled) has nothing to receive, so it is
+      // resolved on the spot with no `checkedInBy`.
+      const needsCheckin =
+        row.status === "rto" ||
+        (isTerminal(row.status) && before !== null && SHIPPED_ISH.includes(before));
+      statusEvents.push({
+        orderId: row.id,
+        channelAccountId: account.id,
+        channel: account.channel,
+        externalOrderId: o.externalOrderId,
+        fromStatus: before,
+        toStatus: row.status,
+        syncRunId: opts.syncRunId ?? null,
+        ...(isTerminal(row.status) && !needsCheckin
+          ? {
+              checkedInAt: new Date(),
+              itemBack: false,
+              checkinNote: "auto — order had not shipped, nothing to receive",
+            }
+          : {}),
+      });
+    }
+
+    // An order the adapter flagged as unchanged brings no items and must not
+    // have its existing rows touched. Otherwise items are replaced wholesale —
+    // an order has a handful of lines and the channel is authoritative about
+    // them, so diffing would be more code for no benefit.
+    if (!o.itemsKnownCurrent) {
+      await db.delete(orderItems).where(eq(orderItems.orderId, row.id));
+    }
+    if (!o.itemsKnownCurrent && o.items.length > 0) {
+      await db.insert(orderItems).values(
+        o.items.map((it) => ({
+          orderId: row.id,
+          productId: skuToProduct.get(it.externalSku) ?? null,
+          externalItemId: it.externalItemId ?? null,
+          externalSku: it.externalSku,
+          externalAsin: it.externalAsin ?? null,
+          title: it.title ?? null,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice ?? null,
+          cancelled: it.cancelled ?? false,
+        })),
+      );
+    }
+
+    if (o.shipment) {
+      const existing = await db
+        .select({ id: shipments.id })
+        .from(shipments)
+        .where(eq(shipments.orderId, row.id))
+        .limit(1);
+
+      const values = {
+        orderId: row.id,
+        externalShipmentId: o.shipment.externalShipmentId ?? null,
+        courier: o.shipment.courier ?? null,
+        awb: o.shipment.awb ?? null,
+        ...(o.shipment.labelPdf
+          ? { labelPdf: o.shipment.labelPdf, labelFetchedAt: new Date() }
+          : {}),
+      };
+
+      if (existing[0]) {
+        await db.update(shipments).set(values).where(eq(shipments.id, existing[0].id));
+      } else {
+        await db.insert(shipments).values(values);
+      }
+    }
+  }
+
+  if (statusEvents.length > 0) {
+    await db
+      .insert(orderStatusEvents)
+      .values(statusEvents)
+      .onConflictDoNothing({ target: [orderStatusEvents.orderId, orderStatusEvents.toStatus] });
+  }
+
+  await recomputeReserved();
+
+  // Product images come from a separate, rate-limited catalogue call, so this
+  // is fire-and-forget with a per-run cap — a routine sync fills a few in and
+  // moves on. Never allowed to slow down or break an ingest.
+  const freshAsins = incoming
+    .filter((o) => !o.itemsKnownCurrent)
+    .flatMap((o) => o.items.map((i) => i.externalAsin))
+    .filter((a): a is string => !!a);
+  await enrichCatalogImages(account, freshAsins).catch(() => {});
+
+  return { seen: incoming.length, written, unmappedSkus };
+}
+
+/**
+ * Fill in `catalog_images` for ASINs we don't have an image for yet, capped per
+ * call so it can't blow the Catalog Items rate limit or stall a sync. Also
+ * back-fills `products.image_url` for any mapped product still missing one.
+ * Every failure here is swallowed — an image is a nice-to-have.
+ */
+export async function enrichCatalogImages(
+  account: ChannelAccount,
+  asins: string[],
+  cap = 20,
+) {
+  if (account.channel !== "amazon") return;
+  const adapter = adapterFor(account);
+  if (!(adapter instanceof AmazonAdapter)) return;
+
+  const wanted = [...new Set(asins.filter(Boolean))];
+  if (wanted.length === 0) return;
+
+  const known = await db
+    .select({ asin: catalogImages.asin })
+    .from(catalogImages)
+    .where(
+      and(eq(catalogImages.channelAccountId, account.id), inArray(catalogImages.asin, wanted)),
+    );
+  const knownSet = new Set(known.map((k) => k.asin));
+  const todo = wanted.filter((a) => !knownSet.has(a)).slice(0, cap);
+  if (todo.length === 0) return;
+
+  const found = await adapter.fetchCatalogImages(todo);
+
+  // Record every ASIN we asked about — even the ones with no image — so we
+  // don't keep re-requesting them every sync.
+  await db
+    .insert(catalogImages)
+    .values(todo.map((asin) => ({ channelAccountId: account.id, asin, imageUrl: found.get(asin) ?? null })))
+    .onConflictDoUpdate({
+      target: [catalogImages.channelAccountId, catalogImages.asin],
+      set: { imageUrl: sql`COALESCE(excluded.image_url, ${catalogImages.imageUrl})`, fetchedAt: new Date() },
+    });
+
+  // Give mapped products their image if they have none.
+  for (const [asin, url] of found) {
+    if (!url) continue;
+    await db
+      .update(products)
+      .set({ imageUrl: url })
+      .where(
+        and(
+          isNull(products.imageUrl),
+          inArray(
+            products.id,
+            db
+              .select({ id: channelListings.productId })
+              .from(channelListings)
+              .innerJoin(orderItems, eq(orderItems.externalSku, channelListings.externalSku))
+              .where(
+                and(
+                  eq(channelListings.channelAccountId, account.id),
+                  eq(orderItems.externalAsin, asin),
+                ),
+              ),
+          ),
+        ),
+      );
+  }
+}
+
+function statusRankSql(expr: string) {
+  return sql.raw(`CASE ${expr}
+      WHEN 'new' THEN 0
+      WHEN 'ready_to_pack' THEN 1
+      WHEN 'packed' THEN 2
+      WHEN 'manifested' THEN 3
+      WHEN 'shipped' THEN 4
+      WHEN 'delivered' THEN 5
+      ELSE 0 END`);
+}
+
+export async function ingestReturns(account: ChannelAccount, incoming: CanonicalReturn[]) {
+  let written = 0;
+
+  for (const r of incoming) {
+    // Link the return back to its order where we can, so the returns screen can
+    // show what was actually in the parcel.
+    let orderId: number | null = null;
+    if (r.externalOrderId) {
+      const [o] = await db
+        .select({ id: orders.id })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.channelAccountId, account.id),
+            eq(orders.externalOrderId, r.externalOrderId),
+          ),
+        )
+        .limit(1);
+      orderId = o?.id ?? null;
+    }
+
+    await db
+      .insert(returns)
+      .values({
+        orderId,
+        channelAccountId: account.id,
+        channel: account.channel,
+        externalReturnId: r.externalReturnId,
+        kind: r.kind,
+        reason: r.reason ?? null,
+        awb: r.awb ?? null,
+        status: r.status ?? null,
+        expectedAt: r.expectedAt ?? null,
+        raw: r.raw,
+      })
+      .onConflictDoUpdate({
+        target: [returns.channelAccountId, returns.externalReturnId],
+        set: {
+          status: r.status ?? null,
+          awb: r.awb ?? null,
+          expectedAt: r.expectedAt ?? null,
+          orderId,
+          raw: r.raw,
+        },
+      });
+    written++;
+  }
+
+  return { seen: incoming.length, written };
+}
+
+/**
+ * Recompute committed stock from the orders table rather than incrementing a
+ * counter on every event. A derived number cannot drift out of sync after a
+ * failed sync, a duplicate webhook or a manual status change — and at this
+ * volume the full recompute is a single cheap query.
+ */
+export async function recomputeReserved() {
+  await db.execute(sql`
+    UPDATE inventory AS inv
+    SET reserved = COALESCE((
+          SELECT SUM(oi.quantity)
+          FROM order_items oi
+          JOIN orders o ON o.id = oi.order_id
+          WHERE oi.product_id = inv.product_id
+            AND oi.cancelled = false
+            AND o.status IN ('new', 'ready_to_pack', 'packed')
+        ), 0),
+        updated_at = now()
+  `);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Orchestration                                                              */
+/* -------------------------------------------------------------------------- */
+
+/** How far back to look for returns on an account that has never synced. */
+const INITIAL_LOOKBACK_DAYS = 14;
+
+/**
+ * The fast lane re-scans this rolling window every run instead of trusting a
+ * saved cursor. It stays cheap because unchanged orders skip the slow
+ * line-item call and every write is an idempotent upsert — and it means a
+ * missed cron run or a little clock skew can never leave a hole in recent
+ * orders. Anything older than this window is the backfill's job.
+ */
+const RECENT_WINDOW_MS = 72 * 60 * 60 * 1000;
+
+/**
+ * Run one incremental sync for one account. Sized to finish comfortably inside
+ * a serverless invocation: it takes a bounded slice of work, records where it
+ * got to, and lets the next cron run continue.
+ */
+export async function syncAccount(
+  account: ChannelAccount,
+  kind: "orders" | "returns" = "orders",
+  limit = 100,
+  options?: {
+    /** Reuse an already-created run row instead of inserting a new one. */
+    runId?: number;
+    onProgress?: (info: { seen: number; total: number }) => void | Promise<void>;
+  },
+) {
+  const adapter = adapterFor(account);
+
+  if (!adapter.supportsLiveSync) {
+    return { skipped: true as const, reason: `${account.channel} has no live API` };
+  }
+
+  const run = options?.runId
+    ? { id: options.runId }
+    : (
+        await db
+          .insert(syncRuns)
+          .values({ channelAccountId: account.id, kind })
+          .returning({ id: syncRuns.id })
+      )[0];
+
+  try {
+    const since =
+      kind === "orders"
+        ? new Date(Date.now() - RECENT_WINDOW_MS)
+        : (account.returnsSyncedThrough ??
+          new Date(Date.now() - INITIAL_LOOKBACK_DAYS * 86_400_000));
+
+    let seen = 0;
+    let written = 0;
+    let syncedThrough = since;
+    let hasMore = false;
+
+    if (kind === "orders") {
+      // Everything we already hold that could plausibly reappear in this
+      // window, keyed for the adapter's skip-if-unchanged check so a routine
+      // sync makes almost no per-order calls.
+      const knownRows = await db
+        .select({
+          externalOrderId: orders.externalOrderId,
+          channelUpdatedAt: orders.channelUpdatedAt,
+        })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.channelAccountId, account.id),
+            gte(orders.channelUpdatedAt, new Date(since.getTime() - 86_400_000)),
+          ),
+        );
+      const unchangedSince = new Map(
+        knownRows
+          .filter((r) => r.channelUpdatedAt)
+          .map((r) => [r.externalOrderId, r.channelUpdatedAt!.getTime()] as const),
+      );
+
+      const res = await adapter.fetchOrders({
+        since,
+        limit,
+        unchangedSince,
+        onProgress: async (info) => {
+          // Live progress, written straight to the row so any request polling
+          // it — regardless of which server instance handles that request —
+          // sees the same number.
+          await db
+            .update(syncRuns)
+            .set({ itemsSeen: info.seen, totalEstimate: info.total })
+            .where(eq(syncRuns.id, run.id));
+          await options?.onProgress?.(info);
+        },
+      });
+      const ingested = await ingestOrders(account, res.orders, { syncRunId: run.id });
+      seen = ingested.seen;
+      written = ingested.written;
+      syncedThrough = res.syncedThrough;
+      hasMore = res.hasMore;
+    } else {
+      const res = await adapter.fetchReturns({ since, limit });
+      const ingested = await ingestReturns(account, res.returns);
+      seen = ingested.seen;
+      written = ingested.written;
+      syncedThrough = res.syncedThrough;
+    }
+
+    await db
+      .update(channelAccounts)
+      .set(
+        kind === "orders"
+          ? { ordersSyncedThrough: syncedThrough }
+          : { returnsSyncedThrough: syncedThrough },
+      )
+      .where(eq(channelAccounts.id, account.id));
+
+    await db
+      .update(syncRuns)
+      .set({
+        status: "ok",
+        finishedAt: new Date(),
+        itemsSeen: seen,
+        itemsWritten: written,
+      })
+      .where(eq(syncRuns.id, run.id));
+
+    return { skipped: false as const, seen, written, hasMore, syncedThrough, runId: run.id };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db
+      .update(syncRuns)
+      .set({ status: "failed", finishedAt: new Date(), error: message.slice(0, 2000) })
+      .where(eq(syncRuns.id, run.id));
+    throw err;
+  }
+}
+
+/**
+ * Kick off an order sync for the "Sync now" button without making the caller
+ * wait for it. The run row is created synchronously — so a runId is available
+ * immediately for the client to poll — and the actual fetch/ingest work
+ * continues after this returns, via `after()`, which keeps the request alive
+ * long enough to finish even on a serverless deploy where the response has
+ * already gone back to the browser.
+ */
+export async function startManualOrderSync(accountId: number) {
+  const [account] = await db
+    .select()
+    .from(channelAccounts)
+    .where(eq(channelAccounts.id, accountId))
+    .limit(1);
+
+  if (!account) return { ok: false as const, error: "Account not found." };
+
+  const adapter = adapterFor(account);
+  if (!adapter.supportsLiveSync) {
+    return { ok: false as const, error: `${account.channel} has no live API to sync from.` };
+  }
+
+  const [run] = await db
+    .insert(syncRuns)
+    .values({ channelAccountId: account.id, kind: "orders" })
+    .returning({ id: syncRuns.id });
+
+  after(async () => {
+    // Failure is already recorded on the run row inside syncAccount's own
+    // catch block — nothing further to do with the rejection here.
+    await syncAccount(account, "orders", 100, { runId: run.id }).catch(() => {});
+    // Returns piggyback on the same trigger, silently — currently a no-op for
+    // Amazon and fast enough elsewhere that it doesn't need its own bar.
+    await syncAccount(account, "returns").catch(() => {});
+  });
+
+  return { ok: true as const, runId: run.id };
+}
+
+export interface SyncProgress {
+  status: "running" | "ok" | "failed";
+  itemsSeen: number;
+  itemsWritten: number;
+  totalEstimate: number | null;
+  error: string | null;
+}
+
+/** Read by the polling endpoint the client hits while a manual sync runs. */
+export async function getSyncProgress(runId: number): Promise<SyncProgress | null> {
+  const [run] = await db.select().from(syncRuns).where(eq(syncRuns.id, runId)).limit(1);
+  if (!run) return null;
+  return {
+    status: run.status,
+    itemsSeen: run.itemsSeen,
+    itemsWritten: run.itemsWritten,
+    totalEstimate: run.totalEstimate,
+    error: run.error,
+  };
+}
+
+export async function syncAllAccounts() {
+  const accounts = await db
+    .select()
+    .from(channelAccounts)
+    .where(eq(channelAccounts.active, true));
+
+  const results: Record<string, unknown> = {};
+
+  for (const account of accounts) {
+    // A channel switched off in config is not synced at all, even if an account
+    // row still exists — otherwise the cron keeps hammering a channel we have
+    // deliberately parked and fills the sync log with noise.
+    if (!isChannelEnabled(account.channel)) continue;
+
+    const key = `${account.channel}:${account.id}`;
+    try {
+      results[key] = {
+        orders: await syncAccount(account, "orders"),
+        returns: await syncAccount(account, "returns"),
+      };
+    } catch (err) {
+      // One broken channel must not stop the others — a Flipkart token expiring
+      // should never hold up Amazon's morning orders.
+      results[key] = { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  return results;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Backfill                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export interface BackfillProgress {
+  /** The date window just finished, e.g. "2026-06-01…2026-07-01". */
+  window: string;
+  /** Running totals across the whole backfill so far. */
+  ordersSeen: number;
+  ordersWritten: number;
+  /** Set if this window failed (and was skipped) rather than ingested. */
+  error?: string;
+}
+
+/**
+ * One-time (and re-runnable) full history load via the channel's bulk report
+ * endpoint. Unlike the fast lane this is not rate-limited per order — one
+ * report covers a whole date range — so it is the only sane way to pull months
+ * of history. It walks the range in windows, ingesting each through the same
+ * `ingestOrders` pipeline as the live sync, and records itself as a `backfill`
+ * row in `sync_runs`.
+ *
+ * Meant to be run from a script or a trusted backend trigger, never from a
+ * serverless request — a full run can take many minutes.
+ */
+export async function backfillAccount(
+  account: ChannelAccount,
+  opts: {
+    start: Date;
+    end?: Date;
+    /** Size of each report window. Smaller = more reports, steadier progress. */
+    chunkDays?: number;
+    onProgress?: (info: BackfillProgress) => void | Promise<void>;
+  },
+) {
+  const adapter = adapterFor(account);
+  if (!adapter.fetchOrdersViaReports) {
+    throw new Error(`${account.channel} has no bulk report endpoint to backfill from.`);
+  }
+
+  const [run] = await db
+    .insert(syncRuns)
+    .values({ channelAccountId: account.id, kind: "backfill" })
+    .returning({ id: syncRuns.id });
+
+  let ordersSeen = 0;
+  let ordersWritten = 0;
+  let windows = 0;
+  const failedWindows: string[] = [];
+
+  try {
+    const end = opts.end ?? new Date();
+    const chunkMs = (opts.chunkDays ?? 90) * 86_400_000;
+
+    for (let from = new Date(opts.start); from < end; from = new Date(from.getTime() + chunkMs)) {
+      const to = new Date(Math.min(from.getTime() + chunkMs, end.getTime()));
+      const label = `${from.toISOString().slice(0, 10)}…${to.toISOString().slice(0, 10)}`;
+      windows++;
+
+      // A window that fails — a report Amazon won't build, a range older than it
+      // keeps, a transient 5xx — is logged and skipped. One bad slice must not
+      // abandon a multi-year backfill that is otherwise working.
+      try {
+        for await (const batch of adapter.fetchOrdersViaReports(from, to)) {
+          const ingested = await ingestOrders(account, batch, { syncRunId: run.id });
+          ordersSeen += ingested.seen;
+          ordersWritten += ingested.written;
+          await db
+            .update(syncRuns)
+            .set({ itemsSeen: ordersSeen, itemsWritten: ordersWritten })
+            .where(eq(syncRuns.id, run.id));
+        }
+        await opts.onProgress?.({ window: label, ordersSeen, ordersWritten });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        failedWindows.push(label);
+        await opts.onProgress?.({ window: label, ordersSeen, ordersWritten, error: message });
+      }
+    }
+
+    const allFailed = failedWindows.length === windows && windows > 0;
+    const note =
+      failedWindows.length > 0
+        ? `${failedWindows.length}/${windows} windows failed: ${failedWindows.join(", ")}`.slice(0, 2000)
+        : null;
+
+    await db
+      .update(syncRuns)
+      .set({
+        status: allFailed ? "failed" : "ok",
+        finishedAt: new Date(),
+        itemsSeen: ordersSeen,
+        itemsWritten: ordersWritten,
+        error: note,
+      })
+      .where(eq(syncRuns.id, run.id));
+
+    if (allFailed) {
+      throw new Error(note ?? "every backfill window failed");
+    }
+    return { runId: run.id, ordersSeen, ordersWritten, failedWindows };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db
+      .update(syncRuns)
+      .set({ status: "failed", finishedAt: new Date(), error: message.slice(0, 2000) })
+      .where(eq(syncRuns.id, run.id));
+    throw err;
+  }
+}

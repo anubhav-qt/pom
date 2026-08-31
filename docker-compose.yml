@@ -1,0 +1,29 @@
+# Local Postgres for development and testing.
+#
+#   docker compose up -d
+#
+# Data persists in a named volume, so restarting the container keeps your test
+# orders. To start completely fresh: docker compose down -v
+#
+# Published on 5433, not 5432, so it cannot collide with an existing Postgres.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: paribelle-oms-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: oms
+      POSTGRES_PASSWORD: oms
+      POSTGRES_DB: oms
+    ports:
+      - "5433:5432"
+    volumes:
+      - oms-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oms -d oms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  oms-pgdata:

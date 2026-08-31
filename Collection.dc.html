@@ -1,0 +1,191 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    :root{
+      --bg:#f4f9fc;--panel:#fff;--panel-2:#eef6fa;--border:rgba(13,110,140,.1);--border-strong:rgba(13,110,140,.18);
+      --text:#0f2536;--muted:#5c7386;--muted-2:#8ba0b0;--accent:#0ea5e9;--accent-2:#22d3ee;--accent-soft:rgba(14,165,233,.1);
+      --danger:#e0455a;--danger-soft:rgba(224,69,90,.1);--warn:#d98a2b;--warn-soft:rgba(217,138,43,.12);
+      --ok:#10b981;--ok-soft:rgba(16,185,129,.12);--amazon:#ff9900;
+      --shadow-xs:0 1px 2px rgba(13,60,82,.05);--shadow-sm:0 1px 2px rgba(13,60,82,.04),0 8px 20px -10px rgba(13,60,82,.12)}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+    a{color:#0b7fb0;text-decoration:none}
+    .mono{font-family:"JetBrains Mono",ui-monospace,monospace}.muted{color:var(--muted)}.tabnum{font-variant-numeric:tabular-nums}
+
+    .bar1{display:flex;align-items:center;gap:20px;height:54px;padding:0 26px;background:var(--panel);border-bottom:1px solid var(--border)}
+    .brand{display:flex;align-items:center;gap:10px}
+    .mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center}
+    .bname{font-size:14px;font-weight:600;letter-spacing:-.01em}
+    .appseg{display:inline-flex;padding:3px;border-radius:9px;background:var(--panel-2);border:1px solid var(--border)}
+    .appseg a{padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;color:var(--muted)}
+    .appseg a.active{background:var(--panel);color:var(--text);font-weight:600;box-shadow:var(--shadow-xs)}
+    .spacer{flex:1}
+    .status{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+    .status .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+    .syncbtn{display:inline-flex;align-items:center;gap:6px;border-radius:10px;border:0;color:#fff;font:inherit;font-size:12.5px;font-weight:500;padding:8px 13px;background:linear-gradient(135deg,var(--accent),var(--accent-2));cursor:pointer}
+    .syncbtn svg{width:14px;height:14px}
+    .uav{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;display:flex;align-items:center;justify-content:center}
+    .bar2{display:flex;align-items:center;gap:24px;padding:0 26px;background:var(--panel);border-bottom:1px solid var(--border)}
+    .bar2 .tab{display:inline-flex;align-items:center;gap:7px;padding:11px 2px;font-size:13.5px;font-weight:500;color:var(--muted);border-bottom:2px solid transparent}
+    .bar2 .tab.active{color:var(--text);font-weight:600;border-bottom-color:var(--accent)}
+    .bar2 .cnt{font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:9999px;background:var(--panel-2);color:var(--muted)}
+    .bar2 .tab.active .cnt{background:var(--accent-soft);color:#0b7fb0}
+    .bar2 .grow{flex:1}
+    .bar2 .fetched{font-size:11.5px;color:var(--muted-2)}
+
+    main{padding:24px 30px 44px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-sm)}
+    .sumrow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 16px}
+    .count b{font-weight:600}
+    .seg{display:inline-flex;padding:3px;border-radius:10px;background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow-xs)}
+    .seg button{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:0;background:transparent;font:inherit;font-size:12px;font-weight:500;color:var(--muted);border-radius:7px;cursor:pointer}
+    .seg button.on{color:#0b7fb0;background:var(--accent-soft)}
+    .seg svg{width:14px;height:14px}
+
+    .ministats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}
+    .ms{padding:14px 16px}
+    .ms .l{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-2)}
+    .ms .v{margin-top:6px;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+    .ms.danger .v{color:var(--danger)}
+
+    .cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+    .card{padding:14px;display:flex;flex-direction:column;gap:11px}
+    .cardtop{display:flex;gap:12px}
+    .thumb{width:64px;height:64px;border-radius:12px;border:1px solid var(--border);background:var(--panel-2);flex:none;display:flex;align-items:center;justify-content:center;color:var(--muted-2)}
+    .thumb svg{width:24px;height:24px}
+    .cmeta{min-width:0;flex:1}
+    .crow1{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+    .csku{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px}
+    .pick{flex:none;border-radius:9999px;padding:3px 10px;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;background:var(--accent-soft);color:#0b7fb0}
+    .ctitle{font-size:12px;color:var(--muted);margin-top:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .unmap{display:inline-block;margin-top:5px;border-radius:9999px;padding:1px 7px;font-size:9px;font-weight:700;letter-spacing:.03em;background:var(--danger-soft);color:var(--danger)}
+    .cfacts{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px}
+    .cfacts .k{color:var(--muted)}.cfacts b{font-weight:600}
+    .late{color:var(--danger);font-weight:600}
+    .cids{display:flex;flex-wrap:wrap;gap:5px;border-top:1px solid var(--border);padding-top:9px}
+    .cid{border-radius:6px;padding:2px 6px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:9.5px;background:var(--panel-2);color:var(--muted)}
+
+    .fab{position:fixed;right:26px;bottom:24px;width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 10px 26px -8px rgba(14,165,233,.6)}
+    .fab svg{width:21px;height:21px}
+  </style>
+</helmet>
+
+<header class="bar1">
+  <div class="brand"><div class="mark">P</div><div class="bname">Paribelle</div></div>
+  <div class="appseg"><a>Dashboard</a><a class="active">Orders</a></div>
+  <div class="spacer"></div>
+  <span class="status"><span class="dot"></span>Synced 2 min ago · next in 8 min</span>
+  <button class="syncbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>Sync now</button>
+  <div class="uav"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 19c1.2-3 3.7-4.5 6.5-4.5S17.3 16 18.5 19"/></svg></div>
+</header>
+<div class="bar2">
+  <span class="tab active">To ship <span class="cnt tabnum">8</span></span>
+  <span class="tab">Shipped <span class="cnt tabnum">406</span></span>
+  <span class="tab">Delivered</span>
+  <span class="tab">Cancelled &amp; RTO <span class="cnt tabnum">5</span></span>
+  <span class="tab">All orders</span>
+  <span class="grow"></span>
+  <span class="fetched">Fetched today · rolling 72h</span>
+</div>
+
+<main>
+  <div class="sumrow">
+    <div class="count"><b style="font-weight:600">Collection view</b> <span class="muted">— today's to-ship orders rolled up by product, most units first</span></div>
+    <div class="seg">
+      <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>List</button>
+      <button class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Collection</button>
+    </div>
+  </div>
+
+  <div class="ministats">
+    <div class="panel ms"><div class="l">Products to pick</div><div class="v">6</div></div>
+    <div class="panel ms"><div class="l">Units total</div><div class="v">11</div></div>
+    <div class="panel ms"><div class="l">Orders covered</div><div class="v">8</div></div>
+    <div class="panel ms danger"><div class="l">With a late order</div><div class="v">2</div></div>
+  </div>
+
+  <div class="cards">
+    <div class="panel card">
+      <div class="cardtop">
+        <div class="thumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l4-4h8l4 4M4 8v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8M4 8h16M9 12h6"/></svg></div>
+        <div class="cmeta">
+          <div class="crow1"><span class="csku">K0-UFZO-1LIW</span><span class="pick">3 to pick</span></div>
+          <div class="ctitle">Cotton Floral Handblock Kurta Palazzo Dupatta Set — Deep Teal</div>
+        </div>
+      </div>
+      <div class="cfacts"><span class="k">Bin <b style="color:var(--text)">A-12</b></span><span class="k">3 orders</span><span class="late">1 past deadline</span></div>
+      <div class="cids"><span class="cid">403-6621948-7742210</span><span class="cid">403-1180733-6650115</span><span class="cid">406-0087415-5109936</span></div>
+    </div>
+    <div class="panel card">
+      <div class="cardtop">
+        <div class="thumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l4-4h8l4 4M4 8v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8M4 8h16M9 12h6"/></svg></div>
+        <div class="cmeta">
+          <div class="crow1"><span class="csku">UC-5B6S-MJF4</span><span class="pick">4 to pick</span></div>
+          <div class="ctitle">Women's Cotton Floral Print Kurta with Palazzo Co-ord Set — Red</div>
+        </div>
+      </div>
+      <div class="cfacts"><span class="k">Bin <b style="color:var(--text)">B-04</b></span><span class="k">2 orders</span><span class="k">1d 4h on the soonest</span></div>
+      <div class="cids"><span class="cid">404-2087551-3390166</span><span class="cid">403-5560712-2213087</span></div>
+    </div>
+    <div class="panel card">
+      <div class="cardtop">
+        <div class="thumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l4-4h8l4 4M4 8v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8M4 8h16M9 12h6"/></svg></div>
+        <div class="cmeta">
+          <div class="crow1"><span class="csku">K0-9QRA-2Z7P</span><span class="pick">1 to pick</span></div>
+          <div class="ctitle">Not mapped to a product yet</div>
+          <span class="unmap">unmapped SKU</span>
+        </div>
+      </div>
+      <div class="cfacts"><span class="k">Bin <b style="color:var(--text)">—</b></span><span class="k">1 order</span><span class="late">oldest 3h left</span></div>
+      <div class="cids"><span class="cid">406-7714520-9930318</span></div>
+    </div>
+    <div class="panel card">
+      <div class="cardtop">
+        <div class="thumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l4-4h8l4 4M4 8v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8M4 8h16M9 12h6"/></svg></div>
+        <div class="cmeta">
+          <div class="crow1"><span class="csku">PB-DUP-IND-07</span><span class="pick">1 to pick</span></div>
+          <div class="ctitle">Indigo Block-print Cotton Dupatta — 2.5m</div>
+        </div>
+      </div>
+      <div class="cfacts"><span class="k">Bin <b style="color:var(--text)">C-09</b></span><span class="k">1 order</span><span class="k">1d 2h on the soonest</span></div>
+      <div class="cids"><span class="cid">402-9963145-7001248</span></div>
+    </div>
+    <div class="panel card">
+      <div class="cardtop">
+        <div class="thumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l4-4h8l4 4M4 8v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8M4 8h16M9 12h6"/></svg></div>
+        <div class="cmeta">
+          <div class="crow1"><span class="csku">K0-7FGH-8JKL</span><span class="pick">1 to pick</span></div>
+          <div class="ctitle">Cotton Anarkali Kurta — Mustard, XL</div>
+        </div>
+      </div>
+      <div class="cfacts"><span class="k">Bin <b style="color:var(--text)">A-03</b></span><span class="k">1 order</span><span class="k">9h on the soonest</span></div>
+      <div class="cids"><span class="cid">406-3325901-1180294</span></div>
+    </div>
+    <div class="panel card">
+      <div class="cardtop">
+        <div class="thumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l4-4h8l4 4M4 8v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8M4 8h16M9 12h6"/></svg></div>
+        <div class="cmeta">
+          <div class="crow1"><span class="csku">PB-KUR-FLR-12</span><span class="pick">1 to pick</span></div>
+          <div class="ctitle">Floral Print A-line Kurta — Blue, L</div>
+        </div>
+      </div>
+      <div class="cfacts"><span class="k">Bin <b style="color:var(--text)">B-11</b></span><span class="k">1 order</span><span class="k">7h on the soonest</span></div>
+      <div class="cids"><span class="cid">404-8890234-6674190</span></div>
+    </div>
+  </div>
+
+  <div class="fab" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-11.9 7.6L3 20.5l1.4-6A8.4 8.4 0 1 1 21 11.5z"/></svg>
+  </div>
+</main>
+</x-dc>
+</body>
+</html>

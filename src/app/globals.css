@@ -1,0 +1,280 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Surfaces — cool, airy, never stark white or flat gray */
+  --bg: #f4f9fc;
+  --bg-subtle: #eaf4fa;
+  --panel: #ffffff;
+  --panel-2: #eef6fa;
+  --border: rgba(13, 110, 140, 0.1);
+  --border-strong: rgba(13, 110, 140, 0.18);
+
+  /* Ink — soft deep navy-teal, never pure black */
+  --text: #0f2536;
+  --muted: #5c7386;
+  --muted-2: #8ba0b0;
+
+  /* Sky / cyan brand pair */
+  --accent: #0ea5e9;
+  --accent-2: #22d3ee;
+  --accent-soft: rgba(14, 165, 233, 0.1);
+  --accent-ring: rgba(14, 165, 233, 0.25);
+
+  --danger: #e0455a;
+  --danger-soft: rgba(224, 69, 90, 0.1);
+  --warn: #d98a2b;
+  --warn-soft: rgba(217, 138, 43, 0.12);
+  /* Validated against --danger for CVD separation via the dataviz skill's
+     checker — plain green (#0d9d78) sat inside the red/green confusion band. */
+  --ok: #10b981;
+  --ok-soft: rgba(16, 185, 129, 0.12);
+
+  --shadow-xs: 0 1px 2px rgba(13, 60, 82, 0.05);
+  --shadow-sm: 0 1px 2px rgba(13, 60, 82, 0.04), 0 8px 20px -10px rgba(13, 60, 82, 0.12);
+  --shadow-md: 0 2px 6px rgba(13, 60, 82, 0.05), 0 20px 40px -14px rgba(13, 60, 82, 0.16);
+  --nav-shadow-idle: 0 1px 1px rgba(13, 60, 82, 0.04), 0 10px 24px -12px rgba(13, 60, 82, 0.14);
+  --nav-shadow-scrolled: 0 1px 1px rgba(13, 60, 82, 0.05), 0 16px 32px -12px rgba(13, 60, 82, 0.2);
+  --panel-highlight: rgba(255, 255, 255, 0.7);
+
+  --ease-premium: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * Deliberately no `@media (prefers-color-scheme: dark)` block. This app is
+ * light-only by design — the brief was explicitly "light, soft, sky blue,"
+ * not "match the OS setting." A dark variant of these tokens exists in git
+ * history if a manual toggle is ever wanted, but nothing should silently
+ * switch the app to dark just because the browser or OS is set that way.
+ */
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-feature-settings: "cv11", "ss01";
+}
+
+* {
+  border-color: var(--border);
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* A soft, faint wash behind the whole app — the thing that stops a flat
+   single-colour background from reading as a bare admin template. */
+body {
+  background-image:
+    radial-gradient(circle at 14% -8%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%),
+    radial-gradient(circle at 88% 18%, color-mix(in srgb, var(--accent-2) 7%, transparent), transparent 38%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  /* --------------------------------------------------------------- panel -- */
+  .panel {
+    @apply rounded-2xl border;
+    background: var(--panel);
+    border-color: var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* -------------------------------------------------------------- buttons -- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-xl border px-3.5 py-2 text-sm font-medium;
+    background: var(--panel);
+    border-color: var(--border);
+    color: var(--text);
+    box-shadow: var(--shadow-xs);
+    transition:
+      transform 0.15s var(--ease-premium),
+      box-shadow 0.15s var(--ease-premium),
+      border-color 0.15s ease,
+      background 0.15s ease,
+      opacity 0.15s ease;
+  }
+  .btn:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+  .btn:disabled {
+    @apply cursor-not-allowed opacity-45;
+  }
+  .btn:focus-visible {
+    outline: none;
+    box-shadow:
+      var(--shadow-xs),
+      0 0 0 3px var(--accent-ring);
+  }
+
+  .btn-primary {
+    @apply text-white border-transparent;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow:
+      var(--shadow-xs),
+      0 6px 16px -6px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.06);
+    box-shadow:
+      var(--shadow-sm),
+      0 10px 22px -8px color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  .btn-primary:focus-visible {
+    box-shadow:
+      var(--shadow-xs),
+      0 0 0 3px var(--accent-ring);
+  }
+
+  /* --------------------------------------------------------------- inputs -- */
+  .input {
+    @apply w-full rounded-xl border px-3.5 py-2 text-sm outline-none;
+    background: var(--panel-2);
+    border-color: var(--border);
+    color: var(--text);
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      background 0.15s ease;
+  }
+  .input::placeholder {
+    color: var(--muted-2);
+  }
+  .input:hover {
+    border-color: var(--border-strong);
+  }
+  .input:focus {
+    background: var(--panel);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+
+  .muted {
+    color: var(--muted);
+  }
+
+  /* ---------------------------------------------------------------- table -- */
+  /* Dense table used for every list in the app. */
+  .grid-table {
+    @apply w-full text-sm;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .grid-table th {
+    @apply px-4 py-3 text-left text-[11px] font-semibold uppercase;
+    color: var(--muted-2);
+    letter-spacing: 0.06em;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .grid-table th:first-child {
+    border-top-left-radius: 1rem;
+  }
+  .grid-table th:last-child {
+    border-top-right-radius: 1rem;
+  }
+  .grid-table td {
+    @apply px-4 py-3.5 align-middle;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.12s ease;
+  }
+  .grid-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .grid-table tbody tr:hover td {
+    background: var(--accent-soft);
+  }
+
+  /* ------------------------------------------------------------- surfaces -- */
+  /* A slightly inset panel-within-a-panel — used for rows that expand
+     inline (e.g. the returns check-in form) so they read as "held inside"
+     rather than just another flat block. */
+  .surface-2 {
+    @apply rounded-xl border;
+    background: var(--panel-2);
+    border-color: var(--border);
+  }
+
+  /* ---------------------------------------------------------- nav pill -- */
+  /* The floating, centred pill nav — shape and motion borrowed from the
+     Paribelle storefront header: fixed (not sticky, so it never reserves
+     layout space), rounded-full, backdrop-blurred, and firms up its
+     background once content has scrolled behind it. */
+  .nav-pill {
+    @apply rounded-full border backdrop-blur-xl;
+    transition:
+      background 0.3s var(--ease-premium),
+      box-shadow 0.3s var(--ease-premium),
+      border-color 0.3s var(--ease-premium);
+  }
+  .nav-pill-item {
+    @apply rounded-full px-3.5 py-2 text-sm font-medium transition-colors;
+    color: var(--muted);
+  }
+  .nav-pill-item:hover {
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+  .nav-pill-item-active {
+    color: #fff;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  .nav-icon-btn {
+    @apply relative flex h-9 w-9 items-center justify-center rounded-full transition-colors;
+    color: var(--text);
+  }
+  .nav-icon-btn:hover {
+    background: var(--accent-soft);
+  }
+}
+
+/* An indeterminate sweep for progress bars whose total isn't known yet. */
+@keyframes sync-sweep {
+  0% {
+    transform: translateX(-60%);
+  }
+  100% {
+    transform: translateX(180%);
+  }
+}
+
+/* A small bounce for the chat "typing" indicator. */
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* A gentle rise-and-fade, used for popovers/modals/chat panels. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Only the label sheet should reach the printer, never the app chrome. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

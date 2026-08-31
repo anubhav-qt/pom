@@ -1,0 +1,223 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    :root{
+      --bg:#f4f9fc;--panel:#fff;--panel-2:#eef6fa;--border:rgba(13,110,140,.1);--border-strong:rgba(13,110,140,.18);
+      --text:#0f2536;--muted:#5c7386;--muted-2:#8ba0b0;--accent:#0ea5e9;--accent-2:#22d3ee;--accent-soft:rgba(14,165,233,.1);
+      --danger:#e0455a;--danger-soft:rgba(224,69,90,.1);--warn:#d98a2b;--warn-soft:rgba(217,138,43,.12);
+      --ok:#10b981;--ok-soft:rgba(16,185,129,.12);--amazon:#ff9900;--flipkart:#2874f0;--meesho:#f43397;--site:#0ea5e9;
+      --shadow-xs:0 1px 2px rgba(13,60,82,.05);--shadow-sm:0 1px 2px rgba(13,60,82,.04),0 8px 20px -10px rgba(13,60,82,.12)}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+    a{color:#0b7fb0;text-decoration:none}
+    .mono{font-family:"JetBrains Mono",ui-monospace,monospace}.muted{color:var(--muted)}.tabnum{font-variant-numeric:tabular-nums}
+
+    .bar1{display:flex;align-items:center;gap:20px;height:54px;padding:0 26px;background:var(--panel);border-bottom:1px solid var(--border)}
+    .brand{display:flex;align-items:center;gap:10px}
+    .mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center}
+    .bname{font-size:14px;font-weight:600;letter-spacing:-.01em}
+    .appseg{display:inline-flex;padding:3px;border-radius:9px;background:var(--panel-2);border:1px solid var(--border)}
+    .appseg a{padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;color:var(--muted)}
+    .appseg a.active{background:var(--panel);color:var(--text);font-weight:600;box-shadow:var(--shadow-xs)}
+    .spacer{flex:1}
+    .status{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+    .status .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+    .syncbtn{display:inline-flex;align-items:center;gap:6px;border-radius:10px;border:0;color:#fff;font:inherit;font-size:12.5px;font-weight:500;padding:8px 13px;background:linear-gradient(135deg,var(--accent),var(--accent-2));cursor:pointer}
+    .syncbtn svg{width:14px;height:14px}
+    .uav{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;display:flex;align-items:center;justify-content:center}
+
+    main{padding:26px 30px 52px}
+    .h1{font-size:19px;font-weight:600;letter-spacing:-.01em;margin:0}
+    .sectitle{font-size:16px;font-weight:600;letter-spacing:-.01em;margin:0}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-sm)}
+    .p5{padding:20px}
+    .cap{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
+    .sub{font-size:11.5px;color:var(--muted)}
+    .seg{display:inline-flex;padding:3px;border-radius:9999px;background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow-xs)}
+    .seg span{padding:6px 14px;border-radius:9999px;font-size:12.5px;font-weight:500;color:var(--muted)}
+    .seg span.on{color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 4px 12px -4px rgba(14,165,233,.5)}
+
+    .stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-top:20px}
+    .stat{position:relative;overflow:hidden;padding:16px 16px 16px 20px}
+    .stat .bar{position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:9999px;background:var(--accent);opacity:.5}
+    .stat.danger .bar{background:var(--danger);opacity:1}
+    .stat .lbl{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-2)}
+    .stat .val{margin-top:8px;font-size:27px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+    .stat.danger .val{color:var(--danger)}
+
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+    .panel h3{margin:0;font-size:13px;font-weight:600}
+    .panel .subp{margin:3px 0 14px;font-size:11.5px;color:var(--muted)}
+    .chartbox{width:100%;height:140px}
+    .bars{display:flex;align-items:flex-end;gap:6px;height:140px}
+    .bars i{flex:1;background:linear-gradient(180deg,var(--accent-2),var(--accent));border-radius:4px 4px 0 0;opacity:.9}
+    .srow{display:flex;align-items:center;gap:12px;margin-bottom:12px;font-size:12.5px}
+    .srow .name{width:120px}.srow .track{flex:1;height:10px;border-radius:9999px;background:var(--panel-2);overflow:hidden}
+    .srow .fill{height:100%;border-radius:9999px}.srow .n{width:44px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+    .krow{display:flex;align-items:center;gap:12px;margin-bottom:11px;font-size:12.5px}
+    .krow .s{width:150px}.krow .track{flex:1;height:10px;border-radius:9999px;background:var(--panel-2);overflow:hidden}
+    .krow .fill{height:100%;border-radius:9999px;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+    .krow .v{width:64px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+
+    .divider{height:1px;background:var(--border);margin:34px 0 22px}
+    .acct{display:flex;align-items:center;gap:12px;padding:15px 18px}
+    .acct + .acct{border-top:1px solid var(--border)}
+    .tag{display:inline-flex;align-items:center;gap:6px;border-radius:9999px;padding:3px 9px 3px 6px;font-size:11.5px;font-weight:500;white-space:nowrap}
+    .tag .d{width:6px;height:6px;border-radius:50%;flex:none}
+    .tag.amazon{background:rgba(255,153,0,.12)}.tag.amazon .d{background:var(--amazon)}.tag.amazon span{color:#9a6300}
+    .tag.flipkart{background:rgba(40,116,240,.1)}.tag.flipkart .d{background:var(--flipkart)}.tag.flipkart span{color:#1e5fd0}
+    .tag.meesho{background:rgba(244,51,151,.1)}.tag.meesho .d{background:var(--meesho)}.tag.meesho span{color:#c81f74}
+    .tag.site{background:var(--accent-soft)}.tag.site .d{background:var(--site)}.tag.site span{color:#0b7fb0}
+    .acct .nm{font-size:13.5px;font-weight:500}
+    .acct .meta{font-size:12px;color:var(--muted)}
+    .acct .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+    .dim{opacity:.6}
+    .btn{display:inline-flex;align-items:center;gap:6px;border-radius:11px;border:1px solid var(--border);background:var(--panel);color:var(--text);font:inherit;font-size:12px;font-weight:500;padding:7px 11px;box-shadow:var(--shadow-xs);cursor:pointer;white-space:nowrap}
+    .btn svg{width:14px;height:14px;flex:none}
+    .btn-primary{color:#fff;border-color:transparent;background:linear-gradient(135deg,var(--accent),var(--accent-2))}
+    .btn-ghost{background:var(--panel-2);border-style:dashed}
+    .btn-danger{color:var(--danger)}
+    .live{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+    .live .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+    .soon{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-2);border:1px solid var(--border);border-radius:9999px;padding:1px 6px}
+
+    .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+    .tbl th{padding:11px 16px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2);background:var(--panel-2);border-bottom:1px solid var(--border)}
+    .tbl th:first-child{border-top-left-radius:16px}.tbl th:last-child{border-top-right-radius:16px}
+    .tbl td{padding:12px 16px;border-bottom:1px solid var(--border);vertical-align:middle}
+    .tbl tbody tr:last-child td{border-bottom:0}
+    .tbl .r{text-align:right;font-variant-numeric:tabular-nums}
+    .kindtag{font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;background:var(--panel-2);color:var(--muted)}
+    .kindtag.backfill{background:var(--accent-soft);color:#0b7fb0}
+    .okk{color:#0c8f63;font-weight:500}.fail{color:var(--danger)}
+  </style>
+</helmet>
+
+<header class="bar1">
+  <div class="brand"><div class="mark">P</div><div class="bname">Paribelle</div></div>
+  <div class="appseg"><a class="active">Dashboard</a><a>Orders</a></div>
+  <div class="spacer"></div>
+  <span class="status"><span class="dot"></span>Synced 2 min ago · next in 8 min</span>
+  <button class="syncbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>Sync now</button>
+  <div class="uav"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 19c1.2-3 3.7-4.5 6.5-4.5S17.3 16 18.5 19"/></svg></div>
+</header>
+
+<main>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px">
+    <h1 class="h1">Overview</h1>
+    <div class="seg"><span>Today</span><span>7 days</span><span class="on">30 days</span><span>90 days</span></div>
+  </div>
+
+  <div class="stats">
+    <div class="panel stat"><span class="bar"></span><div class="lbl">Revenue</div><div class="val">₹2.14L</div></div>
+    <div class="panel stat"><span class="bar"></span><div class="lbl">Orders</div><div class="val">418</div></div>
+    <div class="panel stat"><span class="bar"></span><div class="lbl">Avg order value</div><div class="val">₹1,024</div></div>
+    <div class="panel stat"><span class="bar"></span><div class="lbl">Cancellation rate</div><div class="val">7%</div></div>
+    <div class="panel stat danger"><span class="bar"></span><div class="lbl">Past deadline now</div><div class="val">3</div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel p5">
+      <h3>Revenue</h3><p class="subp">Excludes cancelled, RTO and returned orders.</p>
+      <svg class="chartbox" viewBox="0 0 520 140" preserveAspectRatio="none" aria-hidden="true">
+        <defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0ea5e9" stop-opacity="0.22"/><stop offset="1" stop-color="#0ea5e9" stop-opacity="0"/></linearGradient></defs>
+        <path d="M0,110 L0,96 C40,88 60,64 90,68 C130,74 150,48 190,40 C230,33 250,54 290,46 C330,39 350,18 390,24 C430,30 460,12 520,9 L520,110 Z" fill="url(#rev)"/>
+        <path d="M0,96 C40,88 60,64 90,68 C130,74 150,48 190,40 C230,33 250,54 290,46 C330,39 350,18 390,24 C430,30 460,12 520,9" fill="none" stroke="#0ea5e9" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="panel p5">
+      <h3>Orders</h3><p class="subp">All orders placed, every status.</p>
+      <div class="bars">
+        <i style="height:38%"></i><i style="height:52%"></i><i style="height:44%"></i><i style="height:63%"></i>
+        <i style="height:57%"></i><i style="height:71%"></i><i style="height:66%"></i><i style="height:80%"></i>
+        <i style="height:74%"></i><i style="height:88%"></i><i style="height:69%"></i><i style="height:93%"></i>
+        <i style="height:83%"></i><i style="height:100%"></i>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel p5">
+      <h3>Where orders stand</h3><p class="subp">418 orders in this range · 61% COD</p>
+      <div style="margin-top:4px">
+        <div class="srow"><span class="name">Fulfilled</span><span class="track"><span class="fill" style="width:82%;background:var(--ok)"></span></span><span class="n">343</span></div>
+        <div class="srow"><span class="name">In progress</span><span class="track"><span class="fill" style="width:12%;background:var(--accent)"></span></span><span class="n">48</span></div>
+        <div class="srow"><span class="name">Returned / RTO</span><span class="track"><span class="fill" style="width:4%;background:var(--danger)"></span></span><span class="n">17</span></div>
+        <div class="srow"><span class="name">Cancelled</span><span class="track"><span class="fill" style="width:3%;background:var(--muted-2)"></span></span><span class="n">10</span></div>
+      </div>
+    </div>
+    <div class="panel p5">
+      <h3>Best-selling SKUs</h3><p class="subp">By revenue, this range.</p>
+      <div style="margin-top:4px">
+        <div class="krow"><span class="s mono">K0-UFZO-1LIW</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="v">₹68,400</span></div>
+        <div class="krow"><span class="s mono">UC-5B6S-MJF4</span><span class="track"><span class="fill" style="width:74%"></span></span><span class="v">₹50,900</span></div>
+        <div class="krow"><span class="s mono">K0-7FGH-8JKL</span><span class="track"><span class="fill" style="width:48%"></span></span><span class="v">₹32,970</span></div>
+        <div class="krow"><span class="s mono">PB-KUR-FLR-12</span><span class="track"><span class="fill" style="width:31%"></span></span><span class="v">₹21,300</span></div>
+        <div class="krow"><span class="s mono">PB-DUP-IND-07</span><span class="track"><span class="fill" style="width:19%"></span></span><span class="v">₹12,850</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+  <h2 class="sectitle">Settings</h2>
+
+  <div style="margin-top:16px" class="cap">Connected marketplaces</div>
+  <div class="panel" style="margin-top:8px;overflow:hidden">
+    <div class="acct">
+      <span class="tag amazon"><span class="d"></span><span>Amazon</span></span>
+      <span class="nm">Paribelle — main</span>
+      <span class="meta">· synced 2 min ago · 1,142 orders held · Easy Ship</span>
+      <div class="right">
+        <span class="live"><span class="dot"></span>Live</span>
+        <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>Sync now</button>
+        <button class="btn">Pause</button>
+        <button class="btn btn-danger">Remove</button>
+      </div>
+    </div>
+    <div class="acct dim">
+      <span class="tag flipkart"><span class="d"></span><span>Flipkart</span></span>
+      <span class="nm">Not connected</span><span class="meta">· Seller API v3 · adapter built, switched off</span>
+      <div class="right"><span class="soon">soon</span><button class="btn">Connect</button></div>
+    </div>
+    <div class="acct dim">
+      <span class="tag meesho"><span class="d"></span><span>Meesho</span></span>
+      <span class="nm">Not connected</span><span class="meta">· file import · adapter built, switched off</span>
+      <div class="right"><span class="soon">soon</span><button class="btn">Connect</button></div>
+    </div>
+    <div class="acct dim">
+      <span class="tag site"><span class="d"></span><span>paribelle.in</span></span>
+      <span class="nm">Not connected</span><span class="meta">· our own store · planned</span>
+      <div class="right"><span class="soon">soon</span><button class="btn">Connect</button></div>
+    </div>
+  </div>
+  <div style="margin-top:12px">
+    <button class="btn btn-ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add Amazon account</button>
+  </div>
+
+  <div style="margin-top:26px" class="cap">Sync log</div>
+  <p class="sub" style="margin:6px 0 8px">The last sync attempts. First place to look when orders stop appearing.</p>
+  <div class="panel" style="overflow:hidden">
+    <table class="tbl">
+      <thead><tr><th style="width:18%">When</th><th style="width:24%">Account</th><th style="width:13%">Kind</th><th class="r" style="width:11%">Written</th><th style="width:34%">Result</th></tr></thead>
+      <tbody>
+        <tr><td class="mono" style="font-size:12px">31 Aug, 10:22 am</td><td><span class="tag amazon"><span class="d"></span><span>Amazon</span></span> <span class="muted">Paribelle — main</span></td><td><span class="kindtag">orders</span></td><td class="r">2</td><td><span class="okk">ok</span> <span class="muted">· 72h window · 102 seen, 2 changed · 1.6s</span></td></tr>
+        <tr><td class="mono" style="font-size:12px">31 Aug, 10:12 am</td><td><span class="tag amazon"><span class="d"></span><span>Amazon</span></span> <span class="muted">Paribelle — main</span></td><td><span class="kindtag">orders</span></td><td class="r">0</td><td><span class="okk">ok</span> <span class="muted">· nothing changed · 0.9s</span></td></tr>
+        <tr><td class="mono" style="font-size:12px">31 Aug, 10:02 am</td><td><span class="tag amazon"><span class="d"></span><span>Amazon</span></span> <span class="muted">Paribelle — main</span></td><td><span class="kindtag">orders</span></td><td class="r">7</td><td><span class="okk">ok</span> <span class="muted">· 4 new, 2 RTO, 1 cancelled → status events</span></td></tr>
+        <tr><td class="mono" style="font-size:12px">31 Aug, 8:40 am</td><td><span class="tag amazon"><span class="d"></span><span>Amazon</span></span> <span class="muted">Paribelle — main</span></td><td><span class="kindtag backfill">backfill</span></td><td class="r">1,142</td><td><span class="okk">ok</span> <span class="muted">· last 6 months · Reports API · 4 windows · 6m 40s</span></td></tr>
+        <tr><td class="mono" style="font-size:12px">31 Aug, 7:52 am</td><td><span class="tag amazon"><span class="d"></span><span>Amazon</span></span> <span class="muted">Paribelle — main</span></td><td><span class="kindtag">orders</span></td><td class="r">0</td><td><span class="fail">LWA token refresh failed — 401 invalid_grant</span></td></tr>
+        <tr><td class="mono" style="font-size:12px">31 Aug, 7:42 am</td><td><span class="tag amazon"><span class="d"></span><span>Amazon</span></span> <span class="muted">Paribelle — main</span></td><td><span class="kindtag">orders</span></td><td class="r">3</td><td><span class="okk">ok</span> <span class="muted">· 38 seen, 3 changed · 2.1s</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+</x-dc>
+</body>
+</html>

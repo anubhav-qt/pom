@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    :root{
+      --bg:#f4f9fc;--panel:#fff;--panel-2:#eef6fa;--border:rgba(13,110,140,.1);--border-strong:rgba(13,110,140,.18);
+      --text:#0f2536;--muted:#5c7386;--muted-2:#8ba0b0;--accent:#0ea5e9;--accent-2:#22d3ee;--accent-soft:rgba(14,165,233,.1);
+      --danger:#e0455a;--danger-soft:rgba(224,69,90,.1);--warn:#d98a2b;--warn-soft:rgba(217,138,43,.12);
+      --ok:#10b981;--ok-soft:rgba(16,185,129,.12);--amazon:#ff9900;
+      --shadow-xs:0 1px 2px rgba(13,60,82,.05);--shadow-sm:0 1px 2px rgba(13,60,82,.04),0 8px 20px -10px rgba(13,60,82,.12)}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+    a{color:#0b7fb0;text-decoration:none}
+    .mono{font-family:"JetBrains Mono",ui-monospace,monospace}.muted{color:var(--muted)}.tabnum{font-variant-numeric:tabular-nums}
+
+    .bar1{display:flex;align-items:center;gap:20px;height:54px;padding:0 26px;background:var(--panel);border-bottom:1px solid var(--border)}
+    .brand{display:flex;align-items:center;gap:10px}
+    .mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center}
+    .bname{font-size:14px;font-weight:600;letter-spacing:-.01em}
+    .appseg{display:inline-flex;padding:3px;border-radius:9px;background:var(--panel-2);border:1px solid var(--border)}
+    .appseg a{padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;color:var(--muted)}
+    .appseg a.active{background:var(--panel);color:var(--text);font-weight:600;box-shadow:var(--shadow-xs)}
+    .spacer{flex:1}
+    .status{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+    .status .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+    .syncbtn{display:inline-flex;align-items:center;gap:6px;border-radius:10px;border:0;color:#fff;font:inherit;font-size:12.5px;font-weight:500;padding:8px 13px;background:linear-gradient(135deg,var(--accent),var(--accent-2));cursor:pointer}
+    .syncbtn svg{width:14px;height:14px}
+    .uav{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;display:flex;align-items:center;justify-content:center}
+    .bar2{display:flex;align-items:center;gap:24px;padding:0 26px;background:var(--panel);border-bottom:1px solid var(--border)}
+    .bar2 .tab{display:inline-flex;align-items:center;gap:7px;padding:11px 2px;font-size:13.5px;font-weight:500;color:var(--muted);border-bottom:2px solid transparent}
+    .bar2 .tab.active{color:var(--text);font-weight:600;border-bottom-color:var(--accent)}
+    .bar2 .cnt{font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:9999px;background:var(--panel-2);color:var(--muted)}
+    .bar2 .tab.active .cnt{background:var(--danger-soft);color:var(--danger)}
+
+    main{padding:24px 30px 44px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-sm)}
+    .explain{margin:0 0 4px;font-size:12.5px;color:var(--muted);max-width:78ch}
+    .subtabs{display:flex;gap:6px;margin:14px 0}
+    .subtab{border-radius:9px;padding:6px 12px;font-size:13px;font-weight:500;color:var(--muted)}
+    .subtab.on{background:var(--accent-soft);color:#0b7fb0}
+    .subtab .n{margin-left:6px;font-variant-numeric:tabular-nums;opacity:.7}
+
+    .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px}
+    .tbl th{padding:12px 14px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2);background:var(--panel-2);border-bottom:1px solid var(--border)}
+    .tbl th:first-child{border-top-left-radius:16px}.tbl th:last-child{border-top-right-radius:16px}
+    .tbl td{padding:13px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+    .tbl tbody tr:last-child td{border-bottom:0}
+    .r{text-align:right}
+    .tag{display:inline-flex;align-items:center;gap:6px;border-radius:9999px;padding:3px 9px 3px 6px;font-size:11.5px;font-weight:500;background:rgba(255,153,0,.12)}
+    .tag .d{width:6px;height:6px;border-radius:50%;background:var(--amazon)}.tag span{color:#9a6300}
+    .oid{font-size:12px;margin-top:5px}.odate{font-size:11.5px;color:var(--muted);margin-top:3px}
+    .itln{font-size:12.5px}.itln .q{font-variant-numeric:tabular-nums;color:var(--muted)}
+    .badge{display:inline-flex;align-items:center;gap:6px;border-radius:9999px;padding:3px 9px;font-size:11.5px;font-weight:500;white-space:nowrap}
+    .badge .d{width:6px;height:6px;border-radius:50%;flex:none}
+    .b-new{background:rgba(91,127,224,.12);color:#4560c0}.b-new .d{background:#5b7fe0}
+    .b-ship{background:var(--ok-soft);color:#0c8f63}.b-ship .d{background:var(--ok)}
+    .b-canc{background:rgba(148,152,171,.14);color:#6b7280}.b-canc .d{background:var(--muted-2)}
+    .b-rto{background:var(--danger-soft);color:var(--danger)}.b-rto .d{background:var(--danger)}
+    .arrow{color:var(--muted-2)}
+    .det{font-size:12.5px}.det .sub{color:var(--muted);margin-top:3px;font-size:11.5px}
+    .chk{display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer}
+    .cbox{width:16px;height:16px;border-radius:5px;border:1.5px solid var(--border-strong);flex:none;background:var(--panel)}
+    .subtle{font-size:11px;color:var(--muted);text-decoration:underline}
+    .await{font-size:11.5px;color:var(--muted-2)}
+    .amznback{font-size:11px;color:var(--muted);margin-top:4px}
+    .outcome{display:inline-flex;align-items:center;border-radius:9999px;padding:3px 9px;font-size:11.5px;font-weight:500}
+    .outcome.back{background:var(--ok-soft);color:#0c8f63}
+    .by{font-size:11px;color:var(--muted);margin-top:5px}
+
+    .fab{position:fixed;right:26px;bottom:24px;width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 10px 26px -8px rgba(14,165,233,.6)}
+    .fab svg{width:21px;height:21px}
+  </style>
+</helmet>
+
+<header class="bar1">
+  <div class="brand"><div class="mark">P</div><div class="bname">Paribelle</div></div>
+  <div class="appseg"><a>Dashboard</a><a class="active">Orders</a></div>
+  <div class="spacer"></div>
+  <span class="status"><span class="dot"></span>Synced 2 min ago · next in 8 min</span>
+  <button class="syncbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>Sync now</button>
+  <div class="uav"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 19c1.2-3 3.7-4.5 6.5-4.5S17.3 16 18.5 19"/></svg></div>
+</header>
+<div class="bar2">
+  <span class="tab">To ship <span class="cnt tabnum">8</span></span>
+  <span class="tab">Shipped <span class="cnt tabnum">406</span></span>
+  <span class="tab">Delivered</span>
+  <span class="tab active">Cancelled &amp; RTO <span class="cnt tabnum">5</span></span>
+  <span class="tab">All orders</span>
+</div>
+
+<main>
+  <p class="explain">Every cancellation and RTO, kept as its own dated record — added on the next sync after Amazon changes the order. One that never shipped is closed automatically. One that shipped first waits here: <b>awaiting</b> until Amazon reports the parcel returned to us, then a <b>Received &amp; shelved</b> tick to close it.</p>
+
+  <div class="subtabs">
+    <span class="subtab on">Pending <span class="n">3</span></span>
+    <span class="subtab">Completed <span class="n">2</span></span>
+  </div>
+
+  <section class="panel" style="overflow:hidden">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width:18%">Order</th>
+          <th style="width:23%">Items</th>
+          <th style="width:19%">Status change</th>
+          <th style="width:15%">Detected</th>
+          <th class="r" style="width:8%">Value</th>
+          <th style="width:17%">Check-in</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tag"><span class="d"></span><span>Amazon</span></span><div class="oid mono">402-7982666-1906748</div><div class="odate">Ordered 24 Aug</div></td>
+          <td><div class="itln"><span class="q">1×</span> <span class="mono">UC-5B6S-MJF4</span></div><div class="muted" style="font-size:12px">Kurta with Palazzo Co-ord Set — Red, XL</div></td>
+          <td><span style="display:inline-flex;align-items:center;gap:8px"><span class="badge b-ship"><span class="d"></span>Shipped</span><svg class="arrow" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg><span class="badge b-rto"><span class="d"></span>RTO</span></span></td>
+          <td class="det">Yesterday<div class="sub">30 Aug, 6:12 pm · sync&nbsp;#4790</div></td>
+          <td class="r tabnum">₹999</td>
+          <td>
+            <label class="chk"><span class="cbox"></span>Received &amp; shelved</label>
+            <div class="amznback">Amazon returned it yesterday</div>
+            <div class="subtle" style="margin-top:5px">not returning</div>
+          </td>
+        </tr>
+
+        <tr>
+          <td><span class="tag"><span class="d"></span><span>Amazon</span></span><div class="oid mono">406-0087415-5109936</div><div class="odate">Ordered 24 Aug</div></td>
+          <td><div class="itln"><span class="q">1×</span> <span class="mono">K0-UFZO-1LIW</span></div><div class="muted" style="font-size:12px">Kurta Palazzo Dupatta Set — Deep Teal, L</div></td>
+          <td><span style="display:inline-flex;align-items:center;gap:8px"><span class="badge b-ship"><span class="d"></span>Shipped</span><svg class="arrow" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg><span class="badge b-rto"><span class="d"></span>RTO</span></span></td>
+          <td class="det">2 days ago<div class="sub">29 Aug, 10:41 am · sync&nbsp;#4712</div></td>
+          <td class="r tabnum">₹999</td>
+          <td>
+            <label class="chk"><span class="cbox"></span>Received &amp; shelved</label>
+            <div class="amznback">Amazon returned it 2 days ago</div>
+            <div class="subtle" style="margin-top:5px">not returning</div>
+          </td>
+        </tr>
+
+        <tr>
+          <td><span class="tag"><span class="d"></span><span>Amazon</span></span><div class="oid mono">406-5753270-3936335</div><div class="odate">Ordered 24 Aug</div></td>
+          <td><div class="itln"><span class="q">2×</span> <span class="mono">PB-KUR-FLR-12</span></div><div class="muted" style="font-size:12px">Floral Print A-line Kurta — Blue, L</div></td>
+          <td><span style="display:inline-flex;align-items:center;gap:8px"><span class="badge b-ship"><span class="d"></span>Shipped</span><svg class="arrow" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg><span class="badge b-canc"><span class="d"></span>Cancelled</span></span></td>
+          <td class="det">4 days ago<div class="sub">27 Aug, 8:22 pm · sync&nbsp;#4655</div></td>
+          <td class="r tabnum">₹1,798</td>
+          <td>
+            <div class="await">Awaiting parcel — Amazon has not confirmed a return</div>
+            <div class="subtle" style="margin-top:6px">mark not returning</div>
+          </td>
+        </tr>
+
+        <tr>
+          <td><span class="tag"><span class="d"></span><span>Amazon</span></span><div class="oid mono">406-4825844-9370727</div><div class="odate">Ordered 24 Aug</div></td>
+          <td><div class="itln"><span class="q">1×</span> <span class="mono">K0-UFZO-1LIW</span></div><div class="muted" style="font-size:12px">Kurta Palazzo Dupatta Set — Deep Teal, L</div></td>
+          <td><span style="display:inline-flex;align-items:center;gap:8px"><span class="badge b-new"><span class="d"></span>New</span><svg class="arrow" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg><span class="badge b-canc"><span class="d"></span>Cancelled</span></span></td>
+          <td class="det">2h ago<div class="sub">31 Aug, 9:04 am · sync&nbsp;#4821</div></td>
+          <td class="r tabnum">₹999</td>
+          <td><span class="outcome" style="background:var(--panel-2);color:var(--muted)">Closed</span><div class="by">auto — never shipped</div></td>
+        </tr>
+
+        <tr>
+          <td><span class="tag"><span class="d"></span><span>Amazon</span></span><div class="oid mono">403-2261509-7745120</div><div class="odate">Ordered 18 Aug</div></td>
+          <td><div class="itln"><span class="q">1×</span> <span class="mono">K0-7FGH-8JKL</span></div><div class="muted" style="font-size:12px">Cotton Anarkali Kurta — Mustard, XL</div></td>
+          <td><span style="display:inline-flex;align-items:center;gap:8px"><span class="badge b-ship"><span class="d"></span>Shipped</span><svg class="arrow" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg><span class="badge b-rto"><span class="d"></span>RTO</span></span></td>
+          <td class="det">6 days ago<div class="sub">25 Aug, 7:03 am · sync&nbsp;#4589</div></td>
+          <td class="r tabnum">₹1,499</td>
+          <td><span class="outcome back">Item back</span><div class="by">by Papa · 5 days ago</div></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <div class="fab" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-11.9 7.6L3 20.5l1.4-6A8.4 8.4 0 1 1 21 11.5z"/></svg>
+  </div>
+</main>
+</x-dc>
+</body>
+</html>

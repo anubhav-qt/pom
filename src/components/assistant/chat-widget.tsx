@@ -1,0 +1,257 @@
+"use client";
+
+import { Download, Sparkles, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
+import type { AssistantCard } from "@/lib/assistant/agent";
+
+import { AssistantCardView } from "./cards";
+import { wrapHtmlFragment } from "./render-html";
+
+type DisplayMode = "cards" | "html";
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+  cards?: AssistantCard[];
+  error?: boolean;
+}
+
+const SUGGESTIONS = [
+  "How much revenue this month?",
+  "What's still late?",
+  "What's my best seller?",
+  "How many orders are cancelled?",
+];
+
+/**
+ * Downloads the model's HTML fragment as a standalone .html file, instead of
+ * trying to open it in a new tab — new-tab approaches (blob: navigation,
+ * document.write into window.open) turned out unreliable across browsers
+ * (blocked popups, blob: URLs failing to resolve once handed to a new
+ * renderer process). A download via a temporary <a download> anchor doesn't
+ * hit either failure mode — it never has to resolve as a navigable page.
+ * The fragment is already sanitized server-side (sanitize-html.ts strips
+ * scripts/handlers before it's ever returned).
+ */
+function downloadHtmlPage(html: string) {
+  const blob = new Blob([wrapHtmlFragment(html)], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `assistant-answer-${Date.now()}.html`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function HtmlPageLink({ html }: { html: string }) {
+  return (
+    <button
+      type="button"
+      onClick={() => downloadHtmlPage(html)}
+      className="flex w-fit items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-colors hover:bg-[var(--accent-soft)]"
+      style={{ borderColor: "var(--border)" }}
+    >
+      <Download className="h-3.5 w-3.5" style={{ color: "var(--accent)" }} />
+      Download page
+    </button>
+  );
+}
+
+export function ChatWidget() {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("cards");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("assistant-display-mode");
+    if (saved === "cards" || saved === "html") setDisplayMode(saved);
+  }, []);
+
+  function changeDisplayMode(mode: DisplayMode) {
+    setDisplayMode(mode);
+    localStorage.setItem("assistant-display-mode", mode);
+  }
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, busy]);
+
+  async function ask(question: string) {
+    if (!question.trim() || busy) return;
+    setInput("");
+    setBusy(true);
+
+    const history = messages.map(({ role, content }) => ({ role, content }));
+    setMessages((m) => [...m, { role: "user", content: question }]);
+
+    try {
+      const res = await fetch("/api/assistant/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ question, history, displayMode }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMessages((m) => [...m, { role: "assistant", content: data.error ?? "Something went wrong.", error: true }]);
+      } else {
+        setMessages((m) => [...m, { role: "assistant", content: data.reply, cards: data.cards }]);
+      }
+    } catch {
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: "Couldn't reach the assistant — check your connection.", error: true },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      {/* The trigger — a plain sticky icon until clicked, exactly as asked:
+          it does not look like a chat entry point until it opens into one. */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label={open ? "Close assistant" : "Ask the assistant"}
+        className="no-print fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full text-white transition-transform hover:scale-105 active:scale-95"
+        style={{
+          background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
+          boxShadow: "0 10px 30px -8px color-mix(in srgb, var(--accent) 60%, transparent)",
+        }}
+      >
+        {open ? <X className="h-6 w-6" /> : <Sparkles className="h-6 w-6" />}
+      </button>
+
+      {open ? (
+        <div
+          className="panel no-print fixed bottom-24 right-5 z-40 flex w-[min(24rem,calc(100vw-2.5rem))] flex-col overflow-hidden"
+          style={{ height: "min(32rem, calc(100vh - 8rem))", animation: "rise-in 0.18s var(--ease-premium)" }}
+        >
+          <div
+            className="flex items-center gap-2 border-b px-4 py-3"
+            style={{ borderColor: "var(--border)" }}
+          >
+            <Sparkles className="h-4 w-4" style={{ color: "var(--accent)" }} />
+            <div className="flex-1">
+              <div className="text-sm font-semibold leading-tight">Ask about your data</div>
+              <div className="muted text-[11px]">Answers come straight from your orders</div>
+            </div>
+            <div
+              className="flex rounded-lg border p-0.5 text-[11px]"
+              style={{ borderColor: "var(--border)" }}
+              role="radiogroup"
+              aria-label="Answer display mode"
+            >
+              {(["cards", "html"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={displayMode === mode}
+                  onClick={() => changeDisplayMode(mode)}
+                  className="rounded-md px-2 py-1 transition-colors"
+                  style={{
+                    background: displayMode === mode ? "var(--accent-soft)" : "transparent",
+                    color: displayMode === mode ? "var(--accent)" : "var(--muted)",
+                  }}
+                >
+                  {mode === "cards" ? "Cards" : "Page"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            {messages.length === 0 ? (
+              <div className="space-y-2">
+                <p className="muted text-sm">Try asking:</p>
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => ask(s)}
+                    className="block w-full rounded-xl border px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--accent-soft)]"
+                    style={{ borderColor: "var(--border)" }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {messages.map((m, i) => (
+              <div key={i} className={m.role === "user" ? "flex justify-end" : ""}>
+                {m.role === "user" ? (
+                  <div
+                    className="max-w-[85%] rounded-2xl rounded-br-sm px-3.5 py-2 text-sm text-white"
+                    style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
+                  >
+                    {m.content}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div
+                      className="max-w-[92%] rounded-2xl rounded-bl-sm px-3.5 py-2 text-sm"
+                      style={{
+                        background: m.error ? "var(--danger-soft)" : "var(--panel-2)",
+                        color: m.error ? "var(--danger)" : "var(--text)",
+                      }}
+                    >
+                      {m.content}
+                    </div>
+                    {(() => {
+                      const htmlCard = m.cards?.find((c) => c.type === "html") as { html: string } | undefined;
+                      if (!m.error && displayMode === "html" && htmlCard) {
+                        return <HtmlPageLink html={htmlCard.html} />;
+                      }
+                      return m.cards?.filter((c) => c.type !== "html").map((c, ci) => <AssistantCardView key={ci} card={c} />);
+                    })()}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {busy ? (
+              <div className="flex items-center gap-1.5 px-1">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{
+                      background: "var(--muted-2)",
+                      animation: `typing-bounce 1.1s ease-in-out ${i * 0.15}s infinite`,
+                    }}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              ask(input);
+            }}
+            className="flex items-center gap-2 border-t p-3"
+            style={{ borderColor: "var(--border)" }}
+          >
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Ask a question…"
+              disabled={busy}
+              className="input"
+            />
+            <button type="submit" disabled={busy || !input.trim()} className="btn btn-primary px-3.5">
+              Ask
+            </button>
+          </form>
+        </div>
+      ) : null}
+    </>
+  );
+}
