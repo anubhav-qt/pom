@@ -1,7 +1,7 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 
-import { getMcpAssistantTools } from "./mcp-tools";
+import { ASSISTANT_DB_TOOLS } from "./db-tools";
 import { ASSISTANT_TOOL_MAP, ASSISTANT_TOOLS, renderHtmlTool } from "./tools";
 
 export type DisplayMode = "cards" | "html";
@@ -73,11 +73,13 @@ async function chatModel(mode: DisplayMode) {
     model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
     temperature: 0.2,
   });
-  const mcpTools = await getMcpAssistantTools();
   // render_html is only offered in "html" mode — in "cards" mode the fixed
   // React components own presentation, and there's nothing for the model to
   // render itself.
-  const tools = mode === "html" ? [...ASSISTANT_TOOLS, renderHtmlTool, ...mcpTools] : [...ASSISTANT_TOOLS, ...mcpTools];
+  const tools =
+    mode === "html"
+      ? [...ASSISTANT_TOOLS, renderHtmlTool, ...ASSISTANT_DB_TOOLS]
+      : [...ASSISTANT_TOOLS, ...ASSISTANT_DB_TOOLS];
   return model.bindTools(tools);
 }
 
@@ -119,15 +121,15 @@ export async function runAssistant(
   question: string,
   displayMode: DisplayMode = "cards",
 ): Promise<AssistantResult> {
-  const [chat, mcpTools] = await Promise.all([chatModel(displayMode), getMcpAssistantTools()]);
-  // Every tool here — fixed or MCP-loaded — has its own zod-typed `invoke`
-  // signature, so the union isn't statically callable; narrow the merged map
-  // to the one shared surface we actually use. Safe because every tool
-  // re-validates its args against its own schema regardless of this cast.
+  const chat = await chatModel(displayMode);
+  // Every tool here has its own zod-typed `invoke` signature, so the union
+  // isn't statically callable; narrow the merged map to the one shared
+  // surface we actually use. Safe because every tool re-validates its args
+  // against its own schema regardless of this cast.
   const toolMap = {
     ...ASSISTANT_TOOL_MAP,
     render_html: renderHtmlTool,
-    ...Object.fromEntries(mcpTools.map((t) => [t.name, t])),
+    ...Object.fromEntries(ASSISTANT_DB_TOOLS.map((t) => [t.name, t])),
   } as unknown as Record<string, { invoke: (args: unknown) => Promise<unknown> }>;
 
   const messages: BaseMessage[] = [
@@ -159,7 +161,7 @@ export async function runAssistant(
         result = { error: `No such tool: ${call.name}` };
       } else {
         try {
-          // Fixed tools and MCP-loaded tools share the same `invoke(args)`
+          // Fixed tools and the freeform DB tools share the same `invoke(args)`
           // surface, so both dispatch through the one map above. Every tool
           // re-validates `call.args` against its own schema regardless.
           result = await toolFn.invoke(call.args);
@@ -172,9 +174,9 @@ export async function runAssistant(
       if (result && typeof result === "object" && "type" in result && !("error" in result)) {
         cards.push(result as AssistantCard);
       } else if (call.name === "run_sql" && typeof result === "string") {
-        // The MCP run_sql tool returns raw JSON text (no fixed shape — the query
-        // is ad-hoc), not one of our typed cards. Turn its rows into a generic
-        // "table" card so the UI has something to render besides prose.
+        // run_sql returns raw JSON text (no fixed shape — the query is ad-hoc),
+        // not one of our typed cards. Turn its rows into a generic "table" card
+        // so the UI has something to render besides prose.
         const parsed = tryParseRunSqlResult(result);
         if (parsed) cards.push(parsed);
       }
