@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <style>
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: #0f2536;
+      font-feature-settings: "cv11", "ss01";
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: #0ea5e9; }
+    a:hover { color: #0284c7; }
+    .cap { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #8ba0b0; }
+    /* the app's segmented control, copied from orders-toolbar.tsx */
+    .seg { display: inline-flex; border-radius: 10px; padding: 3px; background: #ffffff; border: 1px solid rgba(13,110,140,0.1); box-shadow: 0 1px 2px rgba(13,60,82,0.05); }
+    .seg-item { display: inline-flex; align-items: center; gap: 6px; border-radius: 7px; padding: 6px 10px; font-size: 12px; font-weight: 500; color: #5c7386; }
+    .seg-item-active { background: rgba(14,165,233,0.1); color: #0b7fb0; }
+    /* .btn, from globals.css */
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 12px; border: 1px solid rgba(13,110,140,0.1); padding: 8px 14px; font-size: 14px; font-weight: 500; font-family: inherit; background: #ffffff; color: #0f2536; box-shadow: 0 1px 2px rgba(13,60,82,0.05); cursor: pointer; }
+  </style>
+</helmet>
+
+<div style="width: 1000px; height: 560px; box-sizing: border-box; background: #f4f9fc; background-image: radial-gradient(circle at 14% -8%, rgba(14,165,233,0.10), transparent 42%); padding: 32px; display: flex; flex-direction: column; gap: 30px;">
+
+  <div>
+    <h1 style="margin: 0 0 4px; font-size: 19px; font-weight: 600; letter-spacing: -0.015em;">Where the button sits</h1>
+    <p style="margin: 0; font-size: 13px; color: #5c7386;">Same row as the existing segmented control, pushed to the far right. It uses the app's plain <span style="font-family: ui-monospace, monospace; font-size: 12px;">.btn</span>, not the primary gradient — the primary action on these screens is still the work in the table.</p>
+  </div>
+
+  <!-- To Ship -->
+  <div style="display: flex; flex-direction: column; gap: 9px;">
+    <span class="cap">To Ship</span>
+    <div style="border-radius: 16px; border: 1px solid rgba(13,110,140,0.1); background: #ffffff; box-shadow: 0 1px 2px rgba(13,60,82,0.04), 0 8px 20px -10px rgba(13,60,82,0.12); padding: 14px 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+        <div class="seg">
+          <span class="seg-item seg-item-active">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>
+            List
+          </span>
+          <span class="seg-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+            Collection
+          </span>
+          <span class="seg-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M9 12h6M9 16h4"/></svg>
+            Restock planner
+          </span>
+        </div>
+
+        <button class="btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+            <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M3 12h18"/>
+          </svg>
+          Scan Barcode
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cancelled & RTO -->
+  <div style="display: flex; flex-direction: column; gap: 9px;">
+    <span class="cap">Cancelled &amp; RTO</span>
+    <div style="border-radius: 16px; border: 1px solid rgba(13,110,140,0.1); background: #ffffff; box-shadow: 0 1px 2px rgba(13,60,82,0.04), 0 8px 20px -10px rgba(13,60,82,0.12); padding: 14px 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+        <div class="seg">
+          <span class="seg-item seg-item-active">Pending <span style="opacity: 0.7; margin-left: 2px;">90</span></span>
+          <span class="seg-item">Completed <span style="opacity: 0.7; margin-left: 2px;">340</span></span>
+        </div>
+
+        <button class="btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+            <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M3 12h18"/>
+          </svg>
+          Scan Barcode
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- mobile: the row wraps, button goes full width -->
+  <div style="display: flex; flex-direction: column; gap: 9px;">
+    <span class="cap">Below 420px — the row wraps</span>
+    <div style="width: 358px; border-radius: 16px; border: 1px solid rgba(13,110,140,0.1); background: #ffffff; box-shadow: 0 1px 2px rgba(13,60,82,0.04), 0 8px 20px -10px rgba(13,60,82,0.12); padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+      <div class="seg" style="width: 100%; box-sizing: border-box;">
+        <span class="seg-item seg-item-active" style="flex-grow: 1; justify-content: center;">List</span>
+        <span class="seg-item" style="flex-grow: 1; justify-content: center;">Collection</span>
+        <span class="seg-item" style="flex-grow: 1; justify-content: center;">Restock</span>
+      </div>
+      <button class="btn" style="width: 100%; height: 44px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+          <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M3 12h18"/>
+        </svg>
+        Scan Barcode
+      </button>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

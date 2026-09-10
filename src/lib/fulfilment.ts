@@ -22,7 +22,7 @@ import {
  * we never write to it; `order_fulfilment.state` is ours and no sync touches it.
  *
  * Reading the queue therefore always means combining both, which is what
- * `openQueueWhere` is for — get that predicate wrong in one screen and the
+ * `openQueueWhere` is for. Get that predicate wrong in one screen and the
  * counts stop agreeing with each other.
  */
 
@@ -31,7 +31,7 @@ import {
  *
  * Amazon only ever reports `new` here (its `Unshipped`); `ready_to_pack` and
  * `packed` are in the list for Flipkart, whose adapter does report them and
- * which is currently switched off. This is the *channel's* opinion only — our
+ * which is currently switched off. This is the *channel's* opinion only. Our
  * own packed/manifested state is no longer stored here.
  */
 export const OPEN_STATUSES = ["new", "ready_to_pack", "packed"] as const;
@@ -45,7 +45,7 @@ export const stateSql = sql<FulfilmentState>`COALESCE(${orderFulfilment.state}, 
  *
  * Manifested orders have to be excluded explicitly now. They used to fall out
  * on their own because we overwrote `orders.status` with `manifested` and that
- * value is not in OPEN_STATUSES — but the channel status now stays `new` right
+ * value is not in OPEN_STATUSES, but the channel status now stays `new` right
  * up until Amazon notices the pickup, so without this they would sit in the
  * queue forever.
  *
@@ -104,7 +104,7 @@ async function setState(
 }
 
 /**
- * Mark parcels packed. Idempotent — re-packing an already-packed order is a
+ * Mark parcels packed. Idempotent: re-packing an already-packed order is a
  * no-op rather than an error, because a scanner firing twice is normal.
  * Returns the ids that actually moved, so the caller knows what to count.
  */
@@ -187,8 +187,8 @@ export async function revertLocal(orderIds: number[]) {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Record a scan. Every scan is logged, including the ones that changed nothing
- * — a refused scan is exactly the event someone will want to look up later
+ * Record a scan. Every scan is logged, including the ones that changed nothing.
+ * A refused scan is exactly the event someone will want to look up later
  * ("we definitely scanned that parcel"), and dropping it would make the log
  * useless for the one question it exists to answer.
  */

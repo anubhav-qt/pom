@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: #0f2536;
+      font-feature-settings: "cv11", "ss01";
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: #0ea5e9; }
+    a:hover { color: #0284c7; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .cap { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #8ba0b0; }
+  </style>
+</helmet>
+
+<div style="width: 640px; height: 1180px; box-sizing: border-box; background: #f4f9fc; padding: 32px; display: flex; flex-direction: column; gap: 26px;">
+
+  <div>
+    <h1 style="margin: 0 0 4px; font-size: 19px; font-weight: 600; letter-spacing: -0.015em;">Feedback states</h1>
+    <p style="margin: 0; font-size: 13px; color: #5c7386;">These replace the result card in place. The scanner keeps running underneath — a bad scan must never need a click to clear.</p>
+  </div>
+
+  <!-- STOP: the reason the scan step exists -->
+  <div style="display: flex; flex-direction: column; gap: 8px;">
+    <span class="cap">Cancelled — hard stop</span>
+    <div style="border-radius: 12px; border: 1.5px solid #e0455a; background: rgba(224,69,90,0.1); padding: 16px; display: flex; gap: 13px; align-items: flex-start;">
+      <svg width="22" height="22" style="flex-shrink: 0; margin-top: 1px;" viewBox="0 0 24 24" fill="none" stroke="#e0455a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>
+      </svg>
+      <div style="flex-grow: 1; min-width: 0;">
+        <p style="margin: 0 0 3px; font-size: 15px; font-weight: 600; color: #e0455a;">STOP — do not ship this parcel</p>
+        <p style="margin: 0 0 8px; font-size: 13.5px; line-height: 1.45;"><span class="mono">407-8013454-4665139</span> was cancelled on Amazon. Put it aside for the goods-in bench.</p>
+        <div style="display: flex; gap: 8px;">
+          <button style="border: 1px solid rgba(224,69,90,0.4); cursor: pointer; border-radius: 12px; padding: 7px 13px; font-size: 13.5px; font-weight: 500; font-family: inherit; background: #ffffff; color: #0f2536;">Open the order</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- already packed: soft, not an error -->
+  <div style="display: flex; flex-direction: column; gap: 8px;">
+    <span class="cap">Already packed — duplicate scan</span>
+    <div style="border-radius: 12px; border: 1px solid rgba(217,138,43,0.4); background: rgba(217,138,43,0.12); padding: 14px 16px; display: flex; gap: 13px; align-items: flex-start;">
+      <svg width="20" height="20" style="flex-shrink: 0; margin-top: 1px;" viewBox="0 0 24 24" fill="none" stroke="#d98a2b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 9v4"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="10"/>
+      </svg>
+      <div>
+        <p style="margin: 0 0 3px; font-size: 14px; font-weight: 600; color: #d98a2b;">Already packed at 11:02</p>
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.45;">Nothing was changed and no stock moved. Scanning twice is harmless.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- not found -->
+  <div style="display: flex; flex-direction: column; gap: 8px;">
+    <span class="cap">No match</span>
+    <div style="border-radius: 12px; border: 1px solid rgba(13,110,140,0.1); background: #eef6fa; padding: 14px 16px; display: flex; gap: 13px; align-items: flex-start;">
+      <svg width="20" height="20" style="flex-shrink: 0; margin-top: 1px;" viewBox="0 0 24 24" fill="none" stroke="#5c7386" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+      </svg>
+      <div>
+        <p style="margin: 0 0 3px; font-size: 14px; font-weight: 600;">No order matches <span class="mono" style="font-weight: 500;">MH-7781-XX</span></p>
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.45; color: #5c7386;">Order ID, AWB and shipment ID are all checked. If the order is new, it may not have synced yet.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- nothing coming back (inbound only) -->
+  <div style="display: flex; flex-direction: column; gap: 8px;">
+    <span class="cap">Goods in — nothing expected back</span>
+    <div style="border-radius: 12px; border: 1px solid rgba(13,110,140,0.1); background: #eef6fa; padding: 14px 16px; display: flex; gap: 13px; align-items: flex-start;">
+      <svg width="20" height="20" style="flex-shrink: 0; margin-top: 1px;" viewBox="0 0 24 24" fill="none" stroke="#5c7386" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12h18"/><path d="M12 3v18"/>
+      </svg>
+      <div>
+        <p style="margin: 0 0 3px; font-size: 14px; font-weight: 600;">This order is still live</p>
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.45; color: #5c7386;"><span class="mono">408-9310950-5878756</span> has no cancellation or return against it. If the parcel really is back, wait for the next sync to pick it up.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- camera denied -->
+  <div style="display: flex; flex-direction: column; gap: 8px;">
+    <span class="cap">Camera unavailable</span>
+    <div style="border-radius: 12px; overflow: hidden; border: 1px dashed rgba(13,110,140,0.18); background: #eef6fa;">
+      <div style="height: 132px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 0 24px; text-align: center;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#8ba0b0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h11"/><path d="M22 17V9a2 2 0 0 0-2-2h-3"/><path d="m2 2 20 20"/>
+        </svg>
+        <p style="margin: 0; font-size: 13.5px; font-weight: 500;">Camera permission was refused</p>
+        <p style="margin: 0; font-size: 12.5px; color: #5c7386; line-height: 1.45;">Allow it in the browser, or just type the code — a bench scanner types into the box anyway.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- success flash -->
+  <div style="display: flex; flex-direction: column; gap: 8px;">
+    <span class="cap">Confirmed</span>
+    <div style="border-radius: 12px; border: 1px solid rgba(16,185,129,0.4); background: rgba(16,185,129,0.12); padding: 14px 16px; display: flex; gap: 13px; align-items: center;">
+      <svg width="20" height="20" style="flex-shrink: 0;" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      <p style="margin: 0; font-size: 14px; font-weight: 500;">Packed <span class="mono" style="font-weight: 500;">408-9310950-5878756</span> — 1 unit off the shelf. Ready for the next scan.</p>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

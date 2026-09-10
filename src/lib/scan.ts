@@ -18,7 +18,7 @@ import {
 /**
  * Barcode lookup, shared by both scan stations.
  *
- * Nobody at a packing bench knows — or should have to know — which of the three
+ * Nobody at a packing bench knows, or should have to know, which of the three
  * barcodes on a label is "the" order id. Amazon's Easy Ship label carries the
  * order id and the AWB; a return sticker carries the AWB and sometimes a return
  * id of its own. So every scan is tried against all of them, and the caller
@@ -40,7 +40,7 @@ export interface ScanItem {
   quantity: number;
   imageUrl: string | null;
   binLocation: string | null;
-  /** False when the SKU has no product behind it — it is not stock-controlled. */
+  /** False when the SKU has no product behind it, so it is not stock-controlled. */
   mapped: boolean;
 }
 
@@ -68,7 +68,7 @@ export type ScanLookup =
       order: ScanOrderSummary;
       /** Outbound only: what packing this parcel would do. */
       outbound?: {
-        /** Already `packed` or beyond — scanning again would be a double-count. */
+        /** Already `packed` or beyond, so scanning again would double-count. */
         alreadyPacked: boolean;
         packedAt: Date | null;
       };
@@ -79,7 +79,7 @@ export type ScanLookup =
         recordId: number;
         /** Cancelled / RTO / customer return, for the wording on screen. */
         label: string;
-        /** Already checked in — scanning again would double-restock. */
+        /** Already checked in, so scanning again would double-restock. */
         alreadyReceived: boolean;
         receivedAt: Date | null;
       };
@@ -206,7 +206,7 @@ export async function lookupOutbound(code: string): Promise<ScanLookup> {
       ok: false,
       code,
       reason: "blocked",
-      message: `STOP — ${row.externalOrderId} is ${row.status.toUpperCase()}. Do not ship it.`,
+      message: `STOP. ${row.externalOrderId} is ${row.status.toUpperCase()}. Do not ship it.`,
     };
   }
 
@@ -216,7 +216,7 @@ export async function lookupOutbound(code: string): Promise<ScanLookup> {
     matchedOn,
     order: summary(row, await itemsFor(row.id)),
     outbound: {
-      // Our own record decides this — the marketplace has no opinion on whether
+      // Our own record decides this. The marketplace has no opinion on whether
       // a parcel has been boxed.
       alreadyPacked: (row.fulfilmentState ?? "to_pack") !== "to_pack",
       packedAt: row.packedAt,
@@ -230,7 +230,7 @@ export async function lookupOutbound(code: string): Promise<ScanLookup> {
  * Inbound: a parcel has come back off the delivery van.
  *
  * Two different records can be waiting for it, and the person holding the
- * parcel has no way to tell which — an RTO that never reached the buyer is an
+ * parcel has no way to tell which: an RTO that never reached the buyer is an
  * `order_status_events` row, a customer return is a `returns` row. Both are
  * looked up and whichever is pending wins, so one scanner covers both.
  *
@@ -323,7 +323,7 @@ export async function lookupInbound(code: string): Promise<ScanLookup> {
   }
   const { row, matchedOn } = found;
 
-  // No return record — look for a cancellation/RTO check-in instead. Prefer one
+  // No return record, so look for a cancellation/RTO check-in instead. Prefer one
   // that is still pending; fall back to the most recent so a second scan can
   // say "already checked in" rather than "not found", which would send someone
   // hunting for a record that is sitting right there.
@@ -349,7 +349,7 @@ export async function lookupInbound(code: string): Promise<ScanLookup> {
       code,
       reason: "not_found",
       message:
-        `${row.externalOrderId} is ${row.status.replace("_", " ")} — nothing is expected back for it. ` +
+        `${row.externalOrderId} is ${row.status.replace("_", " ")}, so nothing is expected back for it. ` +
         `If it has genuinely come back, wait for the next sync to pick the cancellation up.`,
     };
   }

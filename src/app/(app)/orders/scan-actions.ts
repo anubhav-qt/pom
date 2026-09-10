@@ -34,8 +34,8 @@ export async function scanLookup(station: ScanStation, code: string): Promise<Sc
  * Mark a scanned parcel packed and take the stock off the shelf.
  *
  * This is `pack/actions.ts#confirmPacked` with one difference: it is safe to
- * call twice. A scanner that fires a duplicate — and they do, a second read as
- * the parcel moves past the beam — must not decrement stock again, so an order
+ * call twice. A scanner that fires a duplicate, and they do, a second read as
+ * the parcel moves past the beam, must not decrement stock again, so an order
  * that is already packed returns a soft `already` rather than an error.
  */
 export async function scanConfirmPacked(orderId: number) {
@@ -54,7 +54,7 @@ export async function scanConfirmPacked(orderId: number) {
 
   if (!order) return { ok: false as const, error: "Order not found." };
 
-  // The marketplace still gets a veto on shipping — a cancelled order must not
+  // The marketplace still gets a veto on shipping: a cancelled order must not
   // go out whatever our bench thinks.
   if (["cancelled", "rto", "returned"].includes(order.status)) {
     await recordScan({
@@ -65,7 +65,7 @@ export async function scanConfirmPacked(orderId: number) {
       rejectedReason: `order is ${order.status}`,
       scannedBy: user.id,
     });
-    return { ok: false as const, error: `STOP — this order is ${order.status.toUpperCase()}.` };
+    return { ok: false as const, error: `STOP. This order is ${order.status.toUpperCase()}.` };
   }
 
   // Whether it is already packed is purely our own record.
@@ -121,13 +121,13 @@ export async function scanConfirmPacked(orderId: number) {
  * Check a scanned parcel back in.
  *
  * `kind` comes straight from the lookup, so the person scanning never has to
- * know whether they are holding an RTO or a customer return — the two live in
+ * know whether they are holding an RTO or a customer return: the two live in
  * different tables and this dispatches to whichever one was waiting.
  *
  * `itemBack` is the same decision the checkbox on the Cancelled & RTO screen
  * asks for, and it means the same thing here: goods physically received and
  * sellable. Returns additionally put the stock back on, which is why it is a
- * choice and not automatic — marketplace returns come back worn often enough
+ * choice and not automatic, because marketplace returns come back worn often enough
  * that auto-restocking is how a used item reaches the next customer.
  */
 export async function scanCheckIn(input: {
