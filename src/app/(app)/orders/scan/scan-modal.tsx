@@ -104,7 +104,7 @@ export function ScanModal({
           if (res.outbound?.alreadyPacked) {
             setFeedback({
               tone: "warn",
-              text: "This parcel is already packed. Nothing changed and no stock moved.",
+              text: "This parcel was already scanned and dispatched. Nothing changed.",
             });
           } else if (res.inbound?.alreadyReceived) {
             setFeedback({
@@ -162,18 +162,18 @@ export function ScanModal({
       try {
         const res = await scanConfirmPacked(order.orderId);
         if (!res.ok) {
-          setFeedback({ tone: "stop", title: "Not packed", text: res.error });
+          setFeedback({ tone: "stop", title: "Not dispatched", text: res.error });
           push(order.externalOrderId, "Refused", "stop");
         } else if (res.already) {
-          setFeedback({ tone: "warn", text: "Already packed, so nothing moved." });
-          push(order.externalOrderId, "Already packed", "warn");
+          setFeedback({ tone: "warn", text: "Already dispatched, so nothing moved." });
+          push(order.externalOrderId, "Already dispatched", "warn");
         } else {
           changedRef.current = true;
           setFeedback({
             tone: "ok",
-            text: `Packed ${order.externalOrderId}. Ready for the next scan.`,
+            text: `Dispatched ${order.externalOrderId}. Ready for the next scan.`,
           });
-          push(order.externalOrderId, "Packed", "ok");
+          push(order.externalOrderId, "Dispatched", "ok");
         }
         reset();
       } finally {
@@ -292,7 +292,7 @@ export function ScanModal({
                 style={{ borderTop: "1px solid var(--border)", background: "var(--panel)" }}
               >
                 <span className="muted text-xs">
-                  {canPack ? "Stock comes off on confirm." : "Nothing left to do here."}
+                  {canPack ? "Stock comes off on confirm." : "Already dispatched."}
                 </span>
                 <div className="flex gap-2">
                   <button type="button" className="btn" onClick={reset} disabled={busy}>
@@ -304,7 +304,7 @@ export function ScanModal({
                     onClick={confirmPacked}
                     disabled={busy || !canPack}
                   >
-                    Confirm packed
+                    Confirm dispatch
                   </button>
                 </div>
               </div>

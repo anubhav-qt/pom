@@ -39,8 +39,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     .select({
       // Excludes anything we have already manifested: the channel still calls
       // it open, but it has left the building.
-      toShip: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} IN ('new','ready_to_pack','packed') AND COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested')::int`,
-      shipped: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'shipped')::int`,
+      toShip: sql<number>`COUNT(*) FILTER (WHERE (${orders.status} IN ('new','ready_to_pack','packed') OR (${orders.status} = 'shipped' AND ${orders.easyshipStatus} = 'PendingPickUp')) AND COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested')::int`,
+      shipped: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'shipped' AND COALESCE(${orders.easyshipStatus}, '') <> 'PendingPickUp')::int`,
       cancelledRto: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} IN ('cancelled','rto','returned'))::int`,
     })
     .from(orders)

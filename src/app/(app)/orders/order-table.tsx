@@ -24,8 +24,9 @@ export interface OrderRow {
   shipState: string | null;
   totalAmount: string | null;
   isCod: boolean;
-  /** Our own bench state — not the marketplace's. */
+  /** Our own bench state, not the marketplace's. */
   fulfilmentState: FulfilmentState;
+  isPending: boolean;
   items: {
     sku: string;
     title: string | null;
@@ -244,6 +245,15 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
                     <td>
                       <div className="flex items-center gap-2">
                         <ChannelTag channel={row.channel} />
+                        {row.isPending ? (
+                          <span
+                            className="rounded-full px-1.5 py-0.5 text-[9px] font-semibold tracking-wide"
+                            style={{ background: "var(--danger-soft)", color: "var(--danger)" }}
+                            title="Amazon pending order"
+                          >
+                            pending
+                          </span>
+                        ) : null}
                         {row.isCod ? (
                           <span
                             className="rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide"
@@ -297,7 +307,7 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
                     <td className="text-xs">
                       {row.buyerName ? <div>{row.buyerName}</div> : null}
                       <div className="muted">
-                        {[row.shipCity, row.shipState].filter(Boolean).join(", ") || "—"}
+                        {[row.shipCity, row.shipState].filter(Boolean).join(", ") || "-"}
                       </div>
                     </td>
 
@@ -312,7 +322,7 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
                           {deadline.text}
                         </span>
                       ) : (
-                        <span className="muted text-xs">—</span>
+                        <span className="muted text-xs">-</span>
                       )}
                     </td>
 

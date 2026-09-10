@@ -49,6 +49,7 @@ export interface OrdersViewParams {
   q?: string;
   view?: string;
   resolved?: string;
+  tab?: "unshipped" | "packed" | "shipped24h";
 }
 
 export type OrdersView =
@@ -65,8 +66,14 @@ export type OrdersView =
       channel?: Channel;
       query: string;
       isQueueView: boolean;
+      activeTab: "unshipped" | "packed" | "shipped24h";
       rows: OrderRow[];
-      counts: { open: number; packed: number; late: number } | null;
+      counts: {
+        unshipped: number;
+        packed: number;
+        shipped24h: number;
+        late: number;
+      } | null;
     };
 
 export async function getOrdersView(params: OrdersViewParams): Promise<OrdersView> {
@@ -111,15 +118,29 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
   // the open "to ship" queue.
   const showAll = params.status === "all";
   const status = orderStatusEnum.enumValues.find((s) => s === params.status);
+  const isQueueView = !status && !showAll;
+  const activeTab: "unshipped" | "packed" | "shipped24h" =
+    params.tab === "packed" || params.tab === "shipped24h" ? params.tab : "unshipped";
+
   if (status) {
     filters.push(eq(orders.status, status));
   } else if (!showAll) {
-    filters.push(inArray(orders.status, [...OPEN_STATUSES]));
-    // The queue is what is still on our bench, so anything handed to the
-    // courier drops out even though the channel still calls it open.
-    filters.push(sql`COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested'`);
+    if (activeTab === "unshipped") {
+      filters.push(inArray(orders.status, ["new", "ready_to_pack"]));
+      filters.push(sql`COALESCE(${orderFulfilment.state}, 'to_pack') = 'to_pack'`);
+      filters.push(sql`COALESCE(${orders.easyshipStatus}, '') <> 'PendingPickUp'`);
+    } else if (activeTab === "packed") {
+      filters.push(
+        sql`(${orders.easyshipStatus} = 'PendingPickUp' OR ${orderFulfilment.state} = 'packed' OR ${orders.status} = 'packed')`,
+      );
+      filters.push(sql`COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested'`);
+      filters.push(sql`${orders.status} NOT IN ('cancelled', 'rto', 'returned')`);
+    } else if (activeTab === "shipped24h") {
+      filters.push(sql`${orderFulfilment.state} = 'manifested'`);
+      filters.push(sql`${orderFulfilment.manifestedAt} >= now() - interval '24 hours'`);
+      filters.push(sql`${orders.status} NOT IN ('cancelled', 'rto', 'returned')`);
+    }
   }
-  const isQueueView = !status && !showAll;
 
   if (q) {
     const like = `%${q}%`;
@@ -133,13 +154,26 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
   }
 
   const rows = await db
-    .select({ order: orders, fulfilmentState: orderFulfilment.state })
+    .select({
+      order: orders,
+      fulfilmentState: orderFulfilment.state,
+      manifestedAt: orderFulfilment.manifestedAt,
+    })
     .from(orders)
     .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
     .where(filters.length ? and(...filters) : undefined)
-    .orderBy(orders.dispatchBy, desc(orders.orderedAt))
+    .orderBy(
+      activeTab === "shipped24h" ? desc(orderFulfilment.manifestedAt) : orders.dispatchBy,
+      desc(orders.orderedAt),
+    )
     .limit(PAGE_SIZE)
-    .then((res) => res.map((r) => ({ ...r.order, fulfilmentState: r.fulfilmentState })));
+    .then((res) =>
+      res.map((r) => ({
+        ...r.order,
+        fulfilmentState: r.fulfilmentState,
+        manifestedAt: r.manifestedAt,
+      })),
+    );
 
   const items = rows.length
     ? await db
@@ -178,44 +212,66 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
     itemsByOrder.set(it.orderId, list);
   }
 
-  const data: OrderRow[] = rows.map((o) => ({
-    id: o.id,
-    channel: o.channel,
-    externalOrderId: o.externalOrderId,
-    status: o.status,
-    orderedAt: o.orderedAt.toISOString(),
-    dispatchBy: o.dispatchBy?.toISOString() ?? null,
-    buyerName: o.buyerName,
-    shipCity: o.shipCity,
-    shipState: o.shipState,
-    totalAmount: o.totalAmount,
-    isCod: o.isCod,
-    fulfilmentState: o.fulfilmentState ?? "to_pack",
-    items: (itemsByOrder.get(o.id) ?? []).map((it) => ({
-      sku: it.externalSku,
-      title: it.title,
-      quantity: it.quantity,
-      mapped: it.productId !== null,
-      imageUrl: it.pImage ?? it.ciImage ?? null,
-    })),
-  }));
+  const data: OrderRow[] = rows.map((o) => {
+    const rawStatus = (o.raw as Record<string, any> | null)?.OrderStatus;
+    return {
+      id: o.id,
+      channel: o.channel,
+      externalOrderId: o.externalOrderId,
+      status: o.status,
+      orderedAt: o.orderedAt.toISOString(),
+      dispatchBy: o.dispatchBy?.toISOString() ?? null,
+      buyerName: o.buyerName,
+      shipCity: o.shipCity,
+      shipState: o.shipState,
+      totalAmount: o.totalAmount,
+      isCod: o.isCod,
+      fulfilmentState: o.fulfilmentState ?? "to_pack",
+      isPending:
+        rawStatus === "Pending" ||
+        rawStatus === "PendingAvailability" ||
+        (o.status === "new" && !o.buyerName),
+      items: (itemsByOrder.get(o.id) ?? []).map((it) => ({
+        sku: it.externalSku,
+        title: it.title,
+        quantity: it.quantity,
+        mapped: it.productId !== null,
+        imageUrl: it.pImage ?? it.ciImage ?? null,
+      })),
+    };
+  });
 
-  // The split between "to pack" and "to ship" is ours, not the marketplace's:
-  // Amazon calls every one of these Unshipped until the courier scans it.
   const [counts] = isQueueView
     ? await db
         .select({
-          open: sql<number>`COUNT(*) FILTER (WHERE COALESCE(${orderFulfilment.state}, 'to_pack') = 'to_pack')::int`,
-          packed: sql<number>`COUNT(*) FILTER (WHERE ${orderFulfilment.state} = 'packed')::int`,
-          late: sql<number>`COUNT(*) FILTER (WHERE COALESCE(${orderFulfilment.state}, 'to_pack') = 'to_pack' AND ${orders.dispatchBy} < now())::int`,
+          unshipped: sql<number>`COUNT(*) FILTER (
+            WHERE ${orders.status} IN ('new', 'ready_to_pack')
+              AND COALESCE(${orderFulfilment.state}, 'to_pack') = 'to_pack'
+              AND COALESCE(${orders.easyshipStatus}, '') <> 'PendingPickUp'
+          )::int`,
+          packed: sql<number>`COUNT(*) FILTER (
+            WHERE (${orders.easyshipStatus} = 'PendingPickUp' OR ${orderFulfilment.state} = 'packed' OR ${orders.status} = 'packed')
+              AND COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested'
+              AND ${orders.status} NOT IN ('cancelled', 'rto', 'returned')
+          )::int`,
+          shipped24h: sql<number>`COUNT(*) FILTER (
+            WHERE ${orderFulfilment.state} = 'manifested'
+              AND ${orderFulfilment.manifestedAt} >= now() - interval '24 hours'
+              AND ${orders.status} NOT IN ('cancelled', 'rto', 'returned')
+          )::int`,
+          late: sql<number>`COUNT(*) FILTER (
+            WHERE ${orders.status} IN ('new', 'ready_to_pack')
+              AND COALESCE(${orderFulfilment.state}, 'to_pack') = 'to_pack'
+              AND COALESCE(${orders.easyshipStatus}, '') <> 'PendingPickUp'
+              AND ${orders.dispatchBy} < now()
+          )::int`,
         })
         .from(orders)
         .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
         .where(
           and(
-            inArray(orders.status, [...OPEN_STATUSES]),
             inArray(orders.channel, [...ENABLED_CHANNELS]),
-            sql`COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested'`,
+            channel ? eq(orders.channel, channel) : undefined,
           ),
         )
     : [undefined];
@@ -225,11 +281,13 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
     channel,
     query: q ?? "",
     isQueueView,
+    activeTab,
     rows: data,
     counts: counts
       ? {
-          open: Number(counts.open ?? 0),
+          unshipped: Number(counts.unshipped ?? 0),
           packed: Number(counts.packed ?? 0),
+          shipped24h: Number(counts.shipped24h ?? 0),
           late: Number(counts.late ?? 0),
         }
       : null,

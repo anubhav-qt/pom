@@ -245,16 +245,9 @@ export class AmazonAdapter implements ChannelAdapter {
       (a, b) => new Date(a.LastUpdateDate).getTime() - new Date(b.LastUpdateDate).getTime(),
     );
 
-    // Drop orders Amazon hasn't finalised yet. A just-placed order sits at
-    // "Pending" until payment clears — no buyer address, no line items, and
-    // Seller Central doesn't list it as actionable either. Ingesting it would
-    // put a row in the pack queue that the seller can't act on and that isn't
-    // yet a confirmed sale. It gets picked up on the next sync once it turns
-    // "Unshipped" (the 72h floor re-scans it), or never, if Amazon auto-cancels
-    // it.
-    const toProcess = collected
-      .slice(0, limit)
-      .filter((o) => !AMAZON_PENDING_STATUSES.has(o.OrderStatus));
+    // Ingest all orders up to limit, including Pending orders so they appear
+    // in the Unshipped tab with the pending badge.
+    const toProcess = collected.slice(0, limit);
     // Indexed rather than pushed, so the result keeps the oldest-update-first
     // order the cursor depends on even though workers finish out of order.
     const orders: CanonicalOrder[] = new Array(toProcess.length);
@@ -334,13 +327,24 @@ export class AmazonAdapter implements ChannelAdapter {
 
     await this.itemsBudget.take();
 
-    const items = await this.request<{ payload: { OrderItems: AmazonOrderItem[] } }>(
-      `/orders/v0/orders/${encodeURIComponent(itemsOrderId)}/orderItems`,
-    );
+    let orderItemsPayload: AmazonOrderItem[] = [];
+    try {
+      const items = await this.request<{ payload: { OrderItems: AmazonOrderItem[] } }>(
+        `/orders/v0/orders/${encodeURIComponent(itemsOrderId)}/orderItems`,
+      );
+      orderItemsPayload = items.payload.OrderItems ?? [];
+    } catch (err) {
+      // For Pending orders, Amazon SP-API often denies or lacks line items until payment clears.
+      if (AMAZON_PENDING_STATUSES.has(o.OrderStatus)) {
+        orderItemsPayload = [];
+      } else {
+        throw err;
+      }
+    }
 
     return {
       ...common,
-      items: (items.payload.OrderItems ?? []).map((it) => ({
+      items: orderItemsPayload.map((it) => ({
         externalItemId: it.OrderItemId,
         externalSku: it.SellerSKU,
         externalAsin: it.ASIN ?? null,
@@ -651,10 +655,12 @@ function mapAmazonStatus(o: AmazonOrder): OrderStatus {
   if (o.OrderStatus === "Canceled") return "cancelled";
   if (o.OrderStatus === "Unfulfillable") return "rto";
   if (ez === "Delivered") return "delivered";
+  // Easy Ship: when the seller downloads the label in Seller Central, Amazon flips
+  // OrderStatus to Shipped with EasyShipShipmentStatus = PendingPickUp.
+  // The parcel is packed and awaiting outbound pickup/scan, not yet handed to courier.
+  if (ez === "PendingPickUp") return "packed";
   if (o.OrderStatus === "Shipped") return "shipped";
-  // "Unshipped", "PartiallyShipped". "Pending"/"PendingAvailability" are
-  // filtered out before they reach here (see AMAZON_PENDING_STATUSES) — if one
-  // ever slips through, "new" is the safe fallback.
+  // "Unshipped", "PartiallyShipped", "Pending", "PendingAvailability".
   return "new";
 }
 

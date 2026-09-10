@@ -160,6 +160,7 @@ export function ordersViewKey(params: OrdersViewParams): string {
     params.channel ?? "",
     params.q?.trim() ?? "",
     params.resolved ?? "",
+    params.tab ?? "unshipped",
   ].join("|");
 }
 
@@ -170,6 +171,7 @@ export function paramsToQuery(params: OrdersViewParams): string {
   if (params.channel) p.set("channel", params.channel);
   if (params.q?.trim()) p.set("q", params.q.trim());
   if (params.resolved) p.set("resolved", params.resolved);
+  if (params.tab && params.tab !== "unshipped") p.set("tab", params.tab);
   const qs = p.toString();
   return qs ? `?${qs}` : "";
 }
@@ -182,6 +184,7 @@ export function queryToParams(search: string): OrdersViewParams {
     channel: p.get("channel") ?? undefined,
     q: p.get("q") ?? undefined,
     resolved: p.get("resolved") ?? undefined,
+    tab: (p.get("tab") as "unshipped" | "packed" | "shipped24h" | null) ?? undefined,
   };
 }
 
