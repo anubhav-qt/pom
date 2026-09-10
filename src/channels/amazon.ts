@@ -76,9 +76,24 @@ export class AmazonAdapter implements ChannelAdapter {
    * Self-imposed pacing for the orderItems endpoint, ahead of hitting 429 at
    * all. Retries recover from a burst; this avoids triggering one in the
    * common case of syncing more than a handful of orders in one run.
+   *
+   * Amazon documents this endpoint at 0.5 req/sec sustained with a burst bucket
+   * of 30, and a bucket is what we model. The previous scheme — a flat 1.1s
+   * sleep between calls — got both halves wrong: 1.1s is more than twice the
+   * sustained rate, so a long run drained the burst and took 429s anyway, while
+   * a short run slept 1.1s before each of the first 30 calls that the bucket
+   * would have let through immediately. A 30-order catch-up paid ~33s of sleep
+   * for nothing.
    */
-  private lastItemsCallAt = 0;
-  private static readonly ITEMS_MIN_INTERVAL_MS = 1100;
+  private readonly itemsBudget = new TokenBucket(30, 0.5);
+
+  /**
+   * In-flight orderItems calls. The bucket decides *when* a call may start;
+   * this decides how many may be waiting on the network at once, which is what
+   * actually hides per-call latency. Kept low so a burst cannot turn into a
+   * 429 storm — the retry path in `request` is the backstop, not the plan.
+   */
+  private static readonly ITEMS_CONCURRENCY = 4;
 
   constructor(private account: ChannelAccount) {
     this.creds = account.credentials as unknown as AmazonCredentials;
@@ -234,13 +249,23 @@ export class AmazonAdapter implements ChannelAdapter {
     const toProcess = collected
       .slice(0, limit)
       .filter((o) => !AMAZON_PENDING_STATUSES.has(o.OrderStatus));
-    const orders: CanonicalOrder[] = [];
-    for (const [i, o] of toProcess.entries()) {
-      orders.push(await this.toCanonical(o, unchangedSince));
-      // One tick per order, right after the slow paced call that order just
-      // went through — this is the only part of a sync worth reporting on.
-      await onProgress?.({ seen: i + 1, total: toProcess.length });
-    }
+    // Indexed rather than pushed, so the result keeps the oldest-update-first
+    // order the cursor depends on even though workers finish out of order.
+    const orders: CanonicalOrder[] = new Array(toProcess.length);
+    let cursor = 0;
+    let done = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(AmazonAdapter.ITEMS_CONCURRENCY, toProcess.length) }, async () => {
+        for (;;) {
+          const i = cursor++;
+          if (i >= toProcess.length) return;
+          orders[i] = await this.toCanonical(toProcess[i], unchangedSince);
+          // One tick per order, right after the paced call that order just went
+          // through — this is the only part of a sync worth reporting on.
+          await onProgress?.({ seen: ++done, total: toProcess.length });
+        }
+      }),
+    );
 
     return {
       orders,
@@ -294,9 +319,7 @@ export class AmazonAdapter implements ChannelAdapter {
     // order list returns, so the real id cannot be used here.
     const itemsOrderId = this.isSandbox ? SANDBOX.orderId : o.AmazonOrderId;
 
-    const wait = AmazonAdapter.ITEMS_MIN_INTERVAL_MS - (Date.now() - this.lastItemsCallAt);
-    if (wait > 0) await sleep(wait);
-    this.lastItemsCallAt = Date.now();
+    await this.itemsBudget.take();
 
     const items = await this.request<{ payload: { OrderItems: AmazonOrderItem[] } }>(
       `/orders/v0/orders/${encodeURIComponent(itemsOrderId)}/orderItems`,
@@ -740,6 +763,43 @@ function decodeLabel(f: { Contents: string; FileType?: string }): Buffer {
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Classic token bucket: `capacity` calls may go straight through, after which
+ * callers are released at `refillPerSec`. This is the shape SP-API's own rate
+ * limits are documented in, so pacing against it means a short sync pays
+ * nothing and a long one degrades to exactly the sustained rate rather than to
+ * a guess.
+ */
+class TokenBucket {
+  private tokens: number;
+  private lastRefill = Date.now();
+
+  constructor(
+    private readonly capacity: number,
+    private readonly refillPerSec: number,
+  ) {
+    this.tokens = capacity;
+  }
+
+  async take(): Promise<void> {
+    for (;;) {
+      const now = Date.now();
+      this.tokens = Math.min(
+        this.capacity,
+        this.tokens + ((now - this.lastRefill) / 1000) * this.refillPerSec,
+      );
+      this.lastRefill = now;
+      if (this.tokens >= 1) {
+        this.tokens -= 1;
+        return;
+      }
+      // Sleep for exactly as long as the next whole token needs. Re-checked on
+      // the next pass because concurrent takers may have consumed it first.
+      await sleep(Math.ceil(((1 - this.tokens) / this.refillPerSec) * 1000));
+    }
+  }
 }
 
 /* ----------------------------------------------------------- API shapes -- */

@@ -76,6 +76,13 @@ export async function ingestOrders(
 ): Promise<IngestResult> {
   if (incoming.length === 0) return { seen: 0, written: 0, unmappedSkus: [] };
 
+  // One row per order id. Postgres refuses an ON CONFLICT DO UPDATE that would
+  // touch the same row twice in one statement, so a duplicate that the
+  // per-order loop used to absorb silently would now fail the whole batch.
+  // Last occurrence wins — for a paged fetch that is the more recent read.
+  const seenCount = incoming.length;
+  incoming = [...new Map(incoming.map((o) => [o.externalOrderId, o])).values()];
+
   // Resolve every channel SKU to one of our products in a single query. Orders
   // the adapter flagged `itemsKnownCurrent` bring no items and leave the
   // existing rows untouched, so they contribute nothing to resolve here.
@@ -114,28 +121,46 @@ export async function ingestOrders(
   const isTerminal = (s: OrderStatus) => s === "cancelled" || s === "rto" || s === "returned";
   const statusEvents: (typeof orderStatusEvents.$inferInsert)[] = [];
 
-  let written = 0;
+  // Everything below writes in batches rather than per order. A sync where
+  // nothing has changed still has to upsert every order in the window, so the
+  // per-order round trip was the whole cost of a routine run — 82 orders meant
+  // 82 sequential round trips to a serverless Postgres and about ten seconds
+  // of almost pure latency. Chunked multi-row statements turn that into a
+  // handful of round trips.
+  //
+  // CHUNK keeps each statement under Postgres's 65535 bind-parameter ceiling.
+  // The widest row here is `orders` at ~16 columns, so 500 leaves ample room.
+  const CHUNK = 500;
+  const chunks = <T,>(xs: T[]) =>
+    Array.from({ length: Math.ceil(xs.length / CHUNK) }, (_, i) =>
+      xs.slice(i * CHUNK, (i + 1) * CHUNK),
+    );
 
-  for (const o of incoming) {
-    const [row] = await db
+  const orderRows = incoming.map((o) => ({
+    channelAccountId: account.id,
+    channel: account.channel,
+    externalOrderId: o.externalOrderId,
+    status: o.status,
+    orderedAt: o.orderedAt,
+    buyerName: o.buyerName ?? null,
+    shipCity: o.shipCity ?? null,
+    shipState: o.shipState ?? null,
+    shipPincode: o.shipPincode ?? null,
+    totalAmount: o.totalAmount ?? null,
+    isCod: o.isCod ?? false,
+    dispatchBy: o.dispatchBy ?? null,
+    channelUpdatedAt: o.channelUpdatedAt ?? null,
+    easyshipStatus: o.easyshipStatus ?? null,
+    raw: o.raw,
+  }));
+
+  // `raw` has to come from `excluded` now rather than a per-order literal —
+  // one statement covers many orders, so there is no single value to inline.
+  const upserted: { id: number; externalOrderId: string; status: OrderStatus }[] = [];
+  for (const batch of chunks(orderRows)) {
+    const rows = await db
       .insert(orders)
-      .values({
-        channelAccountId: account.id,
-        channel: account.channel,
-        externalOrderId: o.externalOrderId,
-        status: o.status,
-        orderedAt: o.orderedAt,
-        buyerName: o.buyerName ?? null,
-        shipCity: o.shipCity ?? null,
-        shipState: o.shipState ?? null,
-        shipPincode: o.shipPincode ?? null,
-        totalAmount: o.totalAmount ?? null,
-        isCod: o.isCod ?? false,
-        dispatchBy: o.dispatchBy ?? null,
-        channelUpdatedAt: o.channelUpdatedAt ?? null,
-        easyshipStatus: o.easyshipStatus ?? null,
-        raw: o.raw,
-      })
+      .values(batch)
       .onConflictDoUpdate({
         target: [orders.channelAccountId, orders.externalOrderId],
         set: {
@@ -154,101 +179,124 @@ export async function ingestOrders(
           totalAmount: sql`COALESCE(excluded.total_amount, ${orders.totalAmount})`,
           channelUpdatedAt: sql`COALESCE(excluded.channel_updated_at, ${orders.channelUpdatedAt})`,
           easyshipStatus: sql`COALESCE(excluded.easyship_status, ${orders.easyshipStatus})`,
-          raw: o.raw,
-          updatedAt: new Date(),
+          raw: sql`excluded.raw`,
+          updatedAt: sql`now()`,
         },
       })
-      .returning({ id: orders.id, status: orders.status });
+      .returning({
+        id: orders.id,
+        externalOrderId: orders.externalOrderId,
+        status: orders.status,
+      });
+    upserted.push(...rows);
+  }
 
-    if (!row) continue;
-    written++;
+  const written = upserted.length;
+  const idFor = new Map(upserted.map((r) => [r.externalOrderId, r.id]));
 
+  for (const row of upserted) {
     // Record the transition, if there was one. `priorStatus` is null for an
     // order we had never seen — for those we only log an arrival that is
     // already terminal (an order that showed up cancelled), not a routine new
     // order. The unique index on (order_id, to_status) makes this idempotent,
     // so two overlapping syncs racing on the same change is harmless.
-    const before = priorStatus.get(o.externalOrderId) ?? null;
-    if ((before !== null && before !== row.status) || (before === null && isTerminal(row.status))) {
-      // `rto` is only ever set from Amazon's `ReturnedToSeller` — the parcel is
-      // physically back and needs a "received & shelved" check-in, even the
-      // first time we see the order. A `cancelled`/`returned` order needs a
-      // check-in only if it had actually shipped; one cancelled before dispatch
-      // (or first seen already cancelled) has nothing to receive, so it is
-      // resolved on the spot with no `checkedInBy`.
-      const needsCheckin =
-        row.status === "rto" ||
-        (isTerminal(row.status) && before !== null && SHIPPED_ISH.includes(before));
-      statusEvents.push({
-        orderId: row.id,
-        channelAccountId: account.id,
-        channel: account.channel,
-        externalOrderId: o.externalOrderId,
-        fromStatus: before,
-        toStatus: row.status,
-        syncRunId: opts.syncRunId ?? null,
-        ...(isTerminal(row.status) && !needsCheckin
-          ? {
-              checkedInAt: new Date(),
-              itemBack: false,
-              checkinNote: "auto — order had not shipped, nothing to receive",
-            }
-          : {}),
-      });
+    const before = priorStatus.get(row.externalOrderId) ?? null;
+    if (!((before !== null && before !== row.status) || (before === null && isTerminal(row.status)))) {
+      continue;
     }
+    // `rto` is only ever set from Amazon's `ReturnedToSeller` — the parcel is
+    // physically back and needs a "received & shelved" check-in, even the
+    // first time we see the order. A `cancelled`/`returned` order needs a
+    // check-in only if it had actually shipped; one cancelled before dispatch
+    // (or first seen already cancelled) has nothing to receive, so it is
+    // resolved on the spot with no `checkedInBy`.
+    const needsCheckin =
+      row.status === "rto" ||
+      (isTerminal(row.status) && before !== null && SHIPPED_ISH.includes(before));
+    statusEvents.push({
+      orderId: row.id,
+      channelAccountId: account.id,
+      channel: account.channel,
+      externalOrderId: row.externalOrderId,
+      fromStatus: before,
+      toStatus: row.status,
+      syncRunId: opts.syncRunId ?? null,
+      ...(isTerminal(row.status) && !needsCheckin
+        ? {
+            checkedInAt: new Date(),
+            itemBack: false,
+            checkinNote: "auto — order had not shipped, nothing to receive",
+          }
+        : {}),
+    });
+  }
 
-    // An order the adapter flagged as unchanged brings no items and must not
-    // have its existing rows touched. Otherwise items are replaced wholesale —
-    // an order has a handful of lines and the channel is authoritative about
-    // them, so diffing would be more code for no benefit.
-    if (!o.itemsKnownCurrent) {
-      await db.delete(orderItems).where(eq(orderItems.orderId, row.id));
-    }
-    if (!o.itemsKnownCurrent && o.items.length > 0) {
-      await db.insert(orderItems).values(
-        o.items.map((it) => ({
-          orderId: row.id,
-          productId: skuToProduct.get(it.externalSku) ?? null,
-          externalItemId: it.externalItemId ?? null,
-          externalSku: it.externalSku,
-          externalAsin: it.externalAsin ?? null,
-          title: it.title ?? null,
-          quantity: it.quantity,
-          unitPrice: it.unitPrice ?? null,
-          cancelled: it.cancelled ?? false,
-        })),
-      );
-    }
+  // An order the adapter flagged as unchanged brings no items and must not have
+  // its existing rows touched. Otherwise items are replaced wholesale — an
+  // order has a handful of lines and the channel is authoritative about them,
+  // so diffing would be more code for no benefit.
+  const refreshed = incoming.filter((o) => !o.itemsKnownCurrent);
+  const refreshedIds = refreshed
+    .map((o) => idFor.get(o.externalOrderId))
+    .filter((id): id is number => id !== undefined);
 
-    if (o.shipment) {
-      const existing = await db
-        .select({ id: shipments.id })
-        .from(shipments)
-        .where(eq(shipments.orderId, row.id))
-        .limit(1);
+  for (const batch of chunks(refreshedIds)) {
+    await db.delete(orderItems).where(inArray(orderItems.orderId, batch));
+  }
 
-      const values = {
-        orderId: row.id,
-        externalShipmentId: o.shipment.externalShipmentId ?? null,
-        courier: o.shipment.courier ?? null,
-        awb: o.shipment.awb ?? null,
-        ...(o.shipment.labelPdf
-          ? { labelPdf: o.shipment.labelPdf, labelFetchedAt: new Date() }
-          : {}),
-      };
+  const itemRows = refreshed.flatMap((o) => {
+    const orderId = idFor.get(o.externalOrderId);
+    if (orderId === undefined) return [];
+    return o.items.map((it) => ({
+      orderId,
+      productId: skuToProduct.get(it.externalSku) ?? null,
+      externalItemId: it.externalItemId ?? null,
+      externalSku: it.externalSku,
+      externalAsin: it.externalAsin ?? null,
+      title: it.title ?? null,
+      quantity: it.quantity,
+      unitPrice: it.unitPrice ?? null,
+      cancelled: it.cancelled ?? false,
+    }));
+  });
+  for (const batch of chunks(itemRows)) {
+    await db.insert(orderItems).values(batch);
+  }
 
-      if (existing[0]) {
-        await db.update(shipments).set(values).where(eq(shipments.id, existing[0].id));
-      } else {
-        await db.insert(shipments).values(values);
-      }
+  // Shipments stay per-order: only Meesho supplies them, a handful at a time
+  // from a label upload, so there is nothing here worth batching.
+  for (const o of incoming) {
+    if (!o.shipment) continue;
+    const orderId = idFor.get(o.externalOrderId);
+    if (orderId === undefined) continue;
+
+    const existing = await db
+      .select({ id: shipments.id })
+      .from(shipments)
+      .where(eq(shipments.orderId, orderId))
+      .limit(1);
+
+    const values = {
+      orderId,
+      externalShipmentId: o.shipment.externalShipmentId ?? null,
+      courier: o.shipment.courier ?? null,
+      awb: o.shipment.awb ?? null,
+      ...(o.shipment.labelPdf
+        ? { labelPdf: o.shipment.labelPdf, labelFetchedAt: new Date() }
+        : {}),
+    };
+
+    if (existing[0]) {
+      await db.update(shipments).set(values).where(eq(shipments.id, existing[0].id));
+    } else {
+      await db.insert(shipments).values(values);
     }
   }
 
-  if (statusEvents.length > 0) {
+  for (const batch of chunks(statusEvents)) {
     await db
       .insert(orderStatusEvents)
-      .values(statusEvents)
+      .values(batch)
       .onConflictDoNothing({ target: [orderStatusEvents.orderId, orderStatusEvents.toStatus] });
   }
 
@@ -263,7 +311,7 @@ export async function ingestOrders(
     .filter((a): a is string => !!a);
   await enrichCatalogImages(account, freshAsins).catch(() => {});
 
-  return { seen: incoming.length, written, unmappedSkus };
+  return { seen: seenCount, written, unmappedSkus };
 }
 
 /**
