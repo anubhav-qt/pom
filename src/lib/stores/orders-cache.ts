@@ -4,6 +4,7 @@ import { create } from "zustand";
 
 import type { OrdersView, OrdersViewParams } from "@/app/(app)/orders/view-actions";
 import { withBasePath } from "@/lib/base-path";
+import { useOrderDetailCache } from "./order-detail-cache";
 
 /**
  * Client-side cache for the Orders tabs.
@@ -92,7 +93,12 @@ export const useOrdersCache = create<OrdersCacheState>((set, get) => ({
       return { entries: next };
     }),
 
-  bumpSync: () => set((s) => ({ entries: {}, syncStamp: s.syncStamp + 1 })),
+  bumpSync: () => {
+    // A sync rewrites orders wholesale, so the per-order detail cache is as
+    // stale as the tab payloads are.
+    useOrderDetailCache.getState().clear();
+    set((s) => ({ entries: {}, syncStamp: s.syncStamp + 1 }));
+  },
 
   load: async (key, params, fetcher) => {
     const entry = get().entries[key];
@@ -127,9 +133,13 @@ export const useOrdersCache = create<OrdersCacheState>((set, get) => ({
  * Packing or scanning moves an order between the queue's two cards and can
  * change the cancellation list, so the safe set is "anything derived from
  * orders". Kept as one helper so a new call site cannot forget one.
+ *
+ * An open order's detail is derived from orders too, so its cache is dropped
+ * on the same beat.
  */
 export function invalidateOrderViews() {
   useOrdersCache.getState().invalidate();
+  useOrderDetailCache.getState().clear();
 }
 
 /* -------------------------------------------------------------------------- */

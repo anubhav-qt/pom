@@ -7,6 +7,8 @@ import { Modal } from "@/components/modal";
 import type { Channel, OrderStatus } from "@/db/schema";
 import { money } from "@/lib/utils";
 
+import { useOrderDetailCache } from "@/lib/stores/order-detail-cache";
+
 import { getOrderDetail, type OrderDetail } from "./actions";
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -30,15 +32,23 @@ function formatDate(iso: string | null) {
 }
 
 export function OrderDetailModal({ orderId, onClose }: { orderId: number; onClose: () => void }) {
-  const [detail, setDetail] = useState<OrderDetail | null>(null);
+  // Seed from the cache synchronously: an order looked at earlier this session
+  // opens with its data already on screen and no skeleton. The cache is
+  // dropped by every mutation and by a sync, so a hit is known-current.
+  const [detail, setDetail] = useState<OrderDetail | null>(() =>
+    useOrderDetailCache.getState().peek(orderId),
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setDetail(null);
+    const cached = useOrderDetailCache.getState().peek(orderId);
+    setDetail(cached);
     setError(null);
 
-    getOrderDetail(orderId)
+    useOrderDetailCache
+      .getState()
+      .load(orderId, getOrderDetail)
       .then((d) => {
         if (cancelled) return;
         if (!d) setError("This order could not be found — it may have been removed.");
