@@ -654,9 +654,31 @@ export interface BackfillProgress {
   /** Running totals across the whole backfill so far. */
   ordersSeen: number;
   ordersWritten: number;
+  /**
+   * Orders this window alone produced. Reported separately from the running
+   * totals because a window that returns nothing is the signature of a report
+   * Amazon declined to fill (see MAX_REPORT_WINDOW_DAYS) — invisible if the
+   * caller only ever sees a total that keeps climbing.
+   */
+  windowOrders: number;
   /** Set if this window failed (and was skipped) rather than ingested. */
   error?: string;
 }
+
+/**
+ * Amazon will not build an All Orders report spanning more than ~31 days, and
+ * it does not say so: `createReport` is accepted, the report reaches DONE, and
+ * the document downloads as a header row and nothing else. An oversized window
+ * is therefore indistinguishable from a quiet month unless the size is capped
+ * here.
+ *
+ * This cost us the entire history once already — the default was 45 days, so
+ * every full window came back empty and only the short remainder window at the
+ * end of the range ever produced orders (sync_runs #2, 2026-08-31: 51 orders
+ * for what should have been six months). 30 leaves a day of headroom under the
+ * limit and divides a long range evenly enough.
+ */
+const MAX_REPORT_WINDOW_DAYS = 30;
 
 /**
  * One-time (and re-runnable) full history load via the channel's bulk report
@@ -674,7 +696,10 @@ export async function backfillAccount(
   opts: {
     start: Date;
     end?: Date;
-    /** Size of each report window. Smaller = more reports, steadier progress. */
+    /**
+     * Size of each report window, in days. Capped at MAX_REPORT_WINDOW_DAYS —
+     * see the note there; a larger value is silently useless, not an error.
+     */
     chunkDays?: number;
     onProgress?: (info: BackfillProgress) => void | Promise<void>;
   },
@@ -693,10 +718,11 @@ export async function backfillAccount(
   let ordersWritten = 0;
   let windows = 0;
   const failedWindows: string[] = [];
+  const emptyWindows: string[] = [];
 
   try {
     const end = opts.end ?? new Date();
-    const chunkMs = (opts.chunkDays ?? 90) * 86_400_000;
+    const chunkMs = Math.min(opts.chunkDays ?? MAX_REPORT_WINDOW_DAYS, MAX_REPORT_WINDOW_DAYS) * 86_400_000;
 
     for (let from = new Date(opts.start); from < end; from = new Date(from.getTime() + chunkMs)) {
       const to = new Date(Math.min(from.getTime() + chunkMs, end.getTime()));
@@ -706,21 +732,24 @@ export async function backfillAccount(
       // A window that fails — a report Amazon won't build, a range older than it
       // keeps, a transient 5xx — is logged and skipped. One bad slice must not
       // abandon a multi-year backfill that is otherwise working.
+      let windowOrders = 0;
       try {
         for await (const batch of adapter.fetchOrdersViaReports(from, to)) {
           const ingested = await ingestOrders(account, batch, { syncRunId: run.id });
           ordersSeen += ingested.seen;
           ordersWritten += ingested.written;
+          windowOrders += ingested.seen;
           await db
             .update(syncRuns)
             .set({ itemsSeen: ordersSeen, itemsWritten: ordersWritten })
             .where(eq(syncRuns.id, run.id));
         }
-        await opts.onProgress?.({ window: label, ordersSeen, ordersWritten });
+        if (windowOrders === 0) emptyWindows.push(label);
+        await opts.onProgress?.({ window: label, ordersSeen, ordersWritten, windowOrders });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         failedWindows.push(label);
-        await opts.onProgress?.({ window: label, ordersSeen, ordersWritten, error: message });
+        await opts.onProgress?.({ window: label, ordersSeen, ordersWritten, windowOrders, error: message });
       }
     }
 
@@ -744,7 +773,7 @@ export async function backfillAccount(
     if (allFailed) {
       throw new Error(note ?? "every backfill window failed");
     }
-    return { runId: run.id, ordersSeen, ordersWritten, failedWindows };
+    return { runId: run.id, ordersSeen, ordersWritten, failedWindows, emptyWindows };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db
