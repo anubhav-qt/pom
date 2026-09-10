@@ -5,7 +5,7 @@ import { useMemo, useState, useTransition } from "react";
 
 import { ChannelTag, Empty, StatusBadge } from "@/components/ui";
 import { FEATURES } from "@/config/features";
-import type { Channel, OrderStatus } from "@/db/schema";
+import type { Channel, FulfilmentState, OrderStatus } from "@/db/schema";
 import { cn, dayLabel, money, timeLeft } from "@/lib/utils";
 
 import { createManifest, markPacked, revertToNew } from "./actions";
@@ -23,6 +23,8 @@ export interface OrderRow {
   shipState: string | null;
   totalAmount: string | null;
   isCod: boolean;
+  /** Our own bench state — not the marketplace's. */
+  fulfilmentState: FulfilmentState;
   items: {
     sku: string;
     title: string | null;
@@ -189,9 +191,15 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
                 // waiting to go out — once it has shipped, been cancelled, or
                 // come back as a return, "3 days late" is just noise left over
                 // from before the order was actioned.
-                const stillAwaitingDispatch = ["new", "ready_to_pack", "packed"].includes(
-                  row.status,
-                );
+                //
+                // Both halves are needed: the channel decides whether the order
+                // is still live, and our own state decides whether it is still
+                // on the bench. Amazon calls an Easy Ship order `Unshipped`
+                // until the courier scans it, so without the second check a
+                // parcel we packed this morning would keep counting down.
+                const stillAwaitingDispatch =
+                  ["new", "ready_to_pack", "packed"].includes(row.status) &&
+                  row.fulfilmentState === "to_pack";
                 const deadline = stillAwaitingDispatch
                   ? timeLeft(row.dispatchBy ? new Date(row.dispatchBy) : null)
                   : null;

@@ -5,6 +5,13 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import {
+  paramsToQuery,
+  queryToParams,
+  useOrdersCache,
+  useOrdersNav,
+} from "@/lib/stores/orders-cache";
+import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
 import { cn } from "@/lib/utils";
 
 export interface HeaderCounts {
@@ -17,6 +24,16 @@ interface SyncResult {
   ok: boolean;
   runId?: number;
   error?: string;
+}
+
+/**
+ * `ok` only when a sync was actually started. `skipped` says why not: the last
+ * one is still recent, or one is already running.
+ */
+interface AutoSyncResult {
+  ok: boolean;
+  runId?: number;
+  skipped?: "fresh" | "running" | "error";
 }
 
 /**
@@ -36,6 +53,7 @@ export function AppHeader({
   counts,
   onSignOut,
   onSyncNow,
+  onAutoSync,
 }: {
   userName: string;
   /** ISO timestamp of the most recent sync run, or null if none yet. */
@@ -47,6 +65,8 @@ export function AppHeader({
   onSignOut: () => Promise<void>;
   /** Server action that kicks a manual sync and returns its run id. */
   onSyncNow: (accountId: number) => Promise<SyncResult>;
+  /** Server action that syncs on open, but only when one is due. */
+  onAutoSync: (accountId: number) => Promise<AutoSyncResult>;
 }) {
   const pathname = usePathname();
   const onOrders = pathname === "/orders" || pathname.startsWith("/orders/");
@@ -76,7 +96,11 @@ export function AppHeader({
         <SyncStatus lastSyncAt={lastSyncAt} />
 
         {primaryAccountId !== null ? (
-          <SyncNowButton accountId={primaryAccountId} onSyncNow={onSyncNow} />
+          <SyncNowButton
+            accountId={primaryAccountId}
+            onSyncNow={onSyncNow}
+            onAutoSync={onAutoSync}
+          />
         ) : null}
 
         <AvatarMenu userName={userName} onSignOut={onSignOut} />
@@ -186,9 +210,12 @@ const POLL_MS = 800;
 function SyncNowButton({
   accountId,
   onSyncNow,
+  onAutoSync,
 }: {
   accountId: number;
   onSyncNow: (accountId: number) => Promise<SyncResult>;
+  /** Fires once on open; the server decides whether it is actually due. */
+  onAutoSync: (accountId: number) => Promise<AutoSyncResult>;
 }) {
   const router = useRouter();
   const [state, setState] = useState<"idle" | "syncing" | "error">("idle");
@@ -201,6 +228,33 @@ function SyncNowButton({
     [],
   );
 
+  /**
+   * Opening the app is what triggers a sync now that there is no cron.
+   *
+   * Whether one is actually due is decided on the server, not here: a browser
+   * flag would let two tabs, two people or a reload each believe they were
+   * first. This just asks, and starts watching if the answer is yes.
+   *
+   * The guard is for React running effects twice in development, not for
+   * concurrency, which the server handles.
+   */
+  const asked = useRef(false);
+  useEffect(() => {
+    if (asked.current) return;
+    asked.current = true;
+
+    let cancelled = false;
+    void onAutoSync(accountId).then((res) => {
+      if (cancelled || !res.ok || !res.runId) return;
+      setState("syncing");
+      watch(res.runId);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
+
   async function start() {
     setState("syncing");
     const res = await onSyncNow(accountId);
@@ -211,14 +265,23 @@ function SyncNowButton({
       return;
     }
 
+    watch(res.runId);
+  }
+
+  function watch(runId: number) {
+    if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
-      const r = await fetch(`/api/sync-progress?runId=${res.runId}`);
+      const r = await fetch(`/api/sync-progress?runId=${runId}`);
       if (!r.ok) return;
       const data = (await r.json()) as { status: "running" | "ok" | "failed" };
       if (data.status !== "running") {
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = null;
         setState(data.status === "failed" ? "error" : "idle");
+        // A sync rewrites orders wholesale, so nothing cached survives it.
+        // This is the half of the caching contract that keeps the queue honest:
+        // without it, a tab held in memory would go on showing pre-sync data.
+        useOrdersCache.getState().bumpSync();
         router.refresh();
         if (data.status === "failed") setTimeout(() => setState("idle"), 2500);
       }
@@ -331,19 +394,28 @@ function AvatarMenu({
 
 type TabKey = "toShip" | "shipped" | "delivered" | "cancellations" | "all";
 
-const ORDER_TABS: { key: TabKey; label: string; query: string }[] = [
-  { key: "toShip", label: "To Ship", query: "" },
-  { key: "shipped", label: "Shipped", query: "?status=shipped" },
-  { key: "delivered", label: "Delivered", query: "?status=delivered" },
-  { key: "cancellations", label: "Cancelled & RTO", query: "?view=cancellations" },
-  { key: "all", label: "All orders", query: "?status=all" },
+const ORDER_TABS: { key: TabKey; label: string; params: OrdersViewParams }[] = [
+  { key: "toShip", label: "To Ship", params: {} },
+  { key: "shipped", label: "Shipped", params: { status: "shipped" } },
+  { key: "delivered", label: "Delivered", params: { status: "delivered" } },
+  { key: "cancellations", label: "Cancelled & RTO", params: { view: "cancellations" } },
+  { key: "all", label: "All orders", params: { status: "all" } },
 ];
 
 function OrdersTabs({ counts }: { counts: HeaderCounts }) {
   const params = useSearchParams();
+  const pathname = usePathname();
   const router = useRouter();
+  const go = useOrdersNav((s) => s.go);
   const status = params.get("status");
   const view = params.get("view");
+
+  // On /orders the tabs switch in place so the client cache can answer; from
+  // anywhere else there is no workspace mounted yet, so it has to navigate.
+  function select(next: OrdersViewParams) {
+    if (pathname === "/orders") go({ ...next, q: params.get("q") ?? undefined });
+    else router.push(`/orders${paramsToQuery(next)}`);
+  }
 
   let activeKey: TabKey = "toShip";
   if (view === "cancellations") activeKey = "cancellations";
@@ -361,10 +433,7 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
   function onSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const value = String(new FormData(e.currentTarget).get("q") ?? "").trim();
-    const next = new URLSearchParams(params.toString());
-    if (value) next.set("q", value);
-    else next.delete("q");
-    router.push(`/orders${next.toString() ? `?${next}` : ""}`);
+    go({ ...queryToParams(params.toString()), q: value || undefined });
   }
 
   return (
@@ -376,9 +445,10 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
         const active = tab.key === activeKey;
         const badge = badgeFor[tab.key];
         return (
-          <Link
+          <button
             key={tab.key}
-            href={`/orders${tab.query}`}
+            type="button"
+            onClick={() => select(tab.params)}
             className={cn(
               "inline-flex items-center gap-2 whitespace-nowrap border-b-2 py-3 text-[13.5px] font-medium transition-colors",
               !active && "muted hover:text-[var(--text)]",
@@ -401,7 +471,7 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
                 {badge}
               </span>
             ) : null}
-          </Link>
+          </button>
         );
       })}
 

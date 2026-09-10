@@ -68,10 +68,12 @@ export async function getPeriodStats(from: Date): Promise<PeriodStats> {
   // exactly as late today regardless of which range is being viewed.
   const [lateRow] = (
     await db.execute(sql`
-      SELECT COUNT(*) AS n FROM orders
-      WHERE channel IN (${channelsSql})
-        AND status IN ('new','ready_to_pack','packed')
-        AND dispatch_by < now()
+      SELECT COUNT(*) AS n FROM orders o
+      LEFT JOIN order_fulfilment f ON f.order_id = o.id
+      WHERE o.channel IN (${channelsSql})
+        AND o.status IN ('new','ready_to_pack','packed')
+        AND COALESCE(f.state, 'to_pack') = 'to_pack'
+        AND o.dispatch_by < now()
     `)
   ).rows;
 
@@ -101,11 +103,13 @@ export async function getStatusBuckets(from: Date): Promise<StatusBucket[]> {
     await db.execute(sql`
       SELECT
         COUNT(*) FILTER (WHERE status IN ('shipped','delivered')) AS fulfilled,
-        COUNT(*) FILTER (WHERE status IN ('new','ready_to_pack','packed','manifested')) AS in_progress,
+        COUNT(*) FILTER (WHERE status IN ('new','ready_to_pack','packed','manifested')
+                          AND COALESCE(f.state, 'to_pack') <> 'manifested') AS in_progress,
         COUNT(*) FILTER (WHERE status IN ('rto','returned')) AS returned,
         COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled
-      FROM orders
-      WHERE channel IN (${channelsSql}) AND ordered_at >= ${from.toISOString()}
+      FROM orders o
+      LEFT JOIN order_fulfilment f ON f.order_id = o.id
+      WHERE o.channel IN (${channelsSql}) AND o.ordered_at >= ${from.toISOString()}
     `)
   ).rows;
 

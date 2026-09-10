@@ -76,9 +76,24 @@ export class AmazonAdapter implements ChannelAdapter {
    * Self-imposed pacing for the orderItems endpoint, ahead of hitting 429 at
    * all. Retries recover from a burst; this avoids triggering one in the
    * common case of syncing more than a handful of orders in one run.
+   *
+   * Amazon documents this endpoint at 0.5 req/sec sustained with a burst bucket
+   * of 30, and a bucket is what we model. The previous scheme — a flat 1.1s
+   * sleep between calls — got both halves wrong: 1.1s is more than twice the
+   * sustained rate, so a long run drained the burst and took 429s anyway, while
+   * a short run slept 1.1s before each of the first 30 calls that the bucket
+   * would have let through immediately. A 30-order catch-up paid ~33s of sleep
+   * for nothing.
    */
-  private lastItemsCallAt = 0;
-  private static readonly ITEMS_MIN_INTERVAL_MS = 1100;
+  private readonly itemsBudget = new TokenBucket(30, 0.5);
+
+  /**
+   * In-flight orderItems calls. The bucket decides *when* a call may start;
+   * this decides how many may be waiting on the network at once, which is what
+   * actually hides per-call latency. Kept low so a burst cannot turn into a
+   * 429 storm — the retry path in `request` is the backstop, not the plan.
+   */
+  private static readonly ITEMS_CONCURRENCY = 4;
 
   constructor(private account: ChannelAccount) {
     this.creds = account.credentials as unknown as AmazonCredentials;
@@ -183,7 +198,13 @@ export class AmazonAdapter implements ChannelAdapter {
 
   /* -------------------------------------------------------------- orders -- */
 
-  async fetchOrders({ since, limit = 100, onProgress, unchangedSince }: FetchOrdersOptions): Promise<FetchOrdersResult> {
+  async fetchOrders({
+    since,
+    limit = 100,
+    onProgress,
+    unchangedSince,
+    statusOnly = false,
+  }: FetchOrdersOptions): Promise<FetchOrdersResult> {
     const collected: AmazonOrder[] = [];
     let nextToken: string | undefined;
     let hasMore = false;
@@ -213,23 +234,44 @@ export class AmazonAdapter implements ChannelAdapter {
       }
     } while (nextToken);
 
+    // Oldest update first. getOrders does not promise an order for its results,
+    // and the cursor we hand back is "the newest LastUpdateDate we ingested" —
+    // so if the page is cut short at `limit`, every order left behind has to be
+    // *newer* than that cursor or the next run will step straight over it.
+    // Sorting first is what makes that true. With the old fixed 72h window a
+    // skipped order was re-read on the next run anyway; now that the cursor is
+    // trusted for catch-up, it would be lost for good.
+    collected.sort(
+      (a, b) => new Date(a.LastUpdateDate).getTime() - new Date(b.LastUpdateDate).getTime(),
+    );
+
     // Drop orders Amazon hasn't finalised yet. A just-placed order sits at
     // "Pending" until payment clears — no buyer address, no line items, and
     // Seller Central doesn't list it as actionable either. Ingesting it would
     // put a row in the pack queue that the seller can't act on and that isn't
     // yet a confirmed sale. It gets picked up on the next sync once it turns
-    // "Unshipped" (the 72h rolling window re-scans it), or never, if Amazon
-    // auto-cancels it.
+    // "Unshipped" (the 72h floor re-scans it), or never, if Amazon auto-cancels
+    // it.
     const toProcess = collected
       .slice(0, limit)
       .filter((o) => !AMAZON_PENDING_STATUSES.has(o.OrderStatus));
-    const orders: CanonicalOrder[] = [];
-    for (const [i, o] of toProcess.entries()) {
-      orders.push(await this.toCanonical(o, unchangedSince));
-      // One tick per order, right after the slow paced call that order just
-      // went through — this is the only part of a sync worth reporting on.
-      await onProgress?.({ seen: i + 1, total: toProcess.length });
-    }
+    // Indexed rather than pushed, so the result keeps the oldest-update-first
+    // order the cursor depends on even though workers finish out of order.
+    const orders: CanonicalOrder[] = new Array(toProcess.length);
+    let cursor = 0;
+    let done = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(AmazonAdapter.ITEMS_CONCURRENCY, toProcess.length) }, async () => {
+        for (;;) {
+          const i = cursor++;
+          if (i >= toProcess.length) return;
+          orders[i] = await this.toCanonical(toProcess[i], unchangedSince, statusOnly);
+          // One tick per order, right after the paced call that order just went
+          // through — this is the only part of a sync worth reporting on.
+          await onProgress?.({ seen: ++done, total: toProcess.length });
+        }
+      }),
+    );
 
     return {
       orders,
@@ -245,6 +287,7 @@ export class AmazonAdapter implements ChannelAdapter {
   private async toCanonical(
     o: AmazonOrder,
     unchangedSince?: Map<string, number>,
+    statusOnly = false,
   ): Promise<CanonicalOrder> {
     const channelUpdatedAt = o.LastUpdateDate ? new Date(o.LastUpdateDate) : null;
 
@@ -271,10 +314,16 @@ export class AmazonAdapter implements ChannelAdapter {
     // last sync, so skip the slow, rate-limited orderItems call entirely. This
     // is the single biggest saving on a routine sync, where almost every order
     // in the window is one we already have.
+    //
+    // `statusOnly` widens that to any order we already hold, changed or not —
+    // a reconcile sweep is correcting order-level state and already has the
+    // line items. An order we have never seen is not in the map either way, so
+    // it still gets its items fetched.
     if (
       !this.isSandbox &&
-      channelUpdatedAt &&
-      unchangedSince?.get(o.AmazonOrderId) === channelUpdatedAt.getTime()
+      (statusOnly
+        ? unchangedSince?.has(o.AmazonOrderId)
+        : channelUpdatedAt && unchangedSince?.get(o.AmazonOrderId) === channelUpdatedAt.getTime())
     ) {
       return { ...common, itemsKnownCurrent: true, items: [] };
     }
@@ -283,9 +332,7 @@ export class AmazonAdapter implements ChannelAdapter {
     // order list returns, so the real id cannot be used here.
     const itemsOrderId = this.isSandbox ? SANDBOX.orderId : o.AmazonOrderId;
 
-    const wait = AmazonAdapter.ITEMS_MIN_INTERVAL_MS - (Date.now() - this.lastItemsCallAt);
-    if (wait > 0) await sleep(wait);
-    this.lastItemsCallAt = Date.now();
+    await this.itemsBudget.take();
 
     const items = await this.request<{ payload: { OrderItems: AmazonOrderItem[] } }>(
       `/orders/v0/orders/${encodeURIComponent(itemsOrderId)}/orderItems`,
@@ -410,13 +457,21 @@ export class AmazonAdapter implements ChannelAdapter {
   private static readonly ALL_ORDERS_REPORT =
     "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL";
 
-  private async createReport(reportType: string, start: Date, end: Date): Promise<string> {
+  /**
+   * `range` is omitted for snapshot reports (the listings catalogue is "what is
+   * live right now", not a date slice) and required for the order reports.
+   */
+  private async createReport(
+    reportType: string,
+    range?: { start: Date; end: Date },
+  ): Promise<string> {
     const res = await this.request<{ reportId?: string }>("/reports/2021-06-30/reports", {
       method: "POST",
       body: JSON.stringify({
         reportType,
-        dataStartTime: start.toISOString(),
-        dataEndTime: end.toISOString(),
+        ...(range
+          ? { dataStartTime: range.start.toISOString(), dataEndTime: range.end.toISOString() }
+          : {}),
         marketplaceIds: [this.marketplaceId],
       }),
     });
@@ -488,7 +543,7 @@ export class AmazonAdapter implements ChannelAdapter {
     if (this.isSandbox) {
       throw new ChannelError("amazon", "reports backfill is not available against the sandbox");
     }
-    const reportId = await this.createReport(AmazonAdapter.ALL_ORDERS_REPORT, start, end);
+    const reportId = await this.createReport(AmazonAdapter.ALL_ORDERS_REPORT, { start, end });
     const documentId = await this.pollReport(reportId);
     const tsv = await this.downloadReport(documentId);
 
@@ -496,6 +551,25 @@ export class AmazonAdapter implements ChannelAdapter {
     for (let i = 0; i < parsed.length; i += 500) {
       yield parsed.slice(i, i + 500);
     }
+  }
+
+  private static readonly LISTINGS_REPORT = "GET_MERCHANT_LISTINGS_ALL_DATA";
+
+  /**
+   * The seller's live listings catalogue — one row per seller SKU, with the
+   * ASIN, title and the quantity Amazon currently believes we hold.
+   *
+   * This is the authoritative answer to "what SKUs exist", which orders alone
+   * cannot give: orders only ever mention SKUs that have sold, and a SKU that
+   * has sold may since have been delisted. Callers should union the two.
+   */
+  async fetchListings(): Promise<AmazonListing[]> {
+    if (this.isSandbox) {
+      throw new ChannelError("amazon", "the listings report is not available against the sandbox");
+    }
+    const reportId = await this.createReport(AmazonAdapter.LISTINGS_REPORT);
+    const documentId = await this.pollReport(reportId);
+    return parseListingsReport(await this.downloadReport(documentId));
   }
 
   /* ------------------------------------------------------ catalog images -- */
@@ -711,6 +785,57 @@ function parseAllOrdersReport(tsv: string): CanonicalOrder[] {
 }
 
 /**
+ * Parse `GET_MERCHANT_LISTINGS_ALL_DATA` — tab-separated, one row per seller
+ * SKU. Looked up by header name like the orders report: the columns are stable
+ * but their order is not.
+ */
+function parseListingsReport(tsv: string): AmazonListing[] {
+  const lines = tsv.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length < 2) return [];
+
+  const headers = lines[0].split("\t").map((h) => h.trim().toLowerCase());
+  const at = (...names: string[]) => {
+    for (const n of names) {
+      const i = headers.indexOf(n);
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const col = {
+    sku: at("seller-sku", "sku"),
+    asin: at("asin1", "asin"),
+    name: at("item-name", "product-name"),
+    quantity: at("quantity"),
+    price: at("price"),
+    status: at("status"),
+  };
+  if (col.sku < 0) {
+    throw new ChannelError(
+      "amazon",
+      `unexpected listings report format — no "seller-sku" column (saw: ${headers.slice(0, 8).join(", ")}…)`,
+    );
+  }
+
+  const cell = (row: string[], i: number) => (i >= 0 ? (row[i] ?? "").trim() : "");
+  const out: AmazonListing[] = [];
+  for (const line of lines.slice(1)) {
+    const f = line.split("\t");
+    const sku = cell(f, col.sku);
+    if (!sku) continue;
+    const qty = Number(cell(f, col.quantity));
+    out.push({
+      externalSku: sku,
+      asin: cell(f, col.asin) || null,
+      title: cell(f, col.name) || null,
+      quantity: Number.isFinite(qty) ? qty : null,
+      price: cell(f, col.price) || null,
+      status: cell(f, col.status) || null,
+    });
+  }
+  return out;
+}
+
+/**
  * Advance the cursor only as far as we genuinely ingested. When a page was cut
  * short we rewind one second behind the newest record, so a re-read overlaps
  * rather than leaving a hole — upserts make the overlap harmless.
@@ -731,7 +856,55 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Classic token bucket: `capacity` calls may go straight through, after which
+ * callers are released at `refillPerSec`. This is the shape SP-API's own rate
+ * limits are documented in, so pacing against it means a short sync pays
+ * nothing and a long one degrades to exactly the sustained rate rather than to
+ * a guess.
+ */
+class TokenBucket {
+  private tokens: number;
+  private lastRefill = Date.now();
+
+  constructor(
+    private readonly capacity: number,
+    private readonly refillPerSec: number,
+  ) {
+    this.tokens = capacity;
+  }
+
+  async take(): Promise<void> {
+    for (;;) {
+      const now = Date.now();
+      this.tokens = Math.min(
+        this.capacity,
+        this.tokens + ((now - this.lastRefill) / 1000) * this.refillPerSec,
+      );
+      this.lastRefill = now;
+      if (this.tokens >= 1) {
+        this.tokens -= 1;
+        return;
+      }
+      // Sleep for exactly as long as the next whole token needs. Re-checked on
+      // the next pass because concurrent takers may have consumed it first.
+      await sleep(Math.ceil(((1 - this.tokens) / this.refillPerSec) * 1000));
+    }
+  }
+}
+
 /* ----------------------------------------------------------- API shapes -- */
+
+export interface AmazonListing {
+  externalSku: string;
+  asin: string | null;
+  title: string | null;
+  /** Amazon's own on-hand figure for this SKU, where the report carries one. */
+  quantity: number | null;
+  price: string | null;
+  /** "Active" / "Inactive" — an inactive listing is still real history. */
+  status: string | null;
+}
 
 interface AmazonOrdersPayload {
   Orders?: AmazonOrder[];

@@ -24,7 +24,13 @@ import {
 
 /** Statuses that mean the parcel had physically left us — a transition out of
  *  one of these into cancelled/RTO leaves something to receive back, so it
- *  needs a human check-in. Anything else auto-resolves. */
+ *  needs a human check-in. Anything else auto-resolves.
+ *
+ *  `packed` and `manifested` are still listed for channels that report them
+ *  (Flipkart). Our own bench state is no longer here — it lives in
+ *  `order_fulfilment` — and is checked separately in `dispatchedOrderIds`,
+ *  because an order we manifested but Amazon still calls `new` has just as
+ *  much physically left the building. */
 const SHIPPED_ISH: OrderStatus[] = ["packed", "manifested", "shipped", "delivered"];
 
 /**
@@ -76,6 +82,13 @@ export async function ingestOrders(
 ): Promise<IngestResult> {
   if (incoming.length === 0) return { seen: 0, written: 0, unmappedSkus: [] };
 
+  // One row per order id. Postgres refuses an ON CONFLICT DO UPDATE that would
+  // touch the same row twice in one statement, so a duplicate that the
+  // per-order loop used to absorb silently would now fail the whole batch.
+  // Last occurrence wins — for a paged fetch that is the more recent read.
+  const seenCount = incoming.length;
+  incoming = [...new Map(incoming.map((o) => [o.externalOrderId, o])).values()];
+
   // Resolve every channel SKU to one of our products in a single query. Orders
   // the adapter flagged `itemsKnownCurrent` bring no items and leave the
   // existing rows untouched, so they contribute nothing to resolve here.
@@ -114,28 +127,46 @@ export async function ingestOrders(
   const isTerminal = (s: OrderStatus) => s === "cancelled" || s === "rto" || s === "returned";
   const statusEvents: (typeof orderStatusEvents.$inferInsert)[] = [];
 
-  let written = 0;
+  // Everything below writes in batches rather than per order. A sync where
+  // nothing has changed still has to upsert every order in the window, so the
+  // per-order round trip was the whole cost of a routine run — 82 orders meant
+  // 82 sequential round trips to a serverless Postgres and about ten seconds
+  // of almost pure latency. Chunked multi-row statements turn that into a
+  // handful of round trips.
+  //
+  // CHUNK keeps each statement under Postgres's 65535 bind-parameter ceiling.
+  // The widest row here is `orders` at ~16 columns, so 500 leaves ample room.
+  const CHUNK = 500;
+  const chunks = <T,>(xs: T[]) =>
+    Array.from({ length: Math.ceil(xs.length / CHUNK) }, (_, i) =>
+      xs.slice(i * CHUNK, (i + 1) * CHUNK),
+    );
 
-  for (const o of incoming) {
-    const [row] = await db
+  const orderRows = incoming.map((o) => ({
+    channelAccountId: account.id,
+    channel: account.channel,
+    externalOrderId: o.externalOrderId,
+    status: o.status,
+    orderedAt: o.orderedAt,
+    buyerName: o.buyerName ?? null,
+    shipCity: o.shipCity ?? null,
+    shipState: o.shipState ?? null,
+    shipPincode: o.shipPincode ?? null,
+    totalAmount: o.totalAmount ?? null,
+    isCod: o.isCod ?? false,
+    dispatchBy: o.dispatchBy ?? null,
+    channelUpdatedAt: o.channelUpdatedAt ?? null,
+    easyshipStatus: o.easyshipStatus ?? null,
+    raw: o.raw,
+  }));
+
+  // `raw` has to come from `excluded` now rather than a per-order literal —
+  // one statement covers many orders, so there is no single value to inline.
+  const upserted: { id: number; externalOrderId: string; status: OrderStatus }[] = [];
+  for (const batch of chunks(orderRows)) {
+    const rows = await db
       .insert(orders)
-      .values({
-        channelAccountId: account.id,
-        channel: account.channel,
-        externalOrderId: o.externalOrderId,
-        status: o.status,
-        orderedAt: o.orderedAt,
-        buyerName: o.buyerName ?? null,
-        shipCity: o.shipCity ?? null,
-        shipState: o.shipState ?? null,
-        shipPincode: o.shipPincode ?? null,
-        totalAmount: o.totalAmount ?? null,
-        isCod: o.isCod ?? false,
-        dispatchBy: o.dispatchBy ?? null,
-        channelUpdatedAt: o.channelUpdatedAt ?? null,
-        easyshipStatus: o.easyshipStatus ?? null,
-        raw: o.raw,
-      })
+      .values(batch)
       .onConflictDoUpdate({
         target: [orders.channelAccountId, orders.externalOrderId],
         set: {
@@ -154,101 +185,124 @@ export async function ingestOrders(
           totalAmount: sql`COALESCE(excluded.total_amount, ${orders.totalAmount})`,
           channelUpdatedAt: sql`COALESCE(excluded.channel_updated_at, ${orders.channelUpdatedAt})`,
           easyshipStatus: sql`COALESCE(excluded.easyship_status, ${orders.easyshipStatus})`,
-          raw: o.raw,
-          updatedAt: new Date(),
+          raw: sql`excluded.raw`,
+          updatedAt: sql`now()`,
         },
       })
-      .returning({ id: orders.id, status: orders.status });
+      .returning({
+        id: orders.id,
+        externalOrderId: orders.externalOrderId,
+        status: orders.status,
+      });
+    upserted.push(...rows);
+  }
 
-    if (!row) continue;
-    written++;
+  const written = upserted.length;
+  const idFor = new Map(upserted.map((r) => [r.externalOrderId, r.id]));
 
+  for (const row of upserted) {
     // Record the transition, if there was one. `priorStatus` is null for an
     // order we had never seen — for those we only log an arrival that is
     // already terminal (an order that showed up cancelled), not a routine new
     // order. The unique index on (order_id, to_status) makes this idempotent,
     // so two overlapping syncs racing on the same change is harmless.
-    const before = priorStatus.get(o.externalOrderId) ?? null;
-    if ((before !== null && before !== row.status) || (before === null && isTerminal(row.status))) {
-      // `rto` is only ever set from Amazon's `ReturnedToSeller` — the parcel is
-      // physically back and needs a "received & shelved" check-in, even the
-      // first time we see the order. A `cancelled`/`returned` order needs a
-      // check-in only if it had actually shipped; one cancelled before dispatch
-      // (or first seen already cancelled) has nothing to receive, so it is
-      // resolved on the spot with no `checkedInBy`.
-      const needsCheckin =
-        row.status === "rto" ||
-        (isTerminal(row.status) && before !== null && SHIPPED_ISH.includes(before));
-      statusEvents.push({
-        orderId: row.id,
-        channelAccountId: account.id,
-        channel: account.channel,
-        externalOrderId: o.externalOrderId,
-        fromStatus: before,
-        toStatus: row.status,
-        syncRunId: opts.syncRunId ?? null,
-        ...(isTerminal(row.status) && !needsCheckin
-          ? {
-              checkedInAt: new Date(),
-              itemBack: false,
-              checkinNote: "auto — order had not shipped, nothing to receive",
-            }
-          : {}),
-      });
+    const before = priorStatus.get(row.externalOrderId) ?? null;
+    if (!((before !== null && before !== row.status) || (before === null && isTerminal(row.status)))) {
+      continue;
     }
+    // `rto` is only ever set from Amazon's `ReturnedToSeller` — the parcel is
+    // physically back and needs a "received & shelved" check-in, even the
+    // first time we see the order. A `cancelled`/`returned` order needs a
+    // check-in only if it had actually shipped; one cancelled before dispatch
+    // (or first seen already cancelled) has nothing to receive, so it is
+    // resolved on the spot with no `checkedInBy`.
+    const needsCheckin =
+      row.status === "rto" ||
+      (isTerminal(row.status) && before !== null && SHIPPED_ISH.includes(before));
+    statusEvents.push({
+      orderId: row.id,
+      channelAccountId: account.id,
+      channel: account.channel,
+      externalOrderId: row.externalOrderId,
+      fromStatus: before,
+      toStatus: row.status,
+      syncRunId: opts.syncRunId ?? null,
+      ...(isTerminal(row.status) && !needsCheckin
+        ? {
+            checkedInAt: new Date(),
+            itemBack: false,
+            checkinNote: "auto — order had not shipped, nothing to receive",
+          }
+        : {}),
+    });
+  }
 
-    // An order the adapter flagged as unchanged brings no items and must not
-    // have its existing rows touched. Otherwise items are replaced wholesale —
-    // an order has a handful of lines and the channel is authoritative about
-    // them, so diffing would be more code for no benefit.
-    if (!o.itemsKnownCurrent) {
-      await db.delete(orderItems).where(eq(orderItems.orderId, row.id));
-    }
-    if (!o.itemsKnownCurrent && o.items.length > 0) {
-      await db.insert(orderItems).values(
-        o.items.map((it) => ({
-          orderId: row.id,
-          productId: skuToProduct.get(it.externalSku) ?? null,
-          externalItemId: it.externalItemId ?? null,
-          externalSku: it.externalSku,
-          externalAsin: it.externalAsin ?? null,
-          title: it.title ?? null,
-          quantity: it.quantity,
-          unitPrice: it.unitPrice ?? null,
-          cancelled: it.cancelled ?? false,
-        })),
-      );
-    }
+  // An order the adapter flagged as unchanged brings no items and must not have
+  // its existing rows touched. Otherwise items are replaced wholesale — an
+  // order has a handful of lines and the channel is authoritative about them,
+  // so diffing would be more code for no benefit.
+  const refreshed = incoming.filter((o) => !o.itemsKnownCurrent);
+  const refreshedIds = refreshed
+    .map((o) => idFor.get(o.externalOrderId))
+    .filter((id): id is number => id !== undefined);
 
-    if (o.shipment) {
-      const existing = await db
-        .select({ id: shipments.id })
-        .from(shipments)
-        .where(eq(shipments.orderId, row.id))
-        .limit(1);
+  for (const batch of chunks(refreshedIds)) {
+    await db.delete(orderItems).where(inArray(orderItems.orderId, batch));
+  }
 
-      const values = {
-        orderId: row.id,
-        externalShipmentId: o.shipment.externalShipmentId ?? null,
-        courier: o.shipment.courier ?? null,
-        awb: o.shipment.awb ?? null,
-        ...(o.shipment.labelPdf
-          ? { labelPdf: o.shipment.labelPdf, labelFetchedAt: new Date() }
-          : {}),
-      };
+  const itemRows = refreshed.flatMap((o) => {
+    const orderId = idFor.get(o.externalOrderId);
+    if (orderId === undefined) return [];
+    return o.items.map((it) => ({
+      orderId,
+      productId: skuToProduct.get(it.externalSku) ?? null,
+      externalItemId: it.externalItemId ?? null,
+      externalSku: it.externalSku,
+      externalAsin: it.externalAsin ?? null,
+      title: it.title ?? null,
+      quantity: it.quantity,
+      unitPrice: it.unitPrice ?? null,
+      cancelled: it.cancelled ?? false,
+    }));
+  });
+  for (const batch of chunks(itemRows)) {
+    await db.insert(orderItems).values(batch);
+  }
 
-      if (existing[0]) {
-        await db.update(shipments).set(values).where(eq(shipments.id, existing[0].id));
-      } else {
-        await db.insert(shipments).values(values);
-      }
+  // Shipments stay per-order: only Meesho supplies them, a handful at a time
+  // from a label upload, so there is nothing here worth batching.
+  for (const o of incoming) {
+    if (!o.shipment) continue;
+    const orderId = idFor.get(o.externalOrderId);
+    if (orderId === undefined) continue;
+
+    const existing = await db
+      .select({ id: shipments.id })
+      .from(shipments)
+      .where(eq(shipments.orderId, orderId))
+      .limit(1);
+
+    const values = {
+      orderId,
+      externalShipmentId: o.shipment.externalShipmentId ?? null,
+      courier: o.shipment.courier ?? null,
+      awb: o.shipment.awb ?? null,
+      ...(o.shipment.labelPdf
+        ? { labelPdf: o.shipment.labelPdf, labelFetchedAt: new Date() }
+        : {}),
+    };
+
+    if (existing[0]) {
+      await db.update(shipments).set(values).where(eq(shipments.id, existing[0].id));
+    } else {
+      await db.insert(shipments).values(values);
     }
   }
 
-  if (statusEvents.length > 0) {
+  for (const batch of chunks(statusEvents)) {
     await db
       .insert(orderStatusEvents)
-      .values(statusEvents)
+      .values(batch)
       .onConflictDoNothing({ target: [orderStatusEvents.orderId, orderStatusEvents.toStatus] });
   }
 
@@ -263,7 +317,7 @@ export async function ingestOrders(
     .filter((a): a is string => !!a);
   await enrichCatalogImages(account, freshAsins).catch(() => {});
 
-  return { seen: incoming.length, written, unmappedSkus };
+  return { seen: seenCount, written, unmappedSkus };
 }
 
 /**
@@ -402,15 +456,21 @@ export async function ingestReturns(account: ChannelAccount, incoming: Canonical
  * volume the full recompute is a single cheap query.
  */
 export async function recomputeReserved() {
+  // "Committed but not yet gone": the channel still expects the order, and we
+  // have not manifested it. Both halves matter — the channel status no longer
+  // records our floor state, so a manifested parcel still reads as `new` here
+  // and would stay reserved forever without the second condition.
   await db.execute(sql`
     UPDATE inventory AS inv
     SET reserved = COALESCE((
           SELECT SUM(oi.quantity)
           FROM order_items oi
           JOIN orders o ON o.id = oi.order_id
+          LEFT JOIN order_fulfilment f ON f.order_id = o.id
           WHERE oi.product_id = inv.product_id
             AND oi.cancelled = false
             AND o.status IN ('new', 'ready_to_pack', 'packed')
+            AND COALESCE(f.state, 'to_pack') <> 'manifested'
         ), 0),
         updated_at = now()
   `);
@@ -424,13 +484,43 @@ export async function recomputeReserved() {
 const INITIAL_LOOKBACK_DAYS = 14;
 
 /**
- * The fast lane re-scans this rolling window every run instead of trusting a
- * saved cursor. It stays cheap because unchanged orders skip the slow
- * line-item call and every write is an idempotent upsert — and it means a
- * missed cron run or a little clock skew can never leave a hole in recent
- * orders. Anything older than this window is the backfill's job.
+ * The *minimum* look-back for the fast lane. Every run re-scans at least this
+ * far regardless of the cursor, so clock skew or an order Amazon back-dates
+ * can't slip through a gap. It stays cheap because unchanged orders skip the
+ * slow line-item call and every write is an idempotent upsert.
  */
 const RECENT_WINDOW_MS = 72 * 60 * 60 * 1000;
+
+/**
+ * Ceiling on the look-back when the cursor is old. The fast lane pays roughly a
+ * second per changed order, so an account left unsynced for months must not try
+ * to walk the whole gap in one invocation — it would time out and never record
+ * progress. Anything older than this is the backfill's job (`backfillAccount`),
+ * and the run reports the shortfall rather than silently pretending it caught up.
+ */
+const MAX_CATCHUP_MS = 30 * 86_400_000;
+
+/**
+ * Where this run should start reading from.
+ *
+ * The saved cursor is the point of this: a 72h fixed window is only safe if a
+ * sync actually runs every 72h, and this app has no cron — it had a four-day
+ * gap in September 2026, during which an order changed on Amazon, fell out of
+ * the window before the next run, and stayed wrong in our DB permanently. The
+ * cursor closes that hole; RECENT_WINDOW_MS still forces a minimum overlap.
+ */
+function ordersSince(account: ChannelAccount): { since: Date; truncated: boolean } {
+  const now = Date.now();
+  const floor = now - RECENT_WINDOW_MS;
+  const cursor = account.ordersSyncedThrough?.getTime();
+
+  // A minute of overlap absorbs the boundary: `cursorFrom` records the newest
+  // LastUpdateDate we ingested, and an order updated in that same second would
+  // otherwise sit exactly on the exclusive edge of LastUpdatedAfter.
+  const wanted = cursor === undefined ? floor : Math.min(cursor - 60_000, floor);
+  const capped = Math.max(wanted, now - MAX_CATCHUP_MS);
+  return { since: new Date(capped), truncated: capped > wanted };
+}
 
 /**
  * Run one incremental sync for one account. Sized to finish comfortably inside
@@ -463,9 +553,10 @@ export async function syncAccount(
       )[0];
 
   try {
+    const ordersWindow = ordersSince(account);
     const since =
       kind === "orders"
-        ? new Date(Date.now() - RECENT_WINDOW_MS)
+        ? ordersWindow.since
         : (account.returnsSyncedThrough ??
           new Date(Date.now() - INITIAL_LOOKBACK_DAYS * 86_400_000));
 
@@ -543,7 +634,16 @@ export async function syncAccount(
       })
       .where(eq(syncRuns.id, run.id));
 
-    return { skipped: false as const, seen, written, hasMore, syncedThrough, runId: run.id };
+    return {
+      skipped: false as const,
+      seen,
+      written,
+      hasMore,
+      syncedThrough,
+      runId: run.id,
+      /** The cursor was older than MAX_CATCHUP_MS; a backfill is needed to close the rest. */
+      truncated: kind === "orders" && ordersWindow.truncated,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db
@@ -645,6 +745,110 @@ export async function syncAllAccounts() {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Reconcile                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Re-read order-level state for everything we hold and correct whatever has
+ * drifted. This is the repair lane, and it exists because the other two lanes
+ * each have a blind spot:
+ *
+ * - The fast lane only ever sees a window. Anything that changed on Amazon
+ *   while nothing was running, and is now behind the cursor, stays wrong
+ *   forever — order 405-2227158-3721960 sat in the pack queue for five days
+ *   after it had actually been picked up.
+ * - The backfill's All Orders report has no Easy Ship status column at all, so
+ *   `delivered` is unreachable through it. Every historical order it wrote is
+ *   capped at `shipped`, which made the dashboard's delivered figures fiction
+ *   for anything before the live sync started.
+ *
+ * Both are fixed by the same sweep, because both facts live on the order
+ * listing rather than on its line items. It runs `statusOnly`, so orders we
+ * already hold cost nothing but the listing page they arrive on.
+ *
+ * Deliberately does not advance `ordersSyncedThrough`: this reads history, and
+ * the incremental cursor should keep meaning "the newest update the fast lane
+ * has ingested". Recorded as a `backfill` run — it is a full-history pass, and
+ * a separate enum value would need a migration to say the same thing.
+ */
+export async function reconcileAccount(
+  account: ChannelAccount,
+  opts: {
+    since: Date;
+    /** Safety cap; the sweep is one invocation, not a resumable slice. */
+    limit?: number;
+    onProgress?: (info: { seen: number; total: number }) => void | Promise<void>;
+  },
+) {
+  const adapter = adapterFor(account);
+  if (!adapter.supportsLiveSync) {
+    return { skipped: true as const, reason: `${account.channel} has no live API` };
+  }
+
+  // Every order we hold for this account, not just a window — `statusOnly`
+  // reads this as "we already have the items for these".
+  const knownRows = await db
+    .select({
+      externalOrderId: orders.externalOrderId,
+      channelUpdatedAt: orders.channelUpdatedAt,
+    })
+    .from(orders)
+    .where(eq(orders.channelAccountId, account.id));
+  const known = new Map(
+    knownRows.map((r) => [r.externalOrderId, r.channelUpdatedAt?.getTime() ?? 0] as const),
+  );
+
+  const [run] = await db
+    .insert(syncRuns)
+    .values({ channelAccountId: account.id, kind: "backfill" })
+    .returning({ id: syncRuns.id });
+
+  try {
+    const res = await adapter.fetchOrders({
+      since: opts.since,
+      limit: opts.limit ?? 5000,
+      statusOnly: true,
+      unchangedSince: known,
+      onProgress: async (info) => {
+        await db
+          .update(syncRuns)
+          .set({ itemsSeen: info.seen, totalEstimate: info.total })
+          .where(eq(syncRuns.id, run.id));
+        await opts.onProgress?.(info);
+      },
+    });
+
+    const ingested = await ingestOrders(account, res.orders, { syncRunId: run.id });
+
+    await db
+      .update(syncRuns)
+      .set({
+        status: "ok",
+        finishedAt: new Date(),
+        itemsSeen: ingested.seen,
+        itemsWritten: ingested.written,
+      })
+      .where(eq(syncRuns.id, run.id));
+
+    return {
+      skipped: false as const,
+      seen: ingested.seen,
+      written: ingested.written,
+      /** True if the cap was hit — narrow the range and sweep again. */
+      hasMore: res.hasMore,
+      runId: run.id,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db
+      .update(syncRuns)
+      .set({ status: "failed", finishedAt: new Date(), error: message.slice(0, 2000) })
+      .where(eq(syncRuns.id, run.id));
+    throw err;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Backfill                                                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -654,9 +858,31 @@ export interface BackfillProgress {
   /** Running totals across the whole backfill so far. */
   ordersSeen: number;
   ordersWritten: number;
+  /**
+   * Orders this window alone produced. Reported separately from the running
+   * totals because a window that returns nothing is the signature of a report
+   * Amazon declined to fill (see MAX_REPORT_WINDOW_DAYS) — invisible if the
+   * caller only ever sees a total that keeps climbing.
+   */
+  windowOrders: number;
   /** Set if this window failed (and was skipped) rather than ingested. */
   error?: string;
 }
+
+/**
+ * Amazon will not build an All Orders report spanning more than ~31 days, and
+ * it does not say so: `createReport` is accepted, the report reaches DONE, and
+ * the document downloads as a header row and nothing else. An oversized window
+ * is therefore indistinguishable from a quiet month unless the size is capped
+ * here.
+ *
+ * This cost us the entire history once already — the default was 45 days, so
+ * every full window came back empty and only the short remainder window at the
+ * end of the range ever produced orders (sync_runs #2, 2026-08-31: 51 orders
+ * for what should have been six months). 30 leaves a day of headroom under the
+ * limit and divides a long range evenly enough.
+ */
+const MAX_REPORT_WINDOW_DAYS = 30;
 
 /**
  * One-time (and re-runnable) full history load via the channel's bulk report
@@ -674,7 +900,10 @@ export async function backfillAccount(
   opts: {
     start: Date;
     end?: Date;
-    /** Size of each report window. Smaller = more reports, steadier progress. */
+    /**
+     * Size of each report window, in days. Capped at MAX_REPORT_WINDOW_DAYS —
+     * see the note there; a larger value is silently useless, not an error.
+     */
     chunkDays?: number;
     onProgress?: (info: BackfillProgress) => void | Promise<void>;
   },
@@ -693,10 +922,11 @@ export async function backfillAccount(
   let ordersWritten = 0;
   let windows = 0;
   const failedWindows: string[] = [];
+  const emptyWindows: string[] = [];
 
   try {
     const end = opts.end ?? new Date();
-    const chunkMs = (opts.chunkDays ?? 90) * 86_400_000;
+    const chunkMs = Math.min(opts.chunkDays ?? MAX_REPORT_WINDOW_DAYS, MAX_REPORT_WINDOW_DAYS) * 86_400_000;
 
     for (let from = new Date(opts.start); from < end; from = new Date(from.getTime() + chunkMs)) {
       const to = new Date(Math.min(from.getTime() + chunkMs, end.getTime()));
@@ -706,21 +936,24 @@ export async function backfillAccount(
       // A window that fails — a report Amazon won't build, a range older than it
       // keeps, a transient 5xx — is logged and skipped. One bad slice must not
       // abandon a multi-year backfill that is otherwise working.
+      let windowOrders = 0;
       try {
         for await (const batch of adapter.fetchOrdersViaReports(from, to)) {
           const ingested = await ingestOrders(account, batch, { syncRunId: run.id });
           ordersSeen += ingested.seen;
           ordersWritten += ingested.written;
+          windowOrders += ingested.seen;
           await db
             .update(syncRuns)
             .set({ itemsSeen: ordersSeen, itemsWritten: ordersWritten })
             .where(eq(syncRuns.id, run.id));
         }
-        await opts.onProgress?.({ window: label, ordersSeen, ordersWritten });
+        if (windowOrders === 0) emptyWindows.push(label);
+        await opts.onProgress?.({ window: label, ordersSeen, ordersWritten, windowOrders });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         failedWindows.push(label);
-        await opts.onProgress?.({ window: label, ordersSeen, ordersWritten, error: message });
+        await opts.onProgress?.({ window: label, ordersSeen, ordersWritten, windowOrders, error: message });
       }
     }
 
@@ -744,7 +977,7 @@ export async function backfillAccount(
     if (allFailed) {
       throw new Error(note ?? "every backfill window failed");
     }
-    return { runId: run.id, ordersSeen, ordersWritten, failedWindows };
+    return { runId: run.id, ordersSeen, ordersWritten, failedWindows, emptyWindows };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db

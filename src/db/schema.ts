@@ -50,6 +50,23 @@ export const userRoleEnum = pgEnum("user_role", ["owner", "staff"]);
 
 export const batchKindEnum = pgEnum("batch_kind", ["picklist", "manifest"]);
 
+/**
+ * Our own dispatch-floor state, kept deliberately apart from `orders.status`.
+ *
+ * `orders.status` is the marketplace's opinion and is overwritten by every
+ * sync. This is ours: it says where a parcel has got to on our bench, and no
+ * sync ever writes it. The two are read together — the marketplace decides
+ * whether an order is still live, we decide whether it is packed.
+ */
+export const fulfilmentStateEnum = pgEnum("fulfilment_state", [
+  "to_pack",
+  "packed", // scanned and boxed, waiting for the courier
+  "manifested", // handed over
+]);
+
+/** Which bench a scan happened at. */
+export const scanStationEnum = pgEnum("scan_station", ["outbound", "inbound"]);
+
 /* -------------------------------------------------------------------------- */
 /* People                                                                     */
 /* -------------------------------------------------------------------------- */
@@ -346,6 +363,81 @@ export const returns = pgTable(
 /* Picklists and manifests                                                    */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/* Our floor state (never synced)                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Where a parcel has got to on our dispatch bench. One row per order, created
+ * the first time anybody acts on it.
+ *
+ * This exists because `orders.status` cannot hold both opinions at once. It
+ * used to: we wrote `packed` and `manifested` into the same column the sync
+ * overwrites from Amazon, and `reconcileStatus` had to defend our values from
+ * being dragged backwards on every run. That made "has this been packed" and
+ * "what does Amazon think" the same question, when they are not — Amazon calls
+ * an Easy Ship order `Shipped` at courier pickup, which is after we pack, and
+ * says nothing at all about our bench before that.
+ *
+ * Splitting them means a sync can write whatever Amazon says without ever
+ * touching our record of what we physically did, which is the only copy of that
+ * fact that exists anywhere.
+ */
+export const orderFulfilment = pgTable(
+  "order_fulfilment",
+  {
+    orderId: integer("order_id")
+      .primaryKey()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    state: fulfilmentStateEnum("state").notNull().default("to_pack"),
+
+    packedAt: timestamp("packed_at", { withTimezone: true }),
+    packedBy: integer("packed_by").references(() => users.id),
+    manifestedAt: timestamp("manifested_at", { withTimezone: true }),
+    manifestedBy: integer("manifested_by").references(() => users.id),
+
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("order_fulfilment_state_idx").on(t.state)],
+);
+
+/**
+ * Append-only log of every barcode scan, including the ones that changed
+ * nothing.
+ *
+ * A duplicate scan, a scan of a cancelled order, a scan of something already
+ * checked in — all of it is recorded. The point of a scan station is being able
+ * to answer "what did we actually do with that parcel, and when", and a log
+ * that silently drops the awkward cases cannot answer it. `applied` separates
+ * the scans that moved something from the ones that were a no-op.
+ */
+export const parcelScans = pgTable(
+  "parcel_scans",
+  {
+    id: serial("id").primaryKey(),
+    orderId: integer("order_id").references(() => orders.id, { onDelete: "cascade" }),
+    station: scanStationEnum("station").notNull(),
+    /** Exactly what came off the scanner or the keyboard, before normalising. */
+    code: text("code").notNull(),
+    /** Which barcode it turned out to be: order_id / awb / shipment_id / return_id. */
+    matchedOn: text("matched_on"),
+    /** Inbound only: whether the goods came back sellable. */
+    itemBack: boolean("item_back"),
+    note: text("note"),
+    /** False when the scan was a duplicate or otherwise changed nothing. */
+    applied: boolean("applied").notNull().default(true),
+    /** Set when the scan was refused, so the reason survives. */
+    rejectedReason: text("rejected_reason"),
+
+    scannedBy: integer("scanned_by").references(() => users.id),
+    scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("parcel_scans_order_idx").on(t.orderId, t.scannedAt),
+    index("parcel_scans_station_idx").on(t.station, t.scannedAt),
+  ],
+);
+
 export const batches = pgTable("batches", {
   id: serial("id").primaryKey(),
   kind: batchKindEnum("kind").notNull(),
@@ -524,3 +616,7 @@ export type Channel = (typeof channelEnum.enumValues)[number];
 export type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
 export type OrderStatusEvent = typeof orderStatusEvents.$inferSelect;
 export type CatalogImage = typeof catalogImages.$inferSelect;
+export type OrderFulfilment = typeof orderFulfilment.$inferSelect;
+export type FulfilmentState = (typeof fulfilmentStateEnum.enumValues)[number];
+export type ParcelScan = typeof parcelScans.$inferSelect;
+export type ScanStation = (typeof scanStationEnum.enumValues)[number];

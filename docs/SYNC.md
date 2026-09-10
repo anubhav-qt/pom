@@ -8,18 +8,33 @@ the other.
 `syncAccount(account, "orders")`, run by the manual **Sync now** button in the
 header / Settings.
 
-> **No scheduled sync right now** (decision 2026-08-31). `vercel.json` has no
-> `crons` entry and nothing calls `/api/cron/sync` automatically — data is only
-> as fresh as the last time someone pressed **Sync now**. The route still exists
-> and still works if hit with the `CRON_SECRET`; re-adding the schedule is a
-> one-line change to `vercel.json`. Re-enabling it (or moving to push) is a
-> [ROADMAP.md](ROADMAP.md) item for v2.
+> **Triggered by opening the app**, at most once every 30 minutes
+> (`autoSyncOnOpen` in `app/(app)/settings/actions.ts`). There is no cron:
+> `vercel.json` has no `crons` entry. **Sync now** forces one regardless.
+>
+> The 30-minute gate is checked on the server, against the last `orders` run in
+> `sync_runs`, not in the browser. A flag per tab would let two tabs, two people
+> or a reload each believe they were the first and start their own sync, and
+> several overlapping syncs against a 0.5 req/sec endpoint is worse than none.
+> A run that is still going counts as fresh for the same reason.
+>
+> This ran manual-only between 2026-08-31 and 2026-09-10, and that is what broke
+> order `405-2227158-3721960`: nothing synced for four days, the order changed on
+> Amazon inside that gap, and the old fixed 72-hour window had already rolled past
+> it by the next run. Moving to push (SQS/EventBridge) is still a
+> [ROADMAP.md](ROADMAP.md) item — polling is sufficient at this volume.
 
-- **Rolling 72-hour window.** It always asks Amazon for
-  `LastUpdatedAfter = now − 72h` and ignores any saved cursor for the lookback.
-  A skipped sync, a gap between manual syncs, or a little clock skew therefore
-  can't leave a hole in recent orders, and re-reading the same window is free
-  because every write is an idempotent upsert.
+- **Cursor, with a 72-hour floor.** It asks Amazon for `LastUpdatedAfter =
+  min(ordersSyncedThrough − 1min, now − 72h)`, capped at 30 days back. The saved
+  cursor means a gap between runs is caught up rather than skipped; the 72-hour
+  floor means clock skew or a back-dated order still can't slip through. Re-reading
+  the same window is free because every write is an idempotent upsert.
+
+  Before 2026-09-10 this was a fixed `now − 72h` that ignored the cursor
+  entirely, which was only safe while a sync genuinely ran every 72 hours — and
+  with no cron, one didn't. If the cursor is further back than the 30-day cap,
+  `syncAccount` returns `truncated: true`; closing a gap that large is the
+  backfill's job, not the fast lane's.
 - **Skip-if-unchanged.** Before calling the adapter, the orchestrator loads
   `(externalOrderId → channelUpdatedAt)` for everything it already holds in that
   window and passes it in as `unchangedSince`. For any order whose Amazon
@@ -31,7 +46,8 @@ header / Settings.
 - **`channel_updated_at`** on `orders` is the column that makes the skip
   possible. It's set from `LastUpdateDate` on every ingest, live or backfill.
 
-History older than 72h is **not** the fast lane's job — that's the backfill.
+History older than the 30-day cap is **not** the fast lane's job — that's the
+backfill.
 
 ## Backfill lane — one-time, and re-runnable by hand
 

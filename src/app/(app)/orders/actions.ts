@@ -16,6 +16,7 @@ import {
   shipments,
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
+import { markManifestedLocal, markPackedLocal, revertLocal } from "@/lib/fulfilment";
 import { recomputeReserved } from "@/lib/sync";
 
 export interface OrderDetail {
@@ -228,31 +229,14 @@ export async function markPacked(orderIds: number[]) {
   const user = await requireUser();
   if (orderIds.length === 0) return { ok: true, count: 0 };
 
-  await db
-    .update(orders)
-    .set({ status: "packed", updatedAt: new Date() })
-    .where(and(inArray(orders.id, orderIds), inArray(orders.status, ["new", "ready_to_pack"])));
+  // Writes our own floor state, never `orders.status` — that column belongs to
+  // the marketplace and the next sync would overwrite whatever we put there.
+  const { moved } = await markPackedLocal(orderIds, user.id);
 
-  for (const orderId of orderIds) {
-    const [existing] = await db
-      .select({ id: shipments.id })
-      .from(shipments)
-      .where(eq(shipments.orderId, orderId))
-      .limit(1);
-
-    if (existing) {
-      await db
-        .update(shipments)
-        .set({ packedAt: new Date(), packedBy: user.id })
-        .where(eq(shipments.id, existing.id));
-    } else {
-      await db.insert(shipments).values({ orderId, packedAt: new Date(), packedBy: user.id });
-    }
-  }
-
+  await recomputeReserved();
   revalidatePath("/orders");
   revalidatePath("/pack");
-  return { ok: true, count: orderIds.length };
+  return { ok: true, count: moved.length };
 }
 
 /**
@@ -263,12 +247,9 @@ export async function createManifest(orderIds: number[]) {
   const user = await requireUser();
   if (orderIds.length === 0) return { ok: false as const, error: "Select some packed orders first." };
 
-  const eligible = await db
-    .select({ id: orders.id })
-    .from(orders)
-    .where(and(inArray(orders.id, orderIds), eq(orders.status, "packed")));
+  const { moved } = await markManifestedLocal(orderIds, user.id);
 
-  if (eligible.length === 0) {
+  if (moved.length === 0) {
     return { ok: false as const, error: "None of the selected orders are packed yet." };
   }
 
@@ -279,24 +260,13 @@ export async function createManifest(orderIds: number[]) {
 
   await db
     .insert(batchOrders)
-    .values(eligible.map((o) => ({ batchId: batch.id, orderId: o.id })));
-
-  const ids = eligible.map((o) => o.id);
-  await db
-    .update(orders)
-    .set({ status: "manifested", updatedAt: new Date() })
-    .where(inArray(orders.id, ids));
-
-  await db
-    .update(shipments)
-    .set({ dispatchedAt: new Date() })
-    .where(inArray(shipments.orderId, ids));
+    .values(moved.map((orderId) => ({ batchId: batch.id, orderId })));
 
   // Manifested stock has physically left, so it is no longer committed.
   await recomputeReserved();
 
   revalidatePath("/orders");
-  return { ok: true as const, batchId: batch.id, count: ids.length };
+  return { ok: true as const, batchId: batch.id, count: moved.length };
 }
 
 /** Move orders back a step when something was scanned or clicked by mistake. */
@@ -304,19 +274,13 @@ export async function revertToNew(orderIds: number[]) {
   await requireUser();
   if (orderIds.length === 0) return { ok: true, count: 0 };
 
-  await db
-    .update(orders)
-    .set({ status: "new", updatedAt: new Date() })
-    .where(and(inArray(orders.id, orderIds), inArray(orders.status, ["ready_to_pack", "packed"])));
-
-  await db
-    .update(shipments)
-    .set({ packedAt: null, packedBy: null })
-    .where(inArray(shipments.orderId, orderIds));
+  // Only our own state is reset. The marketplace's status is not ours to undo —
+  // if Amazon says an order shipped, clicking "revert" here cannot unsay it.
+  const { moved } = await revertLocal(orderIds);
 
   await recomputeReserved();
   revalidatePath("/orders");
-  return { ok: true, count: orderIds.length };
+  return { ok: true, count: moved.length };
 }
 
 /* -------------------------------------------------------------------------- */

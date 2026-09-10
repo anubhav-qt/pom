@@ -1,0 +1,41 @@
+{
+  "artboards": [
+    { "file": "TriggerRow.dc.html", "x": 0, "y": 0, "w": 1000, "h": 560, "title": "Where the button sits" },
+    { "file": "Main.dc.html", "x": 0, "y": 700, "w": 760, "h": 980, "title": "Pack — desktop" },
+    { "file": "Inbound.dc.html", "x": 880, "y": 700, "w": 760, "h": 980, "title": "Goods in — desktop" },
+    { "file": "PackMobile.dc.html", "x": 1760, "y": 700, "w": 390, "h": 844, "title": "Pack — mobile" },
+    { "file": "GoodsInMobile.dc.html", "x": 2270, "y": 700, "w": 390, "h": 844, "title": "Goods in — mobile" },
+    { "file": "States.dc.html", "x": 0, "y": 1820, "w": 640, "h": 1180, "title": "Feedback states" }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 1120,
+      "y": 0,
+      "w": 300,
+      "text": "Scan Barcode — Paribelle OMS\n\nTwo stations, one component:\nPack (outbound) and Goods in (inbound).\n\nMatched to the running app: Inter,\n#0ea5e9/#22d3ee sky pair, #f4f9fc\nground, 1rem panels, 0.75rem controls,\n36rem modal — all lifted from\nglobals.css and modal.tsx."
+    },
+    {
+      "id": "why-two",
+      "x": 1520,
+      "y": 0,
+      "w": 300,
+      "text": "Why the stations differ\n\nPack ends in one button: confirm, take\nstock off, move to To ship.\n\nGoods in ends in a question — did the\ngoods come back sellable? — because\nrestocking a worn return is how a used\nitem reaches the next customer. On\nmobile that question IS the action bar."
+    },
+    {
+      "id": "mobile-note",
+      "x": 1760,
+      "y": 1600,
+      "w": 340,
+      "text": "Mobile: the sheet is the screen.\nViewfinder gets the space (it is what\nyou aim), the decision sits in the thumb\nzone at 48-52px.\n\nNo painted status bar or fake keyboard —\nthe real ones render on top."
+    },
+    {
+      "id": "states-note",
+      "x": 700,
+      "y": 1820,
+      "w": 320,
+      "text": "The cancelled state is the whole reason\na scan step exists between picking and\nthe courier, so it is the only one that\ngets a heavy border and a 15px bold\nline.\n\nA duplicate scan is deliberately calm —\nit is harmless, and nothing moved."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

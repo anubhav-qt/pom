@@ -15,6 +15,13 @@
       "when": 1788162853834,
       "tag": "0001_hard_wolverine",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789023445652,
+      "tag": "0002_vengeful_vermin",
+      "breakpoints": true
     }
   ]
 }

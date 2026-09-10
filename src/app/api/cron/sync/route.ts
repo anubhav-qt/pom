@@ -8,10 +8,13 @@ export const maxDuration = 60;
 /**
  * Incremental sync endpoint.
  *
- * No Vercel Cron calls this right now — `vercel.json` has no `crons` entry
- * (decision 2026-08-31; see docs/ROADMAP.md). It stays wired up because it is
- * still callable by hand with the `CRON_SECRET`, and re-enabling a schedule is
- * a one-line change to `vercel.json`.
+ * Nothing calls this on a schedule. `vercel.json` has no `crons` entry: syncing
+ * is triggered by somebody opening the app (`autoSyncOnOpen`, at most once
+ * every 30 minutes) and by the Sync now button.
+ *
+ * The route stays because it is the one way to drive a sync from outside the
+ * browser, with the `CRON_SECRET` as a bearer token. Re-adding a schedule is a
+ * one-line change to `vercel.json`.
  *
  * Each run takes a bounded slice of work per channel and records how far it
  * got, so a busy morning simply spreads across several runs instead of timing

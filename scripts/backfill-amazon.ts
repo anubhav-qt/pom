@@ -9,6 +9,10 @@
  * Pass --from to go further back; a window Amazon won't build is logged and
  * skipped, not fatal.
  *
+ * Windows are 30 days and are capped there. Amazon returns an empty report —
+ * not an error — for any range much beyond that, so a larger chunk silently
+ * loses the whole window. Do not raise it.
+ *
  * Uses the SP-API Reports API (GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL),
  * which returns a whole date range as one file and is not rate-limited per
  * order — so months of history come back in minutes rather than the hours the
@@ -70,7 +74,7 @@ async function main() {
   // The shop opened ~6 months ago; there is nothing older to pull.
   const start = parseDate(arg("from"), new Date(Date.now() - 183 * 86_400_000));
   const end = parseDate(arg("to"), new Date());
-  const chunkDays = arg("chunk-days") ? Number(arg("chunk-days")) : 45;
+  const chunkDays = arg("chunk-days") ? Number(arg("chunk-days")) : 30;
 
   console.log(
     `\nBackfilling "${account.label}" ` +
@@ -82,11 +86,13 @@ async function main() {
     start,
     end,
     chunkDays,
-    onProgress: ({ window, ordersSeen, ordersWritten, error }) =>
+    onProgress: ({ window, ordersSeen, ordersWritten, windowOrders, error }) =>
       console.log(
         error
           ? `  ${window}   SKIPPED — ${error}`
-          : `  ${window}   ${ordersSeen} seen · ${ordersWritten} written  (running total)`,
+          : `  ${window}   ${String(windowOrders).padStart(4)} orders` +
+            (windowOrders === 0 ? "   ← EMPTY" : "") +
+            `   (${ordersSeen} seen · ${ordersWritten} written so far)`,
       ),
   });
 
@@ -94,6 +100,11 @@ async function main() {
     `\nDone. sync_runs #${res.runId}: ${res.ordersSeen} orders seen, ${res.ordersWritten} written.` +
       (res.failedWindows.length > 0
         ? `\n${res.failedWindows.length} window(s) skipped: ${res.failedWindows.join(", ")}`
+        : "") +
+      (res.emptyWindows.length > 0
+        ? `\n${res.emptyWindows.length} window(s) returned no orders: ${res.emptyWindows.join(", ")}` +
+          "\n  (A quiet month and a report Amazon declined to build look identical." +
+          "\n   If a window you expect orders in is empty, re-run it alone with a smaller --chunk-days.)"
         : "") +
       "\n",
   );

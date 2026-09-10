@@ -98,6 +98,19 @@ export interface FetchOrdersOptions {
    * since the last sync.
    */
   unchangedSince?: Map<string, number>;
+  /**
+   * Reconcile mode: fetch order-level state only and treat every order already
+   * present in `unchangedSince` as having current line items, whatever its
+   * timestamp says.
+   *
+   * A repair sweep re-reads months of orders to correct statuses that drifted,
+   * and the fields it is correcting — status, Easy Ship status, totals — all
+   * come from the order listing itself. Line items are the expensive part and
+   * we already hold them, so paying for them again would turn a two-minute
+   * sweep into an hour against a 0.5 req/sec endpoint. An order we have never
+   * seen still fetches its items normally.
+   */
+  statusOnly?: boolean;
 }
 
 export interface FetchOrdersResult {

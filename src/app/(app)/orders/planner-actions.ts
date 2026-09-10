@@ -8,7 +8,7 @@ import { ENABLED_CHANNELS } from "@/config/features";
 import { requireUser } from "@/lib/auth";
 import { parseVariantTitle, sortSizes } from "@/lib/variant-title";
 
-const OPEN_STATUSES = ["new", "ready_to_pack", "packed"] as const;
+import { OPEN_STATUSES } from "@/lib/fulfilment";
 
 /* -------------------------------------------------------------------------- */
 /* Shapes returned to the client                                             */
