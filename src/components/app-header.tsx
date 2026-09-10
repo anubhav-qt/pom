@@ -30,6 +30,9 @@ interface SyncResult {
 /**
  * `ok` only when a sync was actually started. `skipped` says why not: the last
  * one is still recent, or one is already running.
+ *
+ * `runId` is the thing to act on, not `ok`. It comes back both for a run we
+ * started and for one already in flight, and either way it has to be watched.
  */
 interface AutoSyncResult {
   ok: boolean;
@@ -246,7 +249,10 @@ function SyncNowButton({
 
     let cancelled = false;
     void onAutoSync(accountId).then((res) => {
-      if (cancelled || !res.ok || !res.runId) return;
+      // Deliberately not gated on `res.ok`: a run someone else started needs
+      // watching just as much as one we started, otherwise it lands without
+      // anything telling the cache to drop its pre-sync orders.
+      if (cancelled || !res.runId) return;
       setState("syncing");
       watch(res.runId);
     });

@@ -82,7 +82,12 @@ export async function autoSyncOnOpen(accountId: number) {
   await requireUser();
 
   const [last] = await db
-    .select({ startedAt: syncRuns.startedAt, finishedAt: syncRuns.finishedAt, status: syncRuns.status })
+    .select({
+      id: syncRuns.id,
+      startedAt: syncRuns.startedAt,
+      finishedAt: syncRuns.finishedAt,
+      status: syncRuns.status,
+    })
     .from(syncRuns)
     .where(and(eq(syncRuns.channelAccountId, accountId), eq(syncRuns.kind, "orders")))
     .orderBy(desc(syncRuns.startedAt))
@@ -90,7 +95,14 @@ export async function autoSyncOnOpen(accountId: number) {
 
   if (last) {
     if (last.status === "running") {
-      return { ok: false as const, skipped: "running" as const };
+      /**
+       * A run is already in flight, started by an earlier open or another tab.
+       * We did not start it, so `ok` stays false, but we hand back its id
+       * anyway: the caller still needs to watch it to know when to refresh.
+       * Without the id the run finishes unobserved and the screen goes on
+       * showing pre-sync orders until something else refetches.
+       */
+      return { ok: false as const, skipped: "running" as const, runId: last.id };
     }
     const finishedAt = last.finishedAt ?? last.startedAt;
     const age = Date.now() - finishedAt.getTime();
