@@ -6,6 +6,7 @@ import { useMemo, useState, useTransition } from "react";
 import { ChannelTag, Empty, StatusBadge } from "@/components/ui";
 import { FEATURES } from "@/config/features";
 import type { Channel, FulfilmentState, OrderStatus } from "@/db/schema";
+import { withBasePath } from "@/lib/base-path";
 import { cn, dayLabel, money, timeLeft } from "@/lib/utils";
 
 import { createManifest, markPacked, revertToNew } from "./actions";
@@ -62,7 +63,7 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
     if (selectedIds.length === 0) return;
     setMessage(null);
 
-    const res = await fetch("/api/labels", {
+    const res = await fetch(withBasePath("/api/labels"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ orderIds: selectedIds, crop: cropLabels }),

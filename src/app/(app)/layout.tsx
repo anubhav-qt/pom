@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { AppHeader } from "@/components/app-header";
 import { ChatWidget } from "@/components/assistant/chat-widget";
+import { ScreenSwitcher } from "@/components/screen-switcher";
 import { ENABLED_CHANNELS } from "@/config/features";
 import { db } from "@/db";
 import { channelAccounts, orderFulfilment, orders, syncRuns } from "@/db/schema";
@@ -68,7 +69,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         onAutoSync={autoSyncOnOpen}
       />
 
-      <main className="mx-auto max-w-7xl px-4 pb-8 pt-6 sm:px-6">{children}</main>
+      <main className="mx-auto max-w-7xl px-4 pb-8 pt-6 sm:px-6">
+        <ScreenSwitcher>{children}</ScreenSwitcher>
+      </main>
 
       <ChatWidget />
     </div>

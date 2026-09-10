@@ -6,12 +6,16 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import {
+  ordersViewKey,
   paramsToQuery,
   queryToParams,
   useOrdersCache,
   useOrdersNav,
 } from "@/lib/stores/orders-cache";
+import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
+import { screenFromPath, screenHref, useScreenNav, type Screen } from "@/lib/stores/screen-nav";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
+import { withBasePath } from "@/lib/base-path";
 import { cn } from "@/lib/utils";
 
 export interface HeaderCounts {
@@ -29,6 +33,9 @@ interface SyncResult {
 /**
  * `ok` only when a sync was actually started. `skipped` says why not: the last
  * one is still recent, or one is already running.
+ *
+ * `runId` is the thing to act on, not `ok`. It comes back both for a run we
+ * started and for one already in flight, and either way it has to be watched.
  */
 interface AutoSyncResult {
   ok: boolean;
@@ -69,7 +76,12 @@ export function AppHeader({
   onAutoSync: (accountId: number) => Promise<AutoSyncResult>;
 }) {
   const pathname = usePathname();
-  const onOrders = pathname === "/orders" || pathname.startsWith("/orders/");
+  const override = useScreenNav((s) => s.override);
+  // What is actually on screen: the toggle can swap in a cached screen without
+  // moving the Next route, so band 2 and the switch highlight follow this, not
+  // the pathname.
+  const effectiveScreen = override ?? screenFromPath(pathname);
+  const onOrders = effectiveScreen === "orders";
 
   return (
     <header
@@ -89,7 +101,7 @@ export function AppHeader({
           <span className="hidden text-sm font-semibold tracking-tight sm:inline">Paribelle</span>
         </Link>
 
-        <AppSwitch pathname={pathname} />
+        <AppSwitch effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
 
         <div className="flex-1" />
 
@@ -116,23 +128,72 @@ export function AppHeader({
 /* Band 1 — Dashboard / Orders switch                                         */
 /* -------------------------------------------------------------------------- */
 
-function AppSwitch({ pathname }: { pathname: string }) {
-  const items = [
-    { href: "/dashboard", label: "Dashboard" },
-    { href: "/orders", label: "Orders" },
+/** `/dashboard` for the default range, `?range=` otherwise, matching page.tsx. */
+function dashboardHref(): string {
+  const { range } = useDashboardNav.getState();
+  return range === "30d" ? "/dashboard" : `/dashboard?range=${range}`;
+}
+
+function ordersHref(): string {
+  return `/orders${paramsToQuery(useOrdersNav.getState().params)}`;
+}
+
+function targetIsCached(screen: Screen): boolean {
+  if (screen === "orders") {
+    return (
+      useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
+    );
+  }
+  return useDashboardCache.getState().peek(useDashboardNav.getState().range) !== null;
+}
+
+function AppSwitch({
+  effectiveScreen,
+  routeScreen,
+}: {
+  effectiveScreen: Screen | null;
+  routeScreen: Screen | null;
+}) {
+  const items: { screen: Screen; label: string }[] = [
+    { screen: "dashboard", label: "Dashboard" },
+    { screen: "orders", label: "Orders" },
   ];
+
+  function onNav(e: React.MouseEvent, screen: Screen) {
+    if (screen === effectiveScreen) return;
+
+    const href = withBasePath(screen === "orders" ? ordersHref() : dashboardHref());
+
+    // Back to the screen the server actually rendered: just drop the override
+    // and put the URL back. No navigation, nothing to fetch.
+    if (screen === routeScreen) {
+      e.preventDefault();
+      useScreenNav.getState().setOverride(null);
+      window.history.pushState(null, "", href);
+      return;
+    }
+
+    // The other screen, and its cache can answer: swap it in place. On a miss
+    // the click falls through to the <Link> and Next navigates for real.
+    if (targetIsCached(screen)) {
+      e.preventDefault();
+      window.history.pushState(null, "", href);
+      useScreenNav.getState().setOverride(screen);
+    }
+  }
+
   return (
     <div
       className="inline-flex rounded-[9px] p-[3px]"
       style={{ background: "var(--panel-2)", border: "1px solid var(--border)" }}
     >
       {items.map((item) => {
-        const active =
-          pathname === item.href || pathname.startsWith(`${item.href}/`);
+        const active = effectiveScreen === item.screen;
         return (
           <Link
-            key={item.href}
-            href={item.href}
+            key={item.screen}
+            href={screenHref(item.screen)}
+            onClick={(e) => onNav(e, item.screen)}
             className={cn(
               "rounded-[7px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
               !active && "muted hover:text-[var(--text)]",
@@ -245,7 +306,10 @@ function SyncNowButton({
 
     let cancelled = false;
     void onAutoSync(accountId).then((res) => {
-      if (cancelled || !res.ok || !res.runId) return;
+      // Deliberately not gated on `res.ok`: a run someone else started needs
+      // watching just as much as one we started, otherwise it lands without
+      // anything telling the cache to drop its pre-sync orders.
+      if (cancelled || !res.runId) return;
       setState("syncing");
       watch(res.runId);
     });
@@ -271,7 +335,7 @@ function SyncNowButton({
   function watch(runId: number) {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
-      const r = await fetch(`/api/sync-progress?runId=${runId}`);
+      const r = await fetch(withBasePath(`/api/sync-progress?runId=${runId}`));
       if (!r.ok) return;
       const data = (await r.json()) as { status: "running" | "ok" | "failed" };
       if (data.status !== "running") {

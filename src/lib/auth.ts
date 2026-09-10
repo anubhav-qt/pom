@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 
 import { db } from "@/db";
 import { users, type User } from "@/db/schema";
+import { COOKIE_PATH } from "./base-path";
 import { isPasswordExpired } from "./password-policy";
 
 const SESSION_COOKIE = "oms_session";
@@ -67,13 +68,15 @@ export async function createPendingSession(user: User) {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    path: "/",
+    // Scoped to the OMS's own prefix. At "/" the browser would attach an OMS
+    // session to every storefront request on paribelle.in as well.
+    path: COOKIE_PATH,
     maxAge: PENDING_MAX_AGE_SECONDS,
   });
 }
 
 export async function destroyPendingSession() {
-  (await cookies()).delete(PENDING_COOKIE);
+  (await cookies()).delete({ name: PENDING_COOKIE, path: COOKIE_PATH });
 }
 
 /** The user mid-login, waiting on an MFA step. Not authenticated yet. */
@@ -117,7 +120,9 @@ export async function createSession(user: User) {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    path: "/",
+    // Scoped to the OMS's own prefix. At "/" the browser would attach an OMS
+    // session to every storefront request on paribelle.in as well.
+    path: COOKIE_PATH,
     maxAge: SESSION_MAX_AGE_SECONDS,
   });
 
@@ -125,7 +130,7 @@ export async function createSession(user: User) {
 }
 
 export async function destroySession() {
-  (await cookies()).delete(SESSION_COOKIE);
+  (await cookies()).delete({ name: SESSION_COOKIE, path: COOKIE_PATH });
 }
 
 /** Current user, or null. Safe to call from any server component. */
