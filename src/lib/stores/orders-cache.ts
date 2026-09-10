@@ -4,6 +4,7 @@ import { create } from "zustand";
 
 import type { OrdersView, OrdersViewParams } from "@/app/(app)/orders/view-actions";
 import { withBasePath } from "@/lib/base-path";
+import { useDashboardCache } from "./dashboard-cache";
 import { useOrderDetailCache } from "./order-detail-cache";
 
 /**
@@ -94,9 +95,11 @@ export const useOrdersCache = create<OrdersCacheState>((set, get) => ({
     }),
 
   bumpSync: () => {
-    // A sync rewrites orders wholesale, so the per-order detail cache is as
-    // stale as the tab payloads are.
+    // A sync rewrites orders wholesale. Everything derived from orders is as
+    // stale as the tab payloads are: the per-order detail cache and the
+    // dashboard's aggregates included.
     useOrderDetailCache.getState().clear();
+    useDashboardCache.getState().clear();
     set((s) => ({ entries: {}, syncStamp: s.syncStamp + 1 }));
   },
 

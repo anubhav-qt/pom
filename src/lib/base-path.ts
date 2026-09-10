@@ -32,3 +32,17 @@ export function withBasePath(path: string) {
  * deployment with no prefix).
  */
 export const COOKIE_PATH = BASE_PATH || "/";
+
+/**
+ * Strip the prefix off a `window.location.pathname`.
+ *
+ * `usePathname()` already returns the app-relative path, but the raw
+ * `location.pathname` read in a `popstate` handler still carries the basePath.
+ * This brings the two back into the same frame so they can be compared.
+ */
+export function stripBasePath(pathname: string) {
+  if (BASE_PATH && pathname.startsWith(BASE_PATH)) {
+    return pathname.slice(BASE_PATH.length) || "/";
+  }
+  return pathname;
+}

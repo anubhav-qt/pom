@@ -6,11 +6,14 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import {
+  ordersViewKey,
   paramsToQuery,
   queryToParams,
   useOrdersCache,
   useOrdersNav,
 } from "@/lib/stores/orders-cache";
+import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
+import { screenFromPath, screenHref, useScreenNav, type Screen } from "@/lib/stores/screen-nav";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
 import { withBasePath } from "@/lib/base-path";
 import { cn } from "@/lib/utils";
@@ -73,7 +76,12 @@ export function AppHeader({
   onAutoSync: (accountId: number) => Promise<AutoSyncResult>;
 }) {
   const pathname = usePathname();
-  const onOrders = pathname === "/orders" || pathname.startsWith("/orders/");
+  const override = useScreenNav((s) => s.override);
+  // What is actually on screen: the toggle can swap in a cached screen without
+  // moving the Next route, so band 2 and the switch highlight follow this, not
+  // the pathname.
+  const effectiveScreen = override ?? screenFromPath(pathname);
+  const onOrders = effectiveScreen === "orders";
 
   return (
     <header
@@ -93,7 +101,7 @@ export function AppHeader({
           <span className="hidden text-sm font-semibold tracking-tight sm:inline">Paribelle</span>
         </Link>
 
-        <AppSwitch pathname={pathname} />
+        <AppSwitch effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
 
         <div className="flex-1" />
 
@@ -120,23 +128,72 @@ export function AppHeader({
 /* Band 1 — Dashboard / Orders switch                                         */
 /* -------------------------------------------------------------------------- */
 
-function AppSwitch({ pathname }: { pathname: string }) {
-  const items = [
-    { href: "/dashboard", label: "Dashboard" },
-    { href: "/orders", label: "Orders" },
+/** `/dashboard` for the default range, `?range=` otherwise, matching page.tsx. */
+function dashboardHref(): string {
+  const { range } = useDashboardNav.getState();
+  return range === "30d" ? "/dashboard" : `/dashboard?range=${range}`;
+}
+
+function ordersHref(): string {
+  return `/orders${paramsToQuery(useOrdersNav.getState().params)}`;
+}
+
+function targetIsCached(screen: Screen): boolean {
+  if (screen === "orders") {
+    return (
+      useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
+    );
+  }
+  return useDashboardCache.getState().peek(useDashboardNav.getState().range) !== null;
+}
+
+function AppSwitch({
+  effectiveScreen,
+  routeScreen,
+}: {
+  effectiveScreen: Screen | null;
+  routeScreen: Screen | null;
+}) {
+  const items: { screen: Screen; label: string }[] = [
+    { screen: "dashboard", label: "Dashboard" },
+    { screen: "orders", label: "Orders" },
   ];
+
+  function onNav(e: React.MouseEvent, screen: Screen) {
+    if (screen === effectiveScreen) return;
+
+    const href = withBasePath(screen === "orders" ? ordersHref() : dashboardHref());
+
+    // Back to the screen the server actually rendered: just drop the override
+    // and put the URL back. No navigation, nothing to fetch.
+    if (screen === routeScreen) {
+      e.preventDefault();
+      useScreenNav.getState().setOverride(null);
+      window.history.pushState(null, "", href);
+      return;
+    }
+
+    // The other screen, and its cache can answer: swap it in place. On a miss
+    // the click falls through to the <Link> and Next navigates for real.
+    if (targetIsCached(screen)) {
+      e.preventDefault();
+      window.history.pushState(null, "", href);
+      useScreenNav.getState().setOverride(screen);
+    }
+  }
+
   return (
     <div
       className="inline-flex rounded-[9px] p-[3px]"
       style={{ background: "var(--panel-2)", border: "1px solid var(--border)" }}
     >
       {items.map((item) => {
-        const active =
-          pathname === item.href || pathname.startsWith(`${item.href}/`);
+        const active = effectiveScreen === item.screen;
         return (
           <Link
-            key={item.href}
-            href={item.href}
+            key={item.screen}
+            href={screenHref(item.screen)}
+            onClick={(e) => onNav(e, item.screen)}
             className={cn(
               "rounded-[7px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
               !active && "muted hover:text-[var(--text)]",
