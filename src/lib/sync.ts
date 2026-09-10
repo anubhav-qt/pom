@@ -424,13 +424,43 @@ export async function recomputeReserved() {
 const INITIAL_LOOKBACK_DAYS = 14;
 
 /**
- * The fast lane re-scans this rolling window every run instead of trusting a
- * saved cursor. It stays cheap because unchanged orders skip the slow
- * line-item call and every write is an idempotent upsert — and it means a
- * missed cron run or a little clock skew can never leave a hole in recent
- * orders. Anything older than this window is the backfill's job.
+ * The *minimum* look-back for the fast lane. Every run re-scans at least this
+ * far regardless of the cursor, so clock skew or an order Amazon back-dates
+ * can't slip through a gap. It stays cheap because unchanged orders skip the
+ * slow line-item call and every write is an idempotent upsert.
  */
 const RECENT_WINDOW_MS = 72 * 60 * 60 * 1000;
+
+/**
+ * Ceiling on the look-back when the cursor is old. The fast lane pays roughly a
+ * second per changed order, so an account left unsynced for months must not try
+ * to walk the whole gap in one invocation — it would time out and never record
+ * progress. Anything older than this is the backfill's job (`backfillAccount`),
+ * and the run reports the shortfall rather than silently pretending it caught up.
+ */
+const MAX_CATCHUP_MS = 30 * 86_400_000;
+
+/**
+ * Where this run should start reading from.
+ *
+ * The saved cursor is the point of this: a 72h fixed window is only safe if a
+ * sync actually runs every 72h, and this app has no cron — it had a four-day
+ * gap in September 2026, during which an order changed on Amazon, fell out of
+ * the window before the next run, and stayed wrong in our DB permanently. The
+ * cursor closes that hole; RECENT_WINDOW_MS still forces a minimum overlap.
+ */
+function ordersSince(account: ChannelAccount): { since: Date; truncated: boolean } {
+  const now = Date.now();
+  const floor = now - RECENT_WINDOW_MS;
+  const cursor = account.ordersSyncedThrough?.getTime();
+
+  // A minute of overlap absorbs the boundary: `cursorFrom` records the newest
+  // LastUpdateDate we ingested, and an order updated in that same second would
+  // otherwise sit exactly on the exclusive edge of LastUpdatedAfter.
+  const wanted = cursor === undefined ? floor : Math.min(cursor - 60_000, floor);
+  const capped = Math.max(wanted, now - MAX_CATCHUP_MS);
+  return { since: new Date(capped), truncated: capped > wanted };
+}
 
 /**
  * Run one incremental sync for one account. Sized to finish comfortably inside
@@ -463,9 +493,10 @@ export async function syncAccount(
       )[0];
 
   try {
+    const ordersWindow = ordersSince(account);
     const since =
       kind === "orders"
-        ? new Date(Date.now() - RECENT_WINDOW_MS)
+        ? ordersWindow.since
         : (account.returnsSyncedThrough ??
           new Date(Date.now() - INITIAL_LOOKBACK_DAYS * 86_400_000));
 
@@ -543,7 +574,16 @@ export async function syncAccount(
       })
       .where(eq(syncRuns.id, run.id));
 
-    return { skipped: false as const, seen, written, hasMore, syncedThrough, runId: run.id };
+    return {
+      skipped: false as const,
+      seen,
+      written,
+      hasMore,
+      syncedThrough,
+      runId: run.id,
+      /** The cursor was older than MAX_CATCHUP_MS; a backfill is needed to close the rest. */
+      truncated: kind === "orders" && ordersWindow.truncated,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db

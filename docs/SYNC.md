@@ -15,11 +15,17 @@ header / Settings.
 > one-line change to `vercel.json`. Re-enabling it (or moving to push) is a
 > [ROADMAP.md](ROADMAP.md) item for v2.
 
-- **Rolling 72-hour window.** It always asks Amazon for
-  `LastUpdatedAfter = now − 72h` and ignores any saved cursor for the lookback.
-  A skipped sync, a gap between manual syncs, or a little clock skew therefore
-  can't leave a hole in recent orders, and re-reading the same window is free
-  because every write is an idempotent upsert.
+- **Cursor, with a 72-hour floor.** It asks Amazon for `LastUpdatedAfter =
+  min(ordersSyncedThrough − 1min, now − 72h)`, capped at 30 days back. The saved
+  cursor means a gap between runs is caught up rather than skipped; the 72-hour
+  floor means clock skew or a back-dated order still can't slip through. Re-reading
+  the same window is free because every write is an idempotent upsert.
+
+  Before 2026-09-10 this was a fixed `now − 72h` that ignored the cursor
+  entirely, which was only safe while a sync genuinely ran every 72 hours — and
+  with no cron, one didn't. If the cursor is further back than the 30-day cap,
+  `syncAccount` returns `truncated: true`; closing a gap that large is the
+  backfill's job, not the fast lane's.
 - **Skip-if-unchanged.** Before calling the adapter, the orchestrator loads
   `(externalOrderId → channelUpdatedAt)` for everything it already holds in that
   window and passes it in as `unchangedSince`. For any order whose Amazon
@@ -31,7 +37,8 @@ header / Settings.
 - **`channel_updated_at`** on `orders` is the column that makes the skip
   possible. It's set from `LastUpdateDate` on every ingest, live or backfill.
 
-History older than 72h is **not** the fast lane's job — that's the backfill.
+History older than the 30-day cap is **not** the fast lane's job — that's the
+backfill.
 
 ## Backfill lane — one-time, and re-runnable by hand
 

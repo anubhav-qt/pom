@@ -213,13 +213,24 @@ export class AmazonAdapter implements ChannelAdapter {
       }
     } while (nextToken);
 
+    // Oldest update first. getOrders does not promise an order for its results,
+    // and the cursor we hand back is "the newest LastUpdateDate we ingested" —
+    // so if the page is cut short at `limit`, every order left behind has to be
+    // *newer* than that cursor or the next run will step straight over it.
+    // Sorting first is what makes that true. With the old fixed 72h window a
+    // skipped order was re-read on the next run anyway; now that the cursor is
+    // trusted for catch-up, it would be lost for good.
+    collected.sort(
+      (a, b) => new Date(a.LastUpdateDate).getTime() - new Date(b.LastUpdateDate).getTime(),
+    );
+
     // Drop orders Amazon hasn't finalised yet. A just-placed order sits at
     // "Pending" until payment clears — no buyer address, no line items, and
     // Seller Central doesn't list it as actionable either. Ingesting it would
     // put a row in the pack queue that the seller can't act on and that isn't
     // yet a confirmed sale. It gets picked up on the next sync once it turns
-    // "Unshipped" (the 72h rolling window re-scans it), or never, if Amazon
-    // auto-cancels it.
+    // "Unshipped" (the 72h floor re-scans it), or never, if Amazon auto-cancels
+    // it.
     const toProcess = collected
       .slice(0, limit)
       .filter((o) => !AMAZON_PENDING_STATUSES.has(o.OrderStatus));
