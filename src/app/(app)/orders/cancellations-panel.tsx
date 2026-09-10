@@ -273,11 +273,16 @@ function ResolvedCell({
             : { background: "var(--panel-2)", color: "var(--muted)" }
         }
       >
-        {back ? "Item back" : "Not returned"}
+        {/* Null is not "no". It means nobody ever recorded what came back, which
+            is what a bulk close leaves behind, and claiming "Not returned" for
+            an RTO that did ship would be inventing a fact. */}
+        {back === null ? "Condition unknown" : back ? "Item back" : "Not returned"}
       </span>
       <span className="muted">
         {record.auto
-          ? "auto — never shipped"
+          ? back === null
+            ? "closed in bulk, never checked in"
+            : "auto, never shipped"
           : `by ${record.checkedInByName ?? "staff"} · ${dayLabel(new Date(record.checkedInAt!))}`}
       </span>
       <button className="text-[11px] underline" style={{ color: "var(--muted)" }} disabled={busy} onClick={onReopen}>
