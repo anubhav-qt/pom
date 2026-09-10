@@ -216,9 +216,7 @@ export async function lookupOutbound(code: string): Promise<ScanLookup> {
     matchedOn,
     order: summary(row, await itemsFor(row.id)),
     outbound: {
-      // Our own record decides this. The marketplace has no opinion on whether
-      // a parcel has been boxed.
-      alreadyPacked: (row.fulfilmentState ?? "to_pack") !== "to_pack",
+      alreadyPacked: row.fulfilmentState === "manifested",
       packedAt: row.packedAt,
     },
   };

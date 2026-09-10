@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { orderFulfilment, orderItems, orders, returns } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
-import { markPackedLocal, recordScan } from "@/lib/fulfilment";
+import { markManifestedLocal, recordScan } from "@/lib/fulfilment";
 import { adjustStock } from "@/lib/inventory";
 import { lookupScan, type ScanLookup, type ScanStation } from "@/lib/scan";
 import { recomputeReserved } from "@/lib/sync";
@@ -16,11 +16,9 @@ import { checkInCancellation } from "./actions";
 /**
  * Server actions behind the Scan Barcode modal.
  *
- * Deliberately thin: the lookup lives in `lib/scan` and the two commit paths
+ * Deliberately thin: the lookup lives in lib/scan and the two commit paths
  * reuse the same functions the existing screens already use, so a scan and a
- * click on the table produce byte-identical records. A scan station that
- * quietly wrote different rows from the manual flow would be worse than no scan
- * station at all.
+ * click on the table produce identical records.
  */
 
 export async function scanLookup(station: ScanStation, code: string): Promise<ScanLookup> {
@@ -31,12 +29,10 @@ export async function scanLookup(station: ScanStation, code: string): Promise<Sc
 /* ------------------------------------------------------------- outbound -- */
 
 /**
- * Mark a scanned parcel packed and take the stock off the shelf.
+ * Outbound scan marks parcel manifested (dispatched) and takes stock off shelf.
  *
- * This is `pack/actions.ts#confirmPacked` with one difference: it is safe to
- * call twice. A scanner that fires a duplicate, and they do, a second read as
- * the parcel moves past the beam, must not decrement stock again, so an order
- * that is already packed returns a soft `already` rather than an error.
+ * Safe to call twice: a duplicate scan returns a soft 'already' rather than an error
+ * and avoids decrementing stock again.
  */
 export async function scanConfirmPacked(orderId: number) {
   const user = await requireUser();
@@ -68,38 +64,41 @@ export async function scanConfirmPacked(orderId: number) {
     return { ok: false as const, error: `STOP. This order is ${order.status.toUpperCase()}.` };
   }
 
-  // Whether it is already packed is purely our own record.
-  if ((order.state ?? "to_pack") !== "to_pack") {
+  // If already manifested, it is already dispatched.
+  if (order.state === "manifested") {
     await recordScan({
       orderId,
       station: "outbound",
       code: order.externalOrderId,
       applied: false,
-      rejectedReason: "already packed",
+      rejectedReason: "already dispatched",
       scannedBy: user.id,
     });
     return { ok: true as const, already: true as const, externalOrderId: order.externalOrderId };
   }
 
-  const items = await db
-    .select({ productId: orderItems.productId, quantity: orderItems.quantity })
-    .from(orderItems)
-    .where(eq(orderItems.orderId, orderId));
+  // Adjust stock if it hasn't been packed yet
+  if ((order.state ?? "to_pack") === "to_pack") {
+    const items = await db
+      .select({ productId: orderItems.productId, quantity: orderItems.quantity })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, orderId));
 
-  for (const item of items) {
-    if (item.productId === null) continue; // Unmapped SKUs are not stock-controlled.
-    await adjustStock({
-      productId: item.productId,
-      delta: -item.quantity,
-      reason: "order_packed",
-      refType: "order",
-      refId: orderId,
-      userId: user.id,
-      note: "Scanned at the pack bench",
-    });
+    for (const item of items) {
+      if (item.productId === null) continue; // Unmapped SKUs are not stock-controlled.
+      await adjustStock({
+        productId: item.productId,
+        delta: -item.quantity,
+        reason: "order_packed",
+        refType: "order",
+        refId: orderId,
+        userId: user.id,
+        note: "Scanned at outbound dispatch",
+      });
+    }
   }
 
-  await markPackedLocal([orderId], user.id);
+  await markManifestedLocal([orderId], user.id);
   await recordScan({
     orderId,
     station: "outbound",

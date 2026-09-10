@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Stat } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import {
   invalidateOrderViews,
   ordersViewKey,
@@ -163,14 +164,56 @@ export function OrdersWorkspace({
       ) : null}
 
       {data.isQueueView && data.counts ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <Stat label="To pack" value={data.counts.open} />
-          <Stat label="To ship" value={data.counts.packed} />
-          <Stat
-            label="Past dispatch deadline"
-            value={data.counts.late}
-            tone={data.counts.late > 0 ? "danger" : undefined}
-          />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div
+            className="inline-flex items-center gap-1 rounded-full border p-1"
+            style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+          >
+            {[
+              { id: "unshipped" as const, label: "Unshipped", count: data.counts.unshipped },
+              { id: "packed" as const, label: "Packed", count: data.counts.packed },
+              { id: "shipped24h" as const, label: "Shipped (24h)", count: data.counts.shipped24h },
+            ].map((tab) => {
+              const active = data.activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => go({ ...params, tab: tab.id === "unshipped" ? undefined : tab.id })}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
+                    active ? "text-white" : "muted hover:text-[var(--text)]",
+                  )}
+                  style={
+                    active
+                      ? { background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }
+                      : undefined
+                  }
+                >
+                  <span>{tab.label}</span>
+                  <span
+                    className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                    style={{
+                      background: active ? "rgba(255,255,255,0.2)" : "var(--panel-2)",
+                      color: active ? "white" : "var(--muted)",
+                    }}
+                  >
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {data.activeTab === "unshipped" && data.counts.late > 0 ? (
+            <div
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
+              style={{ background: "var(--danger-soft)", color: "var(--danger)" }}
+            >
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--danger)" }} />
+              <span>{data.counts.late} past dispatch deadline</span>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

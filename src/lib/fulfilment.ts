@@ -73,7 +73,7 @@ async function setState(
     state === "packed"
       ? { packedAt: now, packedBy: userId }
       : state === "manifested"
-        ? { manifestedAt: now, manifestedBy: userId }
+        ? { packedAt: now, packedBy: userId, manifestedAt: now, manifestedBy: userId }
         : { packedAt: null, packedBy: null, manifestedAt: null, manifestedBy: null };
 
   const rows = await db
@@ -144,26 +144,35 @@ export async function markPackedLocal(orderIds: number[], userId: number | null)
   return { moved };
 }
 
-/** Hand parcels to the courier. Only packed parcels are eligible. */
+/** Hand parcels to courier or mark dispatched on outbound scan. */
 export async function markManifestedLocal(orderIds: number[], userId: number | null) {
   if (orderIds.length === 0) return { moved: [] as number[] };
 
-  const eligible = (
-    await db
-      .select({ orderId: orderFulfilment.orderId })
-      .from(orderFulfilment)
-      .where(
-        and(inArray(orderFulfilment.orderId, orderIds), eq(orderFulfilment.state, "packed")),
-      )
-  ).map((r) => r.orderId);
+  const current = await db
+    .select({ orderId: orderFulfilment.orderId, state: orderFulfilment.state })
+    .from(orderFulfilment)
+    .where(inArray(orderFulfilment.orderId, orderIds));
+  const alreadyDone = new Set(
+    current.filter((r) => r.state === "manifested").map((r) => r.orderId),
+  );
+  const eligible = orderIds.filter((id) => !alreadyDone.has(id));
 
   await setState(eligible, "manifested", userId);
 
-  if (eligible.length > 0) {
-    await db
-      .update(shipments)
-      .set({ dispatchedAt: new Date() })
-      .where(inArray(shipments.orderId, eligible));
+  for (const orderId of eligible) {
+    const [existing] = await db
+      .select({ id: shipments.id })
+      .from(shipments)
+      .where(eq(shipments.orderId, orderId))
+      .limit(1);
+    if (existing) {
+      await db
+        .update(shipments)
+        .set({ dispatchedAt: new Date() })
+        .where(eq(shipments.id, existing.id));
+    } else {
+      await db.insert(shipments).values({ orderId, dispatchedAt: new Date() });
+    }
   }
 
   return { moved: eligible };

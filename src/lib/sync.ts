@@ -176,6 +176,8 @@ export async function ingestOrders(
             CASE
               WHEN excluded.status IN ('cancelled','rto','returned') THEN excluded.status
               WHEN ${orders.status} IN ('cancelled','rto','returned') THEN ${orders.status}
+              WHEN excluded.status = 'packed' AND excluded.easyship_status = 'PendingPickUp' AND ${orders.status} = 'shipped'
+                THEN excluded.status
               WHEN ${statusRankSql("excluded.status")} > ${statusRankSql(`"orders"."status"`)}
                 THEN excluded.status
               ELSE ${orders.status}
