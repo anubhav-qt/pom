@@ -19,6 +19,7 @@
     "check:amazon": "tsx scripts/check-amazon.ts",
     "check:amazon:full": "tsx scripts/check-amazon-full.ts",
     "backfill:amazon": "tsx scripts/backfill-amazon.ts",
+    "reconcile:amazon": "tsx scripts/reconcile-amazon.ts",
     "mfa:reset": "tsx scripts/mfa-reset.ts",
     "check:assistant": "tsx scripts/check-assistant.ts",
     "mcp:db": "tsx mcp/server.ts"

@@ -198,7 +198,13 @@ export class AmazonAdapter implements ChannelAdapter {
 
   /* -------------------------------------------------------------- orders -- */
 
-  async fetchOrders({ since, limit = 100, onProgress, unchangedSince }: FetchOrdersOptions): Promise<FetchOrdersResult> {
+  async fetchOrders({
+    since,
+    limit = 100,
+    onProgress,
+    unchangedSince,
+    statusOnly = false,
+  }: FetchOrdersOptions): Promise<FetchOrdersResult> {
     const collected: AmazonOrder[] = [];
     let nextToken: string | undefined;
     let hasMore = false;
@@ -259,7 +265,7 @@ export class AmazonAdapter implements ChannelAdapter {
         for (;;) {
           const i = cursor++;
           if (i >= toProcess.length) return;
-          orders[i] = await this.toCanonical(toProcess[i], unchangedSince);
+          orders[i] = await this.toCanonical(toProcess[i], unchangedSince, statusOnly);
           // One tick per order, right after the paced call that order just went
           // through — this is the only part of a sync worth reporting on.
           await onProgress?.({ seen: ++done, total: toProcess.length });
@@ -281,6 +287,7 @@ export class AmazonAdapter implements ChannelAdapter {
   private async toCanonical(
     o: AmazonOrder,
     unchangedSince?: Map<string, number>,
+    statusOnly = false,
   ): Promise<CanonicalOrder> {
     const channelUpdatedAt = o.LastUpdateDate ? new Date(o.LastUpdateDate) : null;
 
@@ -307,10 +314,16 @@ export class AmazonAdapter implements ChannelAdapter {
     // last sync, so skip the slow, rate-limited orderItems call entirely. This
     // is the single biggest saving on a routine sync, where almost every order
     // in the window is one we already have.
+    //
+    // `statusOnly` widens that to any order we already hold, changed or not —
+    // a reconcile sweep is correcting order-level state and already has the
+    // line items. An order we have never seen is not in the map either way, so
+    // it still gets its items fetched.
     if (
       !this.isSandbox &&
-      channelUpdatedAt &&
-      unchangedSince?.get(o.AmazonOrderId) === channelUpdatedAt.getTime()
+      (statusOnly
+        ? unchangedSince?.has(o.AmazonOrderId)
+        : channelUpdatedAt && unchangedSince?.get(o.AmazonOrderId) === channelUpdatedAt.getTime())
     ) {
       return { ...common, itemsKnownCurrent: true, items: [] };
     }

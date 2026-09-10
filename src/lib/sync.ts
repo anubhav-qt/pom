@@ -733,6 +733,110 @@ export async function syncAllAccounts() {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Reconcile                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Re-read order-level state for everything we hold and correct whatever has
+ * drifted. This is the repair lane, and it exists because the other two lanes
+ * each have a blind spot:
+ *
+ * - The fast lane only ever sees a window. Anything that changed on Amazon
+ *   while nothing was running, and is now behind the cursor, stays wrong
+ *   forever — order 405-2227158-3721960 sat in the pack queue for five days
+ *   after it had actually been picked up.
+ * - The backfill's All Orders report has no Easy Ship status column at all, so
+ *   `delivered` is unreachable through it. Every historical order it wrote is
+ *   capped at `shipped`, which made the dashboard's delivered figures fiction
+ *   for anything before the live sync started.
+ *
+ * Both are fixed by the same sweep, because both facts live on the order
+ * listing rather than on its line items. It runs `statusOnly`, so orders we
+ * already hold cost nothing but the listing page they arrive on.
+ *
+ * Deliberately does not advance `ordersSyncedThrough`: this reads history, and
+ * the incremental cursor should keep meaning "the newest update the fast lane
+ * has ingested". Recorded as a `backfill` run — it is a full-history pass, and
+ * a separate enum value would need a migration to say the same thing.
+ */
+export async function reconcileAccount(
+  account: ChannelAccount,
+  opts: {
+    since: Date;
+    /** Safety cap; the sweep is one invocation, not a resumable slice. */
+    limit?: number;
+    onProgress?: (info: { seen: number; total: number }) => void | Promise<void>;
+  },
+) {
+  const adapter = adapterFor(account);
+  if (!adapter.supportsLiveSync) {
+    return { skipped: true as const, reason: `${account.channel} has no live API` };
+  }
+
+  // Every order we hold for this account, not just a window — `statusOnly`
+  // reads this as "we already have the items for these".
+  const knownRows = await db
+    .select({
+      externalOrderId: orders.externalOrderId,
+      channelUpdatedAt: orders.channelUpdatedAt,
+    })
+    .from(orders)
+    .where(eq(orders.channelAccountId, account.id));
+  const known = new Map(
+    knownRows.map((r) => [r.externalOrderId, r.channelUpdatedAt?.getTime() ?? 0] as const),
+  );
+
+  const [run] = await db
+    .insert(syncRuns)
+    .values({ channelAccountId: account.id, kind: "backfill" })
+    .returning({ id: syncRuns.id });
+
+  try {
+    const res = await adapter.fetchOrders({
+      since: opts.since,
+      limit: opts.limit ?? 5000,
+      statusOnly: true,
+      unchangedSince: known,
+      onProgress: async (info) => {
+        await db
+          .update(syncRuns)
+          .set({ itemsSeen: info.seen, totalEstimate: info.total })
+          .where(eq(syncRuns.id, run.id));
+        await opts.onProgress?.(info);
+      },
+    });
+
+    const ingested = await ingestOrders(account, res.orders, { syncRunId: run.id });
+
+    await db
+      .update(syncRuns)
+      .set({
+        status: "ok",
+        finishedAt: new Date(),
+        itemsSeen: ingested.seen,
+        itemsWritten: ingested.written,
+      })
+      .where(eq(syncRuns.id, run.id));
+
+    return {
+      skipped: false as const,
+      seen: ingested.seen,
+      written: ingested.written,
+      /** True if the cap was hit — narrow the range and sweep again. */
+      hasMore: res.hasMore,
+      runId: run.id,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db
+      .update(syncRuns)
+      .set({ status: "failed", finishedAt: new Date(), error: message.slice(0, 2000) })
+      .where(eq(syncRuns.id, run.id));
+    throw err;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Backfill                                                                   */
 /* -------------------------------------------------------------------------- */
 
