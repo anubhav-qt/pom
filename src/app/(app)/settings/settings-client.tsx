@@ -7,6 +7,7 @@ import { CHANNEL_META } from "@/channels";
 import { ChannelTag, Empty } from "@/components/ui";
 import { ENABLED_CHANNELS, FEATURES } from "@/config/features";
 import type { Channel } from "@/db/schema";
+import { withBasePath } from "@/lib/base-path";
 import { dayLabel } from "@/lib/utils";
 
 import { addChannelAccount, deleteChannelAccount, setAccountActive, syncNow } from "./actions";
@@ -286,7 +287,7 @@ function SyncControl({ accountId, onSettled }: { accountId: number; onSettled: (
     setProgress({ status: "running", itemsSeen: 0, itemsWritten: 0, totalEstimate: null, error: null });
 
     pollRef.current = setInterval(async () => {
-      const r = await fetch(`/api/sync-progress?runId=${res.runId}`);
+      const r = await fetch(withBasePath(`/api/sync-progress?runId=${res.runId}`));
       if (!r.ok) return; // a missed tick is invisible — the next one catches up
       const data = (await r.json()) as SyncProgressState;
       setProgress(data);
@@ -381,7 +382,7 @@ export function MeeshoImport({ accounts }: { accounts: { id: number; label: stri
     setBusy(true);
     setResult(null);
     try {
-      const res = await fetch("/api/import/meesho", {
+      const res = await fetch(withBasePath("/api/import/meesho"), {
         method: "POST",
         body: new FormData(form),
       });

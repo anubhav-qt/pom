@@ -12,6 +12,7 @@ import {
   useOrdersNav,
 } from "@/lib/stores/orders-cache";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
+import { withBasePath } from "@/lib/base-path";
 import { cn } from "@/lib/utils";
 
 export interface HeaderCounts {
@@ -271,7 +272,7 @@ function SyncNowButton({
   function watch(runId: number) {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
-      const r = await fetch(`/api/sync-progress?runId=${runId}`);
+      const r = await fetch(withBasePath(`/api/sync-progress?runId=${runId}`));
       if (!r.ok) return;
       const data = (await r.json()) as { status: "running" | "ok" | "failed" };
       if (data.status !== "running") {

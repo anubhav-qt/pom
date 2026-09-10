@@ -1,5 +1,41 @@
+/**
+ * The path the OMS is served under. paribelle.in rewrites `/pom` and
+ * `/pom/:path*` to this deployment (a Vercel multi-zone), so every route,
+ * asset and route handler lives behind this prefix.
+ *
+ * Re-exported as NEXT_PUBLIC_BASE_PATH below so the handful of places that
+ * build a URL from a raw string can read it too. See src/lib/base-path.ts.
+ */
+const basePath = "/pom";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  basePath,
+  /**
+   * Next already defaults assetPrefix to basePath, so this is the same value it
+   * would pick on its own. Stated outright because a multi-zone setup depends
+   * on it: assets have to be requested under the prefix or the storefront's
+   * rewrite never sees them.
+   */
+  assetPrefix: basePath,
+
+  env: {
+    NEXT_PUBLIC_BASE_PATH: basePath,
+  },
+
+  experimental: {
+    serverActions: {
+      /**
+       * The OMS runs on server actions almost end to end. Next checks the
+       * request Origin against the Host, and behind a cross-zone rewrite those
+       * disagree: the browser sends paribelle.in, the deployment sees its own
+       * Vercel host. Without this every action fails with "Invalid Server
+       * Actions request", which takes down every interaction in the app.
+       */
+      allowedOrigins: ["paribelle.in", "www.paribelle.in"],
+    },
+  },
+
   /**
    * These must stay out of the server bundle.
    *

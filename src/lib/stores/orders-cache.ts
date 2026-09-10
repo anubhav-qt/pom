@@ -3,6 +3,7 @@
 import { create } from "zustand";
 
 import type { OrdersView, OrdersViewParams } from "@/app/(app)/orders/view-actions";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * Client-side cache for the Orders tabs.
@@ -188,7 +189,7 @@ export const useOrdersNav = create<OrdersNavState>((set) => ({
 
   go: (params, opts) => {
     if (typeof window !== "undefined") {
-      const url = `/orders${paramsToQuery(params)}`;
+      const url = withBasePath(`/orders${paramsToQuery(params)}`);
       if (opts?.replace) window.history.replaceState(null, "", url);
       else window.history.pushState(null, "", url);
     }

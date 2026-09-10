@@ -4,6 +4,7 @@ import { Download, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { AssistantCard } from "@/lib/assistant/agent";
+import { withBasePath } from "@/lib/base-path";
 
 import { AssistantCardView } from "./cards";
 import { wrapHtmlFragment } from "./render-html";
@@ -89,7 +90,7 @@ export function ChatWidget() {
     setMessages((m) => [...m, { role: "user", content: question }]);
 
     try {
-      const res = await fetch("/api/assistant/chat", {
+      const res = await fetch(withBasePath("/api/assistant/chat"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ question, history, displayMode }),
