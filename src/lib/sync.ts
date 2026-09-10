@@ -24,7 +24,13 @@ import {
 
 /** Statuses that mean the parcel had physically left us — a transition out of
  *  one of these into cancelled/RTO leaves something to receive back, so it
- *  needs a human check-in. Anything else auto-resolves. */
+ *  needs a human check-in. Anything else auto-resolves.
+ *
+ *  `packed` and `manifested` are still listed for channels that report them
+ *  (Flipkart). Our own bench state is no longer here — it lives in
+ *  `order_fulfilment` — and is checked separately in `dispatchedOrderIds`,
+ *  because an order we manifested but Amazon still calls `new` has just as
+ *  much physically left the building. */
 const SHIPPED_ISH: OrderStatus[] = ["packed", "manifested", "shipped", "delivered"];
 
 /**
@@ -450,15 +456,21 @@ export async function ingestReturns(account: ChannelAccount, incoming: Canonical
  * volume the full recompute is a single cheap query.
  */
 export async function recomputeReserved() {
+  // "Committed but not yet gone": the channel still expects the order, and we
+  // have not manifested it. Both halves matter — the channel status no longer
+  // records our floor state, so a manifested parcel still reads as `new` here
+  // and would stay reserved forever without the second condition.
   await db.execute(sql`
     UPDATE inventory AS inv
     SET reserved = COALESCE((
           SELECT SUM(oi.quantity)
           FROM order_items oi
           JOIN orders o ON o.id = oi.order_id
+          LEFT JOIN order_fulfilment f ON f.order_id = o.id
           WHERE oi.product_id = inv.product_id
             AND oi.cancelled = false
             AND o.status IN ('new', 'ready_to_pack', 'packed')
+            AND COALESCE(f.state, 'to_pack') <> 'manifested'
         ), 0),
         updated_at = now()
   `);

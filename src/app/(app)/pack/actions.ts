@@ -1,10 +1,11 @@
 "use server";
 
-import { eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { orderItems, orders, products, shipments } from "@/db/schema";
+import { orderFulfilment, orderItems, orders, products, shipments } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
+import { OPEN_STATUSES, markPackedLocal } from "@/lib/fulfilment";
 import { adjustStock } from "@/lib/inventory";
 import { recomputeReserved } from "@/lib/sync";
 
@@ -50,9 +51,11 @@ export async function scanOrder(code: string): Promise<ScanResult> {
       buyerName: orders.buyerName,
       shipCity: orders.shipCity,
       packedAt: shipments.packedAt,
+      fulfilmentState: orderFulfilment.state,
     })
     .from(orders)
     .leftJoin(shipments, eq(shipments.orderId, orders.id))
+    .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
     .where(
       or(
         eq(orders.externalOrderId, value),
@@ -96,7 +99,7 @@ export async function scanOrder(code: string): Promise<ScanResult> {
       status: row.status,
       buyerName: row.buyerName,
       shipCity: row.shipCity,
-      alreadyPacked: row.packedAt !== null,
+      alreadyPacked: (row.fulfilmentState ?? "to_pack") !== "to_pack",
       items: items.map((i) => ({
         sku: i.sku,
         title: i.title,
@@ -125,7 +128,15 @@ export async function confirmPacked(orderId: number) {
     .limit(1);
 
   if (!order) return { ok: false as const, error: "Order not found." };
-  if (order.status === "packed" || order.status === "manifested") {
+
+  // Our own state decides whether this is a duplicate, not the marketplace's —
+  // Amazon has no opinion on whether a parcel has been boxed.
+  const [fulfilment] = await db
+    .select({ state: orderFulfilment.state })
+    .from(orderFulfilment)
+    .where(eq(orderFulfilment.orderId, orderId))
+    .limit(1);
+  if (fulfilment && fulfilment.state !== "to_pack") {
     return { ok: false as const, error: "Already packed." };
   }
 
@@ -146,26 +157,7 @@ export async function confirmPacked(orderId: number) {
     });
   }
 
-  await db
-    .update(orders)
-    .set({ status: "packed", updatedAt: new Date() })
-    .where(eq(orders.id, orderId));
-
-  const [existing] = await db
-    .select({ id: shipments.id })
-    .from(shipments)
-    .where(eq(shipments.orderId, orderId))
-    .limit(1);
-
-  if (existing) {
-    await db
-      .update(shipments)
-      .set({ packedAt: new Date(), packedBy: user.id })
-      .where(eq(shipments.id, existing.id));
-  } else {
-    await db.insert(shipments).values({ orderId, packedAt: new Date(), packedBy: user.id });
-  }
-
+  await markPackedLocal([orderId], user.id);
   await recomputeReserved();
 
   return { ok: true as const };
@@ -176,11 +168,12 @@ export async function packStats() {
   await requireUser();
   const [row] = await db
     .select({
-      remaining: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} IN ('new','ready_to_pack'))`,
-      packedToday: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'packed')`,
+      remaining: sql<number>`COUNT(*) FILTER (WHERE COALESCE(${orderFulfilment.state}, 'to_pack') = 'to_pack')`,
+      packedToday: sql<number>`COUNT(*) FILTER (WHERE ${orderFulfilment.state} = 'packed')`,
     })
     .from(orders)
-    .where(inArray(orders.status, ["new", "ready_to_pack", "packed"]));
+    .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
+    .where(and(inArray(orders.status, [...OPEN_STATUSES]), sql`COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested'`));
 
   return {
     remaining: Number(row?.remaining ?? 0),

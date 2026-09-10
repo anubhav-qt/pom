@@ -4,6 +4,7 @@ import { db } from "@/db";
 import {
   catalogImages,
   channelEnum,
+  orderFulfilment,
   orderItems,
   orders,
   orderStatusEnum,
@@ -122,11 +123,13 @@ export default async function OrdersPage({
   }
 
   const rows = await db
-    .select()
+    .select({ order: orders, fulfilmentState: orderFulfilment.state })
     .from(orders)
+    .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
     .where(filters.length ? and(...filters) : undefined)
     .orderBy(orders.dispatchBy, desc(orders.orderedAt))
-    .limit(PAGE_SIZE);
+    .limit(PAGE_SIZE)
+    .then((res) => res.map((r) => ({ ...r.order, fulfilmentState: r.fulfilmentState })));
 
   const items = rows.length
     ? await db
@@ -172,6 +175,7 @@ export default async function OrdersPage({
     shipState: o.shipState,
     totalAmount: o.totalAmount,
     isCod: o.isCod,
+    fulfilmentState: o.fulfilmentState ?? "to_pack",
     items: (itemsByOrder.get(o.id) ?? []).map((it) => ({
       sku: it.externalSku,
       title: it.title,
@@ -181,18 +185,22 @@ export default async function OrdersPage({
     })),
   }));
 
+  // The split between these two is ours, not the marketplace's: Amazon calls
+  // every one of these orders `Unshipped` right up until the courier scans it.
   const [counts] = isQueueView
     ? await db
         .select({
-          open: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} IN ('new','ready_to_pack'))`,
-          packed: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'packed')`,
-          late: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} IN ('new','ready_to_pack') AND ${orders.dispatchBy} < now())`,
+          open: sql<number>`COUNT(*) FILTER (WHERE COALESCE(${orderFulfilment.state}, 'to_pack') = 'to_pack')`,
+          packed: sql<number>`COUNT(*) FILTER (WHERE ${orderFulfilment.state} = 'packed')`,
+          late: sql<number>`COUNT(*) FILTER (WHERE COALESCE(${orderFulfilment.state}, 'to_pack') = 'to_pack' AND ${orders.dispatchBy} < now())`,
         })
         .from(orders)
+        .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
         .where(
           and(
             inArray(orders.status, [...OPEN_STATUSES]),
             inArray(orders.channel, [...ENABLED_CHANNELS]),
+            sql`COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested'`,
           ),
         )
     : [undefined];
@@ -206,7 +214,7 @@ export default async function OrdersPage({
       {isQueueView && counts ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Stat label="To pack" value={Number(counts.open ?? 0)} />
-          <Stat label="Packed, awaiting manifest" value={Number(counts.packed ?? 0)} />
+          <Stat label="To ship" value={Number(counts.packed ?? 0)} />
           <Stat
             label="Past dispatch deadline"
             value={Number(counts.late ?? 0)}

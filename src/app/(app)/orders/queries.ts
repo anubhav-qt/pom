@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { ENABLED_CHANNELS } from "@/config/features";
 import {
   catalogImages,
+  orderFulfilment,
   orderItems,
   orders,
   orderStatusEvents,
@@ -12,8 +13,13 @@ import {
   type Channel,
 } from "@/db/schema";
 
-/** Statuses that still need the warehouse to act — the "to ship" queue. */
-export const OPEN_STATUSES = ["new", "ready_to_pack", "packed"] as const;
+/**
+ * Channel statuses that still need the warehouse to act. Re-exported from
+ * `lib/fulfilment`, which is where the queue predicate lives now that the
+ * to-pack / to-ship split comes from our own state rather than this column.
+ */
+import { OPEN_STATUSES } from "@/lib/fulfilment";
+export { OPEN_STATUSES };
 
 /** The terminal statuses the Cancelled & RTO screen is built from. */
 export const CANCELLED_STATUSES = ["cancelled", "rto", "returned"] as const;
@@ -50,6 +56,10 @@ export async function getToShipPickList(channel?: Channel): Promise<PickRow[]> {
     inArray(orders.status, [...OPEN_STATUSES]),
     inArray(orders.channel, [...ENABLED_CHANNELS]),
     eq(orderItems.cancelled, false),
+    // Nothing we have already handed to the courier: the channel status stays
+    // open until Amazon notices the pickup, so this is the only thing keeping
+    // dispatched parcels off the shelf run.
+    sql`COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested'`,
   ];
   if (channel) filters.push(eq(orders.channel, channel));
 
@@ -72,6 +82,7 @@ export async function getToShipPickList(channel?: Channel): Promise<PickRow[]> {
     })
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
+    .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
     .leftJoin(products, eq(products.id, orderItems.productId))
     .leftJoin(
       catalogImages,
@@ -197,6 +208,7 @@ export async function getCancellationRecords(opts: {
     })
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
+    .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
     .leftJoin(products, eq(products.id, orderItems.productId))
     .where(inArray(orderItems.orderId, rows.map((r) => r.orderId)));
 

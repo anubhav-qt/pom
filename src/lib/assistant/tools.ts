@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { ENABLED_CHANNELS } from "@/config/features";
 import { db } from "@/db";
-import { orderItems, orders, orderStatusEnum } from "@/db/schema";
+import { orderFulfilment, orderItems, orders, orderStatusEnum } from "@/db/schema";
 
 import {
   getDailySeries,
@@ -212,10 +212,13 @@ export const getLateOrdersTool = tool(
         shipState: orders.shipState,
       })
       .from(orders)
+      .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
       .where(
         and(
           inArray(orders.channel, [...ENABLED_CHANNELS]),
           inArray(orders.status, ["new", "ready_to_pack", "packed"]),
+          // Still on our bench — a parcel we have manifested is not late.
+          sql`COALESCE(${orderFulfilment.state}, 'to_pack') = 'to_pack'`,
           lt(orders.dispatchBy, new Date()),
         ),
       )

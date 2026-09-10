@@ -5,7 +5,7 @@ import { AppHeader } from "@/components/app-header";
 import { ChatWidget } from "@/components/assistant/chat-widget";
 import { ENABLED_CHANNELS } from "@/config/features";
 import { db } from "@/db";
-import { channelAccounts, orders, syncRuns } from "@/db/schema";
+import { channelAccounts, orderFulfilment, orders, syncRuns } from "@/db/schema";
 import { destroySession, requireFreshPassword, requireUser } from "@/lib/auth";
 
 import { syncNow } from "./settings/actions";
@@ -36,11 +36,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const [orderCounts] = await db
     .select({
-      toShip: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} IN ('new','ready_to_pack','packed'))::int`,
+      // Excludes anything we have already manifested: the channel still calls
+      // it open, but it has left the building.
+      toShip: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} IN ('new','ready_to_pack','packed') AND COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested')::int`,
       shipped: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} = 'shipped')::int`,
       cancelledRto: sql<number>`COUNT(*) FILTER (WHERE ${orders.status} IN ('cancelled','rto','returned'))::int`,
     })
     .from(orders)
+    .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
     .where(inArray(orders.channel, [...ENABLED_CHANNELS]));
 
   async function signOut() {
