@@ -64,10 +64,12 @@ if the adapter holds up.
 
 ---
 
-## 3. Push sync (polling is live)
+## 3. Push sync
 
-**Done 2026-09-10:** `vercel.json` runs `/api/cron/sync` every 15 minutes. The
-manual-only period cost us real data — see docs/SYNC.md. Remaining option:
+Syncing is triggered by opening the app, at most once every 30 minutes, plus
+the Sync now button. There is no cron (decision 2026-09-10: a schedule was
+added and then dropped in favour of the open trigger, which costs nothing when
+nobody is looking at the data). Remaining option:
 
 - **Push (no polling):** the Notifications API *is* available to this app
   (`GET /notifications/v1/destinations` → 200; `ORDER_CHANGE` subscription

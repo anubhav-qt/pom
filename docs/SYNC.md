@@ -8,10 +8,15 @@ the other.
 `syncAccount(account, "orders")`, run by the manual **Sync now** button in the
 header / Settings.
 
-> **Scheduled every 15 minutes** since 2026-09-10. `vercel.json` has a `crons`
-> entry pointing at `/api/cron/sync`, which Vercel calls with the `CRON_SECRET`
-> as a bearer token. **Sync now** remains available for when you don't want to
-> wait for the next tick.
+> **Triggered by opening the app**, at most once every 30 minutes
+> (`autoSyncOnOpen` in `app/(app)/settings/actions.ts`). There is no cron:
+> `vercel.json` has no `crons` entry. **Sync now** forces one regardless.
+>
+> The 30-minute gate is checked on the server, against the last `orders` run in
+> `sync_runs`, not in the browser. A flag per tab would let two tabs, two people
+> or a reload each believe they were the first and start their own sync, and
+> several overlapping syncs against a 0.5 req/sec endpoint is worse than none.
+> A run that is still going counts as fresh for the same reason.
 >
 > This ran manual-only between 2026-08-31 and 2026-09-10, and that is what broke
 > order `405-2227158-3721960`: nothing synced for four days, the order changed on

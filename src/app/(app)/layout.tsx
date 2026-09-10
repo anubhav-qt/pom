@@ -8,7 +8,7 @@ import { db } from "@/db";
 import { channelAccounts, orderFulfilment, orders, syncRuns } from "@/db/schema";
 import { destroySession, requireFreshPassword, requireUser } from "@/lib/auth";
 
-import { syncNow } from "./settings/actions";
+import { autoSyncOnOpen, syncNow } from "./settings/actions";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -65,6 +65,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         }}
         onSignOut={signOut}
         onSyncNow={syncNow}
+        onAutoSync={autoSyncOnOpen}
       />
 
       <main className="mx-auto max-w-7xl px-4 pb-8 pt-6 sm:px-6">{children}</main>

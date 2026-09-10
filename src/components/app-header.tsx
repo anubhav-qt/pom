@@ -27,6 +27,16 @@ interface SyncResult {
 }
 
 /**
+ * `ok` only when a sync was actually started. `skipped` says why not: the last
+ * one is still recent, or one is already running.
+ */
+interface AutoSyncResult {
+  ok: boolean;
+  runId?: number;
+  skipped?: "fresh" | "running" | "error";
+}
+
+/**
  * The app's header: a single merged top bar, replacing the old floating pill.
  *
  *  Band 1 — brand · Dashboard/Orders switch · sync status · Sync now · avatar.
@@ -43,6 +53,7 @@ export function AppHeader({
   counts,
   onSignOut,
   onSyncNow,
+  onAutoSync,
 }: {
   userName: string;
   /** ISO timestamp of the most recent sync run, or null if none yet. */
@@ -54,6 +65,8 @@ export function AppHeader({
   onSignOut: () => Promise<void>;
   /** Server action that kicks a manual sync and returns its run id. */
   onSyncNow: (accountId: number) => Promise<SyncResult>;
+  /** Server action that syncs on open, but only when one is due. */
+  onAutoSync: (accountId: number) => Promise<AutoSyncResult>;
 }) {
   const pathname = usePathname();
   const onOrders = pathname === "/orders" || pathname.startsWith("/orders/");
@@ -83,7 +96,11 @@ export function AppHeader({
         <SyncStatus lastSyncAt={lastSyncAt} />
 
         {primaryAccountId !== null ? (
-          <SyncNowButton accountId={primaryAccountId} onSyncNow={onSyncNow} />
+          <SyncNowButton
+            accountId={primaryAccountId}
+            onSyncNow={onSyncNow}
+            onAutoSync={onAutoSync}
+          />
         ) : null}
 
         <AvatarMenu userName={userName} onSignOut={onSignOut} />
@@ -193,9 +210,12 @@ const POLL_MS = 800;
 function SyncNowButton({
   accountId,
   onSyncNow,
+  onAutoSync,
 }: {
   accountId: number;
   onSyncNow: (accountId: number) => Promise<SyncResult>;
+  /** Fires once on open; the server decides whether it is actually due. */
+  onAutoSync: (accountId: number) => Promise<AutoSyncResult>;
 }) {
   const router = useRouter();
   const [state, setState] = useState<"idle" | "syncing" | "error">("idle");
@@ -208,6 +228,33 @@ function SyncNowButton({
     [],
   );
 
+  /**
+   * Opening the app is what triggers a sync now that there is no cron.
+   *
+   * Whether one is actually due is decided on the server, not here: a browser
+   * flag would let two tabs, two people or a reload each believe they were
+   * first. This just asks, and starts watching if the answer is yes.
+   *
+   * The guard is for React running effects twice in development, not for
+   * concurrency, which the server handles.
+   */
+  const asked = useRef(false);
+  useEffect(() => {
+    if (asked.current) return;
+    asked.current = true;
+
+    let cancelled = false;
+    void onAutoSync(accountId).then((res) => {
+      if (cancelled || !res.ok || !res.runId) return;
+      setState("syncing");
+      watch(res.runId);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
+
   async function start() {
     setState("syncing");
     const res = await onSyncNow(accountId);
@@ -218,8 +265,13 @@ function SyncNowButton({
       return;
     }
 
+    watch(res.runId);
+  }
+
+  function watch(runId: number) {
+    if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
-      const r = await fetch(`/api/sync-progress?runId=${res.runId}`);
+      const r = await fetch(`/api/sync-progress?runId=${runId}`);
       if (!r.ok) return;
       const data = (await r.json()) as { status: "running" | "ok" | "failed" };
       if (data.status !== "running") {
