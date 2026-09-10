@@ -457,13 +457,21 @@ export class AmazonAdapter implements ChannelAdapter {
   private static readonly ALL_ORDERS_REPORT =
     "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL";
 
-  private async createReport(reportType: string, start: Date, end: Date): Promise<string> {
+  /**
+   * `range` is omitted for snapshot reports (the listings catalogue is "what is
+   * live right now", not a date slice) and required for the order reports.
+   */
+  private async createReport(
+    reportType: string,
+    range?: { start: Date; end: Date },
+  ): Promise<string> {
     const res = await this.request<{ reportId?: string }>("/reports/2021-06-30/reports", {
       method: "POST",
       body: JSON.stringify({
         reportType,
-        dataStartTime: start.toISOString(),
-        dataEndTime: end.toISOString(),
+        ...(range
+          ? { dataStartTime: range.start.toISOString(), dataEndTime: range.end.toISOString() }
+          : {}),
         marketplaceIds: [this.marketplaceId],
       }),
     });
@@ -535,7 +543,7 @@ export class AmazonAdapter implements ChannelAdapter {
     if (this.isSandbox) {
       throw new ChannelError("amazon", "reports backfill is not available against the sandbox");
     }
-    const reportId = await this.createReport(AmazonAdapter.ALL_ORDERS_REPORT, start, end);
+    const reportId = await this.createReport(AmazonAdapter.ALL_ORDERS_REPORT, { start, end });
     const documentId = await this.pollReport(reportId);
     const tsv = await this.downloadReport(documentId);
 
@@ -543,6 +551,25 @@ export class AmazonAdapter implements ChannelAdapter {
     for (let i = 0; i < parsed.length; i += 500) {
       yield parsed.slice(i, i + 500);
     }
+  }
+
+  private static readonly LISTINGS_REPORT = "GET_MERCHANT_LISTINGS_ALL_DATA";
+
+  /**
+   * The seller's live listings catalogue — one row per seller SKU, with the
+   * ASIN, title and the quantity Amazon currently believes we hold.
+   *
+   * This is the authoritative answer to "what SKUs exist", which orders alone
+   * cannot give: orders only ever mention SKUs that have sold, and a SKU that
+   * has sold may since have been delisted. Callers should union the two.
+   */
+  async fetchListings(): Promise<AmazonListing[]> {
+    if (this.isSandbox) {
+      throw new ChannelError("amazon", "the listings report is not available against the sandbox");
+    }
+    const reportId = await this.createReport(AmazonAdapter.LISTINGS_REPORT);
+    const documentId = await this.pollReport(reportId);
+    return parseListingsReport(await this.downloadReport(documentId));
   }
 
   /* ------------------------------------------------------ catalog images -- */
@@ -758,6 +785,57 @@ function parseAllOrdersReport(tsv: string): CanonicalOrder[] {
 }
 
 /**
+ * Parse `GET_MERCHANT_LISTINGS_ALL_DATA` — tab-separated, one row per seller
+ * SKU. Looked up by header name like the orders report: the columns are stable
+ * but their order is not.
+ */
+function parseListingsReport(tsv: string): AmazonListing[] {
+  const lines = tsv.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length < 2) return [];
+
+  const headers = lines[0].split("\t").map((h) => h.trim().toLowerCase());
+  const at = (...names: string[]) => {
+    for (const n of names) {
+      const i = headers.indexOf(n);
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const col = {
+    sku: at("seller-sku", "sku"),
+    asin: at("asin1", "asin"),
+    name: at("item-name", "product-name"),
+    quantity: at("quantity"),
+    price: at("price"),
+    status: at("status"),
+  };
+  if (col.sku < 0) {
+    throw new ChannelError(
+      "amazon",
+      `unexpected listings report format — no "seller-sku" column (saw: ${headers.slice(0, 8).join(", ")}…)`,
+    );
+  }
+
+  const cell = (row: string[], i: number) => (i >= 0 ? (row[i] ?? "").trim() : "");
+  const out: AmazonListing[] = [];
+  for (const line of lines.slice(1)) {
+    const f = line.split("\t");
+    const sku = cell(f, col.sku);
+    if (!sku) continue;
+    const qty = Number(cell(f, col.quantity));
+    out.push({
+      externalSku: sku,
+      asin: cell(f, col.asin) || null,
+      title: cell(f, col.name) || null,
+      quantity: Number.isFinite(qty) ? qty : null,
+      price: cell(f, col.price) || null,
+      status: cell(f, col.status) || null,
+    });
+  }
+  return out;
+}
+
+/**
  * Advance the cursor only as far as we genuinely ingested. When a page was cut
  * short we rewind one second behind the newest record, so a re-read overlaps
  * rather than leaving a hole — upserts make the overlap harmless.
@@ -816,6 +894,17 @@ class TokenBucket {
 }
 
 /* ----------------------------------------------------------- API shapes -- */
+
+export interface AmazonListing {
+  externalSku: string;
+  asin: string | null;
+  title: string | null;
+  /** Amazon's own on-hand figure for this SKU, where the report carries one. */
+  quantity: number | null;
+  price: string | null;
+  /** "Active" / "Inactive" — an inactive listing is still real history. */
+  status: string | null;
+}
 
 interface AmazonOrdersPayload {
   Orders?: AmazonOrder[];
