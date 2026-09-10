@@ -8,12 +8,16 @@ the other.
 `syncAccount(account, "orders")`, run by the manual **Sync now** button in the
 header / Settings.
 
-> **No scheduled sync right now** (decision 2026-08-31). `vercel.json` has no
-> `crons` entry and nothing calls `/api/cron/sync` automatically — data is only
-> as fresh as the last time someone pressed **Sync now**. The route still exists
-> and still works if hit with the `CRON_SECRET`; re-adding the schedule is a
-> one-line change to `vercel.json`. Re-enabling it (or moving to push) is a
-> [ROADMAP.md](ROADMAP.md) item for v2.
+> **Scheduled every 15 minutes** since 2026-09-10. `vercel.json` has a `crons`
+> entry pointing at `/api/cron/sync`, which Vercel calls with the `CRON_SECRET`
+> as a bearer token. **Sync now** remains available for when you don't want to
+> wait for the next tick.
+>
+> This ran manual-only between 2026-08-31 and 2026-09-10, and that is what broke
+> order `405-2227158-3721960`: nothing synced for four days, the order changed on
+> Amazon inside that gap, and the old fixed 72-hour window had already rolled past
+> it by the next run. Moving to push (SQS/EventBridge) is still a
+> [ROADMAP.md](ROADMAP.md) item — polling is sufficient at this volume.
 
 - **Cursor, with a 72-hour floor.** It asks Amazon for `LastUpdatedAfter =
   min(ordersSyncedThrough − 1min, now − 72h)`, capped at 30 days back. The saved

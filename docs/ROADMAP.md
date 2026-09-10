@@ -64,20 +64,18 @@ if the adapter holds up.
 
 ---
 
-## 3. Scheduled / push sync (currently manual only)
+## 3. Push sync (polling is live)
 
-`vercel.json` has **no `crons` entry** (decision 2026-08-31) — sync only runs
-when someone presses **Sync now**. Options for v2:
+**Done 2026-09-10:** `vercel.json` runs `/api/cron/sync` every 15 minutes. The
+manual-only period cost us real data — see docs/SYNC.md. Remaining option:
 
-- **Simplest:** put back `{ "path": "/api/cron/sync", "schedule": "*/10 * * * *" }`
-  in `vercel.json`. The route already exists and works.
 - **Push (no polling):** the Notifications API *is* available to this app
   (`GET /notifications/v1/destinations` → 200; `ORDER_CHANGE` subscription
   allowed). But SP-API push is **not a webhook / websocket** — it only delivers
   to an **Amazon SQS queue** or **EventBridge** you own. That means standing up
   an SQS queue + a consumer (or a Lambda that calls a Vercel webhook), plus a
   low-frequency reconcile sweep as a backstop. Worth it only once order volume
-  or "must action within minutes" makes 10-minute latency a real problem.
+  or "must action within minutes" makes 15-minute latency a real problem.
 
 Re-check with `npm run tsx scripts/probe-amazon-notifications.ts`.
 
