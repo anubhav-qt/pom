@@ -16,10 +16,19 @@ export function CancellationsPanel({
   records,
   counts,
   resolved,
+  onResolvedChange,
+  rightSlot,
 }: {
   records: CancellationRecord[];
   counts: { pending: number; completed: number };
   resolved: boolean;
+  /**
+   * Switch between Pending and Completed without a navigation, so the workspace
+   * can serve the other tab from cache. Falls back to a link when absent.
+   */
+  onResolvedChange?: (resolved: boolean) => void;
+  /** Rendered at the right end of the sub-tab row, e.g. the scan button. */
+  rightSlot?: React.ReactNode;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -36,16 +45,28 @@ export function CancellationsPanel({
 
   return (
     <div className="space-y-4">
-      <div
-        className="inline-flex rounded-[10px] p-[3px]"
-        style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-xs)" }}
-      >
-        <SubTab href="/orders?view=cancellations" active={!resolved}>
-          Pending <Count n={counts.pending} />
-        </SubTab>
-        <SubTab href="/orders?view=cancellations&resolved=1" active={resolved}>
-          Completed <Count n={counts.completed} />
-        </SubTab>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div
+          className="inline-flex rounded-[10px] p-[3px]"
+          style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-xs)" }}
+        >
+          <SubTab
+            href="/orders?view=cancellations"
+            active={!resolved}
+            onSelect={onResolvedChange ? () => onResolvedChange(false) : undefined}
+          >
+            Pending <Count n={counts.pending} />
+          </SubTab>
+          <SubTab
+            href="/orders?view=cancellations&resolved=1"
+            active={resolved}
+            onSelect={onResolvedChange ? () => onResolvedChange(true) : undefined}
+          >
+            Completed <Count n={counts.completed} />
+          </SubTab>
+        </div>
+
+        {rightSlot}
       </div>
 
       <div className="panel overflow-x-auto">
@@ -147,21 +168,31 @@ export function CancellationsPanel({
 function SubTab({
   href,
   active,
+  onSelect,
   children,
 }: {
   href: string;
   active: boolean;
+  /** When given, the tab switches in place instead of navigating. */
+  onSelect?: () => void;
   children: React.ReactNode;
 }) {
+  const className = cn(
+    "inline-flex items-center gap-1.5 rounded-[7px] px-3 py-1.5 text-sm font-medium transition-colors",
+    !active && "muted",
+  );
+  const style = active ? { background: "var(--accent-soft)", color: "#0b7fb0" } : undefined;
+
+  if (onSelect) {
+    return (
+      <button type="button" onClick={onSelect} className={className} style={style}>
+        {children}
+      </button>
+    );
+  }
+
   return (
-    <Link
-      href={href}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-[7px] px-3 py-1.5 text-sm font-medium transition-colors",
-        !active && "muted",
-      )}
-      style={active ? { background: "var(--accent-soft)", color: "#0b7fb0" } : undefined}
-    >
+    <Link href={href} className={className} style={style}>
       {children}
     </Link>
   );

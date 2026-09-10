@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
-
 import { CHANNEL_META } from "@/channels";
 import { ENABLED_CHANNELS } from "@/config/features";
 import type { Channel } from "@/db/schema";
+import { useOrdersNav } from "@/lib/stores/orders-cache";
 import { cn } from "@/lib/utils";
 
 type View = "list" | "collection" | "planner";
@@ -27,13 +26,16 @@ export function OrdersToolbar({
   /** Rendered at the right end of the toolbar row (e.g. the collection sheet button). */
   rightSlot?: React.ReactNode;
 }) {
-  function href(view: View) {
-    const p = new URLSearchParams();
-    if (view !== "list") p.set("view", view);
-    if (activeChannel) p.set("channel", activeChannel);
-    if (query) p.set("q", query);
-    const qs = p.toString();
-    return `/orders${qs ? `?${qs}` : ""}`;
+  const go = useOrdersNav((s) => s.go);
+
+  // Switching view is a cache lookup, not a navigation: `go` moves the URL with
+  // pushState and the workspace re-reads from the store.
+  function select(view: View) {
+    go({
+      view: view === "list" ? undefined : view,
+      channel: activeChannel,
+      q: query || undefined,
+    });
   }
 
   const tabs: { view: View; label: string; icon: React.ReactNode }[] = [
@@ -78,9 +80,10 @@ export function OrdersToolbar({
         {tabs.map((t) => {
           const active = t.view === activeView;
           return (
-            <Link
+            <button
               key={t.view}
-              href={href(t.view)}
+              type="button"
+              onClick={() => select(t.view)}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-medium transition-colors",
                 !active && "muted",
@@ -93,7 +96,7 @@ export function OrdersToolbar({
             >
               {t.icon}
               {t.label}
-            </Link>
+            </button>
           );
         })}
       </div>

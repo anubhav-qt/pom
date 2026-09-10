@@ -5,6 +5,13 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import {
+  paramsToQuery,
+  queryToParams,
+  useOrdersCache,
+  useOrdersNav,
+} from "@/lib/stores/orders-cache";
+import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
 import { cn } from "@/lib/utils";
 
 export interface HeaderCounts {
@@ -219,6 +226,10 @@ function SyncNowButton({
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = null;
         setState(data.status === "failed" ? "error" : "idle");
+        // A sync rewrites orders wholesale, so nothing cached survives it.
+        // This is the half of the caching contract that keeps the queue honest:
+        // without it, a tab held in memory would go on showing pre-sync data.
+        useOrdersCache.getState().bumpSync();
         router.refresh();
         if (data.status === "failed") setTimeout(() => setState("idle"), 2500);
       }
@@ -331,19 +342,28 @@ function AvatarMenu({
 
 type TabKey = "toShip" | "shipped" | "delivered" | "cancellations" | "all";
 
-const ORDER_TABS: { key: TabKey; label: string; query: string }[] = [
-  { key: "toShip", label: "To Ship", query: "" },
-  { key: "shipped", label: "Shipped", query: "?status=shipped" },
-  { key: "delivered", label: "Delivered", query: "?status=delivered" },
-  { key: "cancellations", label: "Cancelled & RTO", query: "?view=cancellations" },
-  { key: "all", label: "All orders", query: "?status=all" },
+const ORDER_TABS: { key: TabKey; label: string; params: OrdersViewParams }[] = [
+  { key: "toShip", label: "To Ship", params: {} },
+  { key: "shipped", label: "Shipped", params: { status: "shipped" } },
+  { key: "delivered", label: "Delivered", params: { status: "delivered" } },
+  { key: "cancellations", label: "Cancelled & RTO", params: { view: "cancellations" } },
+  { key: "all", label: "All orders", params: { status: "all" } },
 ];
 
 function OrdersTabs({ counts }: { counts: HeaderCounts }) {
   const params = useSearchParams();
+  const pathname = usePathname();
   const router = useRouter();
+  const go = useOrdersNav((s) => s.go);
   const status = params.get("status");
   const view = params.get("view");
+
+  // On /orders the tabs switch in place so the client cache can answer; from
+  // anywhere else there is no workspace mounted yet, so it has to navigate.
+  function select(next: OrdersViewParams) {
+    if (pathname === "/orders") go({ ...next, q: params.get("q") ?? undefined });
+    else router.push(`/orders${paramsToQuery(next)}`);
+  }
 
   let activeKey: TabKey = "toShip";
   if (view === "cancellations") activeKey = "cancellations";
@@ -361,10 +381,7 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
   function onSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const value = String(new FormData(e.currentTarget).get("q") ?? "").trim();
-    const next = new URLSearchParams(params.toString());
-    if (value) next.set("q", value);
-    else next.delete("q");
-    router.push(`/orders${next.toString() ? `?${next}` : ""}`);
+    go({ ...queryToParams(params.toString()), q: value || undefined });
   }
 
   return (
@@ -376,9 +393,10 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
         const active = tab.key === activeKey;
         const badge = badgeFor[tab.key];
         return (
-          <Link
+          <button
             key={tab.key}
-            href={`/orders${tab.query}`}
+            type="button"
+            onClick={() => select(tab.params)}
             className={cn(
               "inline-flex items-center gap-2 whitespace-nowrap border-b-2 py-3 text-[13.5px] font-medium transition-colors",
               !active && "muted hover:text-[var(--text)]",
@@ -401,7 +419,7 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
                 {badge}
               </span>
             ) : null}
-          </Link>
+          </button>
         );
       })}
 
