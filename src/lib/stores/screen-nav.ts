@@ -2,6 +2,9 @@
 
 import { create } from "zustand";
 
+import { ordersViewKey, useOrdersCache, useOrdersNav } from "./orders-cache";
+import { useDashboardCache, useDashboardNav } from "./dashboard-cache";
+
 /**
  * The two screens the top toggle switches between. Everything else in the app
  * ("/settings", "/pack", ...) is a normal route and never an override.
@@ -41,3 +44,27 @@ export const useScreenNav = create<ScreenNavState>((set) => ({
   override: null,
   setOverride: (override) => set({ override }),
 }));
+
+/**
+ * What should actually be on screen: the override, but only when the screen
+ * it points at is something the in-place swap can actually render.
+ *
+ * `AppHeader` (which tabs are lit) and `ScreenSwitcher` (what body renders)
+ * used to each answer this question themselves, and could disagree — the
+ * override says "orders" so the header lights the Orders tab, but the swap's
+ * own cache lookup comes up empty (a stale pushState entry from a popstate,
+ * a cache a sync just cleared, ...) so the body quietly falls back to
+ * `children`, whatever route was last actually rendered. One function, used
+ * by both, means they can no longer land on different answers.
+ */
+export function resolveScreen(pathname: string, override: Screen | null): Screen | null {
+  const route = screenFromPath(pathname);
+  if (override === null || override === route) return route;
+
+  const cached =
+    override === "orders"
+      ? useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
+      : useDashboardCache.getState().peek(useDashboardNav.getState().range) !== null;
+
+  return cached ? override : route;
+}

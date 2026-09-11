@@ -95,17 +95,39 @@ export function ChatWidget() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ question, history, displayMode }),
       });
-      const data = await res.json();
 
-      if (!res.ok) {
-        setMessages((m) => [...m, { role: "assistant", content: data.error ?? "Something went wrong.", error: true }]);
-      } else {
-        setMessages((m) => [...m, { role: "assistant", content: data.reply, cards: data.cards }]);
+      // Read as text first: a request that failed before it ever reached our
+      // route handler — a gateway timeout, a proxy/rewrite error page — comes
+      // back as HTML or plain text, not JSON, and `res.json()` would just
+      // throw a generic parse error indistinguishable from an offline browser.
+      const raw = await res.text();
+      let data: { reply?: string; cards?: AssistantCard[]; error?: string } | null = null;
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch {
+        /* not JSON — handled below */
       }
-    } catch {
+
+      if (!res.ok || !data) {
+        const content =
+          data?.error ??
+          (res.status === 504
+            ? "The assistant took too long to answer that — try a narrower question."
+            : `The assistant returned an unexpected response (HTTP ${res.status}).`);
+        setMessages((m) => [...m, { role: "assistant", content, error: true }]);
+      } else {
+        setMessages((m) => [...m, { role: "assistant", content: data!.reply ?? "", cards: data!.cards }]);
+      }
+    } catch (err) {
+      // The fetch itself never resolved — a genuine network/connectivity
+      // failure, as opposed to a bad response from the server.
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: "Couldn't reach the assistant — check your connection.", error: true },
+        {
+          role: "assistant",
+          content: `Couldn't reach the assistant${err instanceof Error && err.message ? ` — ${err.message}` : " — check your connection."}`,
+          error: true,
+        },
       ]);
     } finally {
       setBusy(false);

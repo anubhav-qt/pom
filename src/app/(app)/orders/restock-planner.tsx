@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { Empty } from "@/components/ui";
+import { ImageLightbox } from "@/components/image-lightbox";
 import { colorSwatch } from "@/lib/variant-title";
 
 import {
@@ -61,6 +62,7 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
   const [busy, setBusy] = useState<null | "reset" | "jpeg" | "pdf">(null);
   const [error, setError] = useState<string | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(initialPlan.generatedAt);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   const active =
     plan.products.find((p) => p.baseKey === activeKey) ?? plan.products[0] ?? null;
@@ -140,11 +142,14 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
   }
 
   const t = plan.totals;
+  const selIdsForActive = active
+    ? [...selected].filter((id) => active.cells.some((c) => c.id === id))
+    : [];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-24 sm:pb-0">
       {/* ---------------------------------------------------------- top strip */}
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="panel flex flex-wrap items-center justify-between gap-3 p-4">
         <div className="flex items-end gap-2">
           <Kpi label="products" value={t.products} />
           <Kpi label="need" value={t.needed} />
@@ -152,7 +157,7 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
           <Kpi label="to buy" value={t.buy} tone="buy" />
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="hidden items-center gap-2 sm:flex">
           {generatedAt ? (
             <span className="muted text-[11px]">built {relTime(generatedAt)}</span>
           ) : null}
@@ -174,6 +179,10 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
             {busy === "pdf" ? "…" : "PDF"}
           </button>
         </div>
+
+        {generatedAt ? (
+          <span className="muted text-[11px] sm:hidden">built {relTime(generatedAt)}</span>
+        ) : null}
       </div>
 
       {error ? (
@@ -214,7 +223,15 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
                     boxShadow: on ? "inset 3px 0 0 var(--accent)" : undefined,
                   }}
                 >
-                  <Thumb src={p.imageUrl} size={44} />
+                  <span
+                    onClick={(e) => {
+                      if (!p.imageUrl) return;
+                      e.stopPropagation();
+                      setLightbox({ src: p.imageUrl, alt: p.label });
+                    }}
+                  >
+                    <Thumb src={p.imageUrl} size={44} />
+                  </span>
                   <span className="min-w-0 flex-1">
                     <span className="line-clamp-2 text-[12.5px] font-semibold leading-tight">
                       {p.label}
@@ -257,16 +274,62 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
             onHave={setHave}
             onMarkInStock={markInStock}
             onExclude={setExcluded}
+            onOpenImage={(src, alt) => setLightbox({ src, alt })}
           />
         ) : null}
       </div>
 
-      <p className="muted max-w-[820px] text-[11.5px]">
+      <p className="muted hidden max-w-[820px] text-[11.5px] sm:block">
         <b>need</b> = units in today’s open orders for that size + colour · <b>have</b> = what you
         count on the shelf · <b>buy</b> = need − have. Click a cell, a colour, or a size header to
         select in bulk. <b>Reset from latest sync</b> rebuilds the grid and drops every edit. The buy
         sheet exports only the <b>buy</b> quantities for the wholesaler.
       </p>
+
+      {/* ------------------------------------------------------ mobile bottom bar */}
+      <div
+        className="fixed inset-x-0 bottom-0 z-40 border-t p-3 sm:hidden"
+        style={{ background: "var(--panel)", borderColor: "var(--border)", boxShadow: "0 -6px 20px rgba(15,37,54,0.08)" }}
+      >
+        {selIdsForActive.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 text-[12px]">
+            <b className="tabular-nums">{selIdsForActive.length}</b> selected
+            <button className="btn text-xs" onClick={() => markInStock(selIdsForActive)}>
+              In stock
+            </button>
+            <button className="btn text-xs" onClick={() => setExcluded(selIdsForActive, true)}>
+              Exclude
+            </button>
+            <button className="btn ml-auto text-xs" onClick={() => setSelected(new Set())}>
+              Clear
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button className="btn flex-1 text-xs" disabled={busy !== null} onClick={reset}>
+              {busy === "reset" ? "Rebuilding…" : "Reset"}
+            </button>
+            <button
+              className="btn btn-primary flex-1 text-xs"
+              disabled={busy !== null || t.buy === 0}
+              onClick={() => exportSheet("jpeg")}
+            >
+              {busy === "jpeg" ? "…" : "JPEG"}
+            </button>
+            <button
+              className="btn btn-primary flex-1 text-xs"
+              disabled={busy !== null || t.buy === 0}
+              onClick={() => exportSheet("pdf")}
+            >
+              {busy === "pdf" ? "…" : "PDF"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {lightbox ? (
+        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
+      ) : null}
     </div>
   );
 }
@@ -282,6 +345,7 @@ function ProductPanel({
   onHave,
   onMarkInStock,
   onExclude,
+  onOpenImage,
 }: {
   product: PlanProduct;
   selected: Set<number>;
@@ -289,7 +353,11 @@ function ProductPanel({
   onHave: (ids: number[], have: number) => void;
   onMarkInStock: (ids: number[]) => void;
   onExclude: (ids: number[], excluded: boolean) => void;
+  onOpenImage: (src: string, alt: string) => void;
 }) {
+  const [activeColor, setActiveColor] = useState<string>(product.colors[0] ?? "");
+  const [selectMode, setSelectMode] = useState(false);
+
   const byCell = useMemo(() => {
     const m = new Map<string, PlanCell>();
     for (const c of product.cells) m.set(`${c.color} ${c.size}`, c);
@@ -322,7 +390,15 @@ function ProductPanel({
     <div className="panel max-w-[900px] overflow-hidden">
       {/* header */}
       <div className="flex gap-4 border-b p-5" style={{ borderColor: "var(--border)" }}>
-        <Thumb src={product.imageUrl} size={128} />
+        <span
+          onClick={(e) => {
+            if (!product.imageUrl) return;
+            e.stopPropagation();
+            onOpenImage(product.imageUrl, product.label);
+          }}
+        >
+          <Thumb src={product.imageUrl} size={128} />
+        </span>
         <div className="min-w-0 flex-1">
           <div className="text-[17px] font-extrabold leading-tight tracking-tight">{product.label}</div>
           <div className="mt-1.5 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
@@ -352,10 +428,10 @@ function ProductPanel({
         </button>
       </div>
 
-      {/* bulk bar */}
+      {/* bulk bar — desktop only; mobile selection uses the docked bottom bar */}
       {selIds.length > 0 ? (
         <div
-          className="mx-5 mt-4 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-[12px] text-white"
+          className="mx-5 mt-4 hidden flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-[12px] text-white sm:flex"
           style={{ background: "#0f2536" }}
         >
           <b className="tabular-nums">{selIds.length}</b> selected
@@ -383,8 +459,8 @@ function ProductPanel({
         </div>
       ) : null}
 
-      {/* matrix */}
-      <div className="overflow-x-auto p-5">
+      {/* matrix — desktop/tablet only; the size×colour table never renders on mobile */}
+      <div className="hidden overflow-x-auto p-5 sm:block">
         <table className="border-collapse" style={{ tableLayout: "fixed" }}>
           <colgroup>
             <col style={{ width: 150 }} />
@@ -530,6 +606,105 @@ function ProductPanel({
           </tbody>
         </table>
       </div>
+
+      {/* mobile — one colour at a time, sizes as a stepper list */}
+      <div className="space-y-3 p-4 sm:hidden">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+            Colour
+          </span>
+          <button
+            className="text-[11.5px] font-semibold"
+            style={{ color: selectMode ? "var(--accent)" : "var(--muted)" }}
+            onClick={() => {
+              setSelectMode((s) => !s);
+            }}
+          >
+            {selectMode ? "Done selecting" : "Select mode"}
+          </button>
+        </div>
+
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+          {product.colors.map((color) => {
+            const sw = colorSwatch(color);
+            const ids = rowIds(color);
+            const rowOn = ids.length > 0 && ids.every((i) => selected.has(i));
+            const rowExcluded =
+              ids.length > 0 && product.cells.filter((c) => c.color === color).every((c) => c.excluded);
+            const on = color === activeColor;
+            return (
+              <button
+                key={color}
+                onClick={() => (selectMode ? pickMany(ids) : setActiveColor(color))}
+                className="flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[12px] font-semibold"
+                style={{
+                  borderColor: on && !selectMode ? "var(--accent)" : "var(--border)",
+                  background: on && !selectMode ? "var(--accent-soft)" : "var(--panel)",
+                  opacity: rowExcluded ? 0.5 : 1,
+                }}
+              >
+                {selectMode ? <Box on={rowOn} /> : null}
+                <Swatch sw={sw} />
+                <span className={rowExcluded ? "line-through" : ""}>{color || "—"}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="space-y-2">
+          {product.sizes.map((size) => {
+            const cell = byCell.get(`${activeColor} ${size}`) ?? null;
+            if (!cell) return null;
+            const covered = !cell.excluded && cell.buy === 0;
+            const isSel = selected.has(cell.id);
+            return (
+              <div
+                key={size}
+                onClick={() => {
+                  if (selectMode) toggle(cell.id);
+                }}
+                className="flex items-center gap-3 rounded-xl border p-3"
+                style={{
+                  borderColor: isSel ? "var(--accent)" : "var(--border)",
+                  background: cell.excluded ? "var(--panel-2)" : covered ? "var(--ok-soft)" : "var(--panel)",
+                }}
+              >
+                {selectMode ? <Box on={isSel} /> : null}
+
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13.5px] font-extrabold leading-tight">{size || "—"}</div>
+                  <div className="text-[11px]" style={{ color: "var(--muted-2)" }}>
+                    need {cell.needed}
+                  </div>
+                </div>
+
+                {cell.excluded ? (
+                  <span className="text-[10px] font-bold tracking-wide" style={{ color: "var(--muted)" }}>
+                    EXCLUDED
+                  </span>
+                ) : covered ? (
+                  <span className="flex items-center gap-1 text-[11.5px] font-bold" style={{ color: "var(--ok)" }}>
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="var(--ok)" strokeWidth="3" strokeLinecap="round">
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                    covered
+                  </span>
+                ) : (
+                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <Stepper value={cell.have} onChange={(v) => onHave([cell.id], v)} disabled={selectMode} />
+                    <span
+                      className="rounded-full px-2 py-1 text-[10.5px] font-extrabold tracking-wide"
+                      style={{ background: "var(--accent-soft)", color: "#0b7fb0" }}
+                    >
+                      BUY {cell.buy}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -556,6 +731,53 @@ function Kpi({ label, value, tone }: { label: string; value: number; tone?: "buy
       >
         {value}
       </span>
+    </span>
+  );
+}
+
+function Stepper({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <span
+      className="flex items-center overflow-hidden rounded-lg border"
+      style={{ borderColor: "var(--border-strong)", opacity: disabled ? 0.5 : 1 }}
+    >
+      <button
+        type="button"
+        disabled={disabled || value <= 0}
+        onClick={() => onChange(Math.max(0, value - 1))}
+        className="flex h-8 w-8 items-center justify-center text-[15px] font-bold disabled:opacity-40"
+        style={{ color: "var(--text)" }}
+        aria-label="Decrease have"
+      >
+        −
+      </button>
+      <input
+        type="number"
+        min={0}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
+        className="h-8 w-10 border-x text-center text-[13px] tabular-nums outline-none"
+        style={{ borderColor: "var(--border-strong)", background: "var(--panel)", color: "var(--text)" }}
+      />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(value + 1)}
+        className="flex h-8 w-8 items-center justify-center text-[15px] font-bold disabled:opacity-40"
+        style={{ color: "var(--text)" }}
+        aria-label="Increase have"
+      >
+        +
+      </button>
     </span>
   );
 }

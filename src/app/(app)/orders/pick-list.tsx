@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Empty } from "@/components/ui";
+import { ImageLightbox } from "@/components/image-lightbox";
 import { timeLeft } from "@/lib/utils";
 
 import { CollectionDetailModal } from "./collection-detail-modal";
@@ -15,6 +16,7 @@ import type { PickRow } from "./queries";
  */
 export function PickList({ rows }: { rows: PickRow[] }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   if (rows.length === 0) {
     return <Empty title="Nothing to ship" hint="Open orders roll up here by product as channels sync." />;
@@ -36,11 +38,20 @@ export function PickList({ rows }: { rows: PickRow[] }) {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {rows.map((r) => (
-          <PickCard key={r.key} row={r} onOpen={() => setOpenKey(r.key)} />
+          <PickCard
+            key={r.key}
+            row={r}
+            onOpen={() => setOpenKey(r.key)}
+            onOpenImage={(src, alt) => setLightbox({ src, alt })}
+          />
         ))}
       </div>
 
       {openRow ? <CollectionDetailModal row={openRow} onClose={() => setOpenKey(null)} /> : null}
+
+      {lightbox ? (
+        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
+      ) : null}
     </div>
   );
 }
@@ -59,10 +70,19 @@ function MiniStat({ label, value, tone }: { label: string; value: number; tone?:
   );
 }
 
-function PickCard({ row, onOpen }: { row: PickRow; onOpen: () => void }) {
+function PickCard({
+  row,
+  onOpen,
+  onOpenImage,
+}: {
+  row: PickRow;
+  onOpen: () => void;
+  onOpenImage: (src: string, alt: string) => void;
+}) {
   const deadline = timeLeft(row.earliestDispatchBy ? new Date(row.earliestDispatchBy) : null);
   const shownOrders = row.orderIds.slice(0, 4);
   const more = row.orderIds.length - shownOrders.length;
+  const alt = row.title ?? row.sku;
 
   return (
     <button
@@ -71,7 +91,15 @@ function PickCard({ row, onOpen }: { row: PickRow; onOpen: () => void }) {
       className="panel flex flex-col gap-3 p-3.5 text-left transition-colors hover:bg-[var(--accent-soft)]"
     >
       <div className="flex gap-3.5">
-        <Thumb src={row.imageUrl} alt={row.title ?? row.sku} />
+        <span
+          onClick={(e) => {
+            if (!row.imageUrl) return;
+            e.stopPropagation();
+            onOpenImage(row.imageUrl, alt);
+          }}
+        >
+          <Thumb src={row.imageUrl} alt={alt} />
+        </span>
         <div className="flex min-w-0 flex-1 flex-col">
           {/* NAME is the headline. */}
           <div className="line-clamp-2 text-[13.5px] font-semibold leading-snug">

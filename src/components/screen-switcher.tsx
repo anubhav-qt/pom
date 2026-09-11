@@ -7,7 +7,7 @@ import { useEffect, useRef } from "react";
 import { stripBasePath } from "@/lib/base-path";
 import { ordersViewKey, useOrdersCache, useOrdersNav } from "@/lib/stores/orders-cache";
 import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
-import { screenFromPath, useScreenNav } from "@/lib/stores/screen-nav";
+import { resolveScreen, screenFromPath, useScreenNav } from "@/lib/stores/screen-nav";
 
 // Only pulled when an override actually activates, so /settings and friends do
 // not carry the orders workspace in their first load.
@@ -64,13 +64,26 @@ export function ScreenSwitcher({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  if (override === "orders" && screenFromPath(routePath) !== "orders") {
+  // The same check `AppHeader` uses to decide which tabs to light, so the
+  // two can never disagree about what's actually on screen: if the override
+  // points somewhere the cache can't actually serve, both fall back to the
+  // real route together instead of one showing new tabs over old content.
+  const resolved = resolveScreen(routePath, override);
+
+  // An override the cache couldn't back up is dead weight — left alone, it
+  // would spring back to life the moment something populates that cache
+  // entry later, swapping the screen out from under whoever is reading it.
+  useEffect(() => {
+    if (override !== null && resolved !== override) useScreenNav.getState().setOverride(null);
+  }, [override, resolved]);
+
+  if (resolved === "orders" && screenFromPath(routePath) !== "orders") {
     const params = useOrdersNav.getState().params;
     const data = useOrdersCache.getState().peek(ordersViewKey(params));
     if (data) return <OrdersWorkspace initialParams={params} initialData={data} />;
   }
 
-  if (override === "dashboard" && screenFromPath(routePath) !== "dashboard") {
+  if (resolved === "dashboard" && screenFromPath(routePath) !== "dashboard") {
     const view = useDashboardCache.getState().peek(useDashboardNav.getState().range);
     if (view) return <DashboardWorkspace initialView={view} />;
   }
