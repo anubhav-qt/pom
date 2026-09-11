@@ -116,6 +116,17 @@ export function AppHeader({
 
         <div className="flex-1" />
 
+        {/* Band 2's own search only ever shows from `md` up (see `OrdersTabs`)
+            — mobile has no search at all otherwise, so it gets this compact
+            stand-in here, right before Sync/avatar. Shrunk (not the full
+            w-56) because band 1 is already tight on a phone width; gone again
+            from `md` so the two never both show at once. */}
+        {onOrders ? (
+          <div className="md:hidden">
+            <HeaderSearch compact />
+          </div>
+        ) : null}
+
         <SyncStatus lastSyncAt={lastSyncAt} />
 
         {primaryAccountId !== null ? (
@@ -525,13 +536,6 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
     cancellations: counts.cancelledRto,
   };
 
-  // Search keeps the tab you are on; it only sets/clears `q`.
-  function onSearch(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const value = String(new FormData(e.currentTarget).get("q") ?? "").trim();
-    useOrdersNav.getState().go({ ...queryToParams(params.toString()), q: value || undefined });
-  }
-
   return (
     <div
       // Desktop-only: mobile gets `MobileOrdersCrumb`'s compact dropdown
@@ -575,29 +579,57 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
 
       <div className="flex-1" />
 
-      <form onSubmit={onSearch} className="hidden py-2 md:block">
-        <div className="relative">
-          <svg
-            viewBox="0 0 24 24"
-            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
-            fill="none"
-            stroke="var(--muted-2)"
-            strokeWidth="2"
-            strokeLinecap="round"
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="m20 20-3.5-3.5" />
-          </svg>
-          <input
-            key={params.get("q") ?? ""}
-            name="q"
-            defaultValue={params.get("q") ?? ""}
-            placeholder="Search order ID, buyer, pincode…"
-            className="w-56 rounded-lg py-1.5 pl-8 pr-3 text-[12.5px] outline-none transition-colors focus:w-72"
-            style={{ background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--text)" }}
-          />
-        </div>
-      </form>
+      <div className="hidden py-2 md:block">
+        <HeaderSearch />
+      </div>
     </div>
+  );
+}
+
+/**
+ * The order search box — band 2's own version (desktop, `md` up) and band 1's
+ * compact mobile stand-in (`compact`) both render this, so search keeps
+ * behaving identically (same `q` param, same "keep whatever tab you're on")
+ * everywhere it appears.
+ */
+function HeaderSearch({ compact }: { compact?: boolean }) {
+  const params = useSearchParams();
+
+  function onSearch(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const value = String(new FormData(e.currentTarget).get("q") ?? "").trim();
+    useOrdersNav.getState().go({ ...queryToParams(params.toString()), q: value || undefined });
+  }
+
+  return (
+    <form onSubmit={onSearch}>
+      <div className="relative">
+        <svg
+          viewBox="0 0 24 24"
+          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
+          fill="none"
+          stroke="var(--muted-2)"
+          strokeWidth="2"
+          strokeLinecap="round"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <input
+          key={params.get("q") ?? ""}
+          name="q"
+          defaultValue={params.get("q") ?? ""}
+          placeholder={compact ? "Search…" : "Search order ID, buyer, pincode…"}
+          className={cn(
+            "rounded-lg py-1.5 pl-8 pr-3 text-[12.5px] outline-none transition-colors",
+            // Fixed, not growing on focus, for the compact mobile version —
+            // band 1 has no spare width for an input to expand into without
+            // shoving Sync/avatar out of the row.
+            compact ? "w-20" : "w-56 focus:w-72",
+          )}
+          style={{ background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--text)" }}
+        />
+      </div>
+    </form>
   );
 }
