@@ -3,7 +3,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { catalogImages, orderItems, orders, products, restockPlanItems } from "@/db/schema";
+import { catalogImages, orderFulfilment, orderItems, orders, products, restockPlanItems } from "@/db/schema";
 import { ENABLED_CHANNELS } from "@/config/features";
 import { requireUser } from "@/lib/auth";
 import { parseVariantTitle, sortSizes } from "@/lib/variant-title";
@@ -143,6 +143,7 @@ async function rebuild() {
     })
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
+    .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
     .leftJoin(products, eq(products.id, orderItems.productId))
     .leftJoin(
       catalogImages,
@@ -156,6 +157,10 @@ async function rebuild() {
         inArray(orders.status, [...OPEN_STATUSES]),
         inArray(orders.channel, [...ENABLED_CHANNELS]),
         eq(orderItems.cancelled, false),
+        // Same exclusion Collection already applies: the channel status stays
+        // "new"/"packed" until Amazon notices the pickup, so without this an
+        // order we already manifested (shipped) keeps inflating "need" here.
+        sql`COALESCE(${orderFulfilment.state}, 'to_pack') <> 'manifested'`,
       ),
     );
 
