@@ -686,7 +686,17 @@ export async function startManualOrderSync(accountId: number) {
   after(async () => {
     // Failure is already recorded on the run row inside syncAccount's own
     // catch block — nothing further to do with the rejection here.
-    await syncAccount(account, "orders", 100, { runId: run.id }).catch(() => {});
+    //
+    // limit is generous (not 100): fetchOrders sorts oldest-updated-first and
+    // stops as soon as it has collected `limit`, so on a store whose 72h
+    // rescan window holds >100 touched orders (routine once shipped/delivered
+    // status pings are counted, not just new orders), a 100-order cap meant
+    // every "Sync now" click re-ingested the same oldest 100 forever and the
+    // cursor never reached genuinely new orders behind them. Most of a big
+    // window is the cheap "unchanged" fast lane (see toCanonical), so a much
+    // higher cap costs little on a routine run and only matters when there is
+    // real backlog to clear.
+    await syncAccount(account, "orders", 500, { runId: run.id }).catch(() => {});
     // Returns piggyback on the same trigger, silently — currently a no-op for
     // Amazon and fast enough elsewhere that it doesn't need its own bar.
     await syncAccount(account, "returns").catch(() => {});
