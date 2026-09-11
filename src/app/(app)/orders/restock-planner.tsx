@@ -21,6 +21,16 @@ import { exportSvg, svgEscape, truncate } from "./sheet-export";
 /* recompute buy / totals locally so edits feel instant                      */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Key for the colour+size lookup map. Joined with a control character rather
+ * than a space: colour and size names are free text ("Deep Teal Green", "3
+ * XL") and a space-joined key can collide across different colour/size pairs
+ * that happen to concatenate to the same string.
+ */
+function cellKey(color: string, size: string): string {
+  return `${color}\0${size}`;
+}
+
 function buyOf(c: PlanCell): number {
   if (c.excluded) return 0;
   if (c.buyOverride != null) return Math.max(0, c.buyOverride);
@@ -360,7 +370,7 @@ function ProductPanel({
 
   const byCell = useMemo(() => {
     const m = new Map<string, PlanCell>();
-    for (const c of product.cells) m.set(`${c.color} ${c.size}`, c);
+    for (const c of product.cells) m.set(cellKey(c.color, c.size), c);
     return m;
   }, [product]);
 
@@ -380,9 +390,9 @@ function ProductPanel({
   }
 
   const colIds = (size: string) =>
-    product.colors.map((c) => byCell.get(`${c} ${size}`)?.id).filter((n): n is number => n != null);
+    product.colors.map((c) => byCell.get(cellKey(c, size))?.id).filter((n): n is number => n != null);
   const rowIds = (color: string) =>
-    product.sizes.map((s) => byCell.get(`${color} ${s}`)?.id).filter((n): n is number => n != null);
+    product.sizes.map((s) => byCell.get(cellKey(color, s))?.id).filter((n): n is number => n != null);
 
   const selIds = [...selected].filter((id) => product.cells.some((c) => c.id === id));
 
@@ -517,7 +527,7 @@ function ProductPanel({
                     </span>
                   </td>
                   {product.sizes.map((size) => {
-                    const cell = byCell.get(`${color} ${size}`) ?? null;
+                    const cell = byCell.get(cellKey(color, size)) ?? null;
                     if (!cell) {
                       return (
                         <td
@@ -653,7 +663,7 @@ function ProductPanel({
 
         <div className="space-y-2">
           {product.sizes.map((size) => {
-            const cell = byCell.get(`${activeColor} ${size}`) ?? null;
+            const cell = byCell.get(cellKey(activeColor, size)) ?? null;
             if (!cell) return null;
             const covered = !cell.excluded && cell.buy === 0;
             const isSel = selected.has(cell.id);
