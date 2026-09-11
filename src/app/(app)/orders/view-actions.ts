@@ -139,6 +139,9 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
       filters.push(sql`${orderFulfilment.state} = 'manifested'`);
       filters.push(sql`${orderFulfilment.manifestedAt} >= now() - interval '24 hours'`);
       filters.push(sql`${orders.status} NOT IN ('cancelled', 'rto', 'returned')`);
+      // Dismissed by hand from this queue — the order itself is untouched, this
+      // just stops it cluttering the 24h review list.
+      filters.push(sql`${orderFulfilment.dismissedAt} IS NULL`);
     }
   }
 
@@ -258,6 +261,7 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
             WHERE ${orderFulfilment.state} = 'manifested'
               AND ${orderFulfilment.manifestedAt} >= now() - interval '24 hours'
               AND ${orders.status} NOT IN ('cancelled', 'rto', 'returned')
+              AND ${orderFulfilment.dismissedAt} IS NULL
           )::int`,
           late: sql<number>`COUNT(*) FILTER (
             WHERE ${orders.status} IN ('new', 'ready_to_pack')

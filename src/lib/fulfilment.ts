@@ -249,6 +249,26 @@ export async function listUnmappedPackedOrders(limit = 40) {
     .limit(limit);
 }
 
+/**
+ * Clear manifested orders off the Shipped (24h) queue by hand. Purely a local
+ * "stop showing me this" acknowledgement — it does not touch `state`, so the
+ * order still reads as shipped everywhere else (Shipped/Delivered/All orders,
+ * dashboards, RTO tracking). Only orders already manifested are eligible;
+ * anything else is silently skipped rather than erroring, since a stale
+ * selection re-checked after the list refreshed is normal.
+ */
+export async function dismissShipped24hLocal(orderIds: number[], userId: number | null) {
+  if (orderIds.length === 0) return { moved: [] as number[] };
+
+  const rows = await db
+    .update(orderFulfilment)
+    .set({ dismissedAt: new Date(), dismissedBy: userId, updatedAt: sql`now()` })
+    .where(and(inArray(orderFulfilment.orderId, orderIds), eq(orderFulfilment.state, "manifested")))
+    .returning({ orderId: orderFulfilment.orderId });
+
+  return { moved: rows.map((r) => r.orderId) };
+}
+
 /** Put parcels back on the bench when something was scanned or clicked wrongly. */
 export async function revertLocal(orderIds: number[]) {
   if (orderIds.length === 0) return { moved: [] as number[] };

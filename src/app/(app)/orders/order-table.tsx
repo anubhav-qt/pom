@@ -10,7 +10,7 @@ import type { Channel, FulfilmentState, OrderStatus } from "@/db/schema";
 import { withBasePath } from "@/lib/base-path";
 import { cn, dayLabel, money, timeLeft } from "@/lib/utils";
 
-import { createManifest, markPacked, revertToNew } from "./actions";
+import { createManifest, dismissShipped24h, markPacked, revertToNew } from "./actions";
 import { OrderDetailModal } from "./order-detail-modal";
 
 export interface OrderRow {
@@ -62,7 +62,8 @@ export function OrderTable({
   // its state. This is the manual escape hatch, independent of the
   // print-labels feature flag, since it isn't about labels at all.
   const canBulkShip = activeTab === "packed";
-  const showSelection = FEATURES.labelPrinting || canBulkShip;
+  const canDismiss = activeTab === "shipped24h";
+  const showSelection = FEATURES.labelPrinting || canBulkShip || canDismiss;
 
   const allSelected = rows.length > 0 && selected.size === rows.length;
   const selectedIds = useMemo(() => [...selected], [selected]);
@@ -179,6 +180,20 @@ export function OrderTable({
               title="For orders you packed but never scanned — moves them straight to Shipped."
             >
               Mark shipped
+            </button>
+          ) : null}
+
+          {/* Clears reviewed parcels off this 24h list by hand — a local
+              acknowledgement, not a status change. The order is untouched
+              everywhere else. */}
+          {canDismiss ? (
+            <button
+              className="btn btn-primary ml-auto"
+              disabled={selected.size === 0 || pending}
+              onClick={() => run(() => dismissShipped24h(selectedIds))}
+              title="Remove from this list — the order itself is not changed."
+            >
+              Dismiss
             </button>
           ) : null}
         </div>

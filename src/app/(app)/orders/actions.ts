@@ -16,7 +16,12 @@ import {
   shipments,
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
-import { markManifestedLocal, markPackedLocal, revertLocal } from "@/lib/fulfilment";
+import {
+  dismissShipped24hLocal,
+  markManifestedLocal,
+  markPackedLocal,
+  revertLocal,
+} from "@/lib/fulfilment";
 import { recomputeReserved } from "@/lib/sync";
 
 export interface OrderDetail {
@@ -279,6 +284,21 @@ export async function revertToNew(orderIds: number[]) {
   const { moved } = await revertLocal(orderIds);
 
   await recomputeReserved();
+  revalidatePath("/orders");
+  return { ok: true, count: moved.length };
+}
+
+/**
+ * Clear orders off the Shipped (24h) queue by hand — a local "seen it,
+ * confirmed it" acknowledgement, not a status change. The order stays exactly
+ * as-is everywhere else; this only stops it cluttering the 24h review list.
+ */
+export async function dismissShipped24h(orderIds: number[]) {
+  const user = await requireUser();
+  if (orderIds.length === 0) return { ok: true, count: 0 };
+
+  const { moved } = await dismissShipped24hLocal(orderIds, user.id);
+
   revalidatePath("/orders");
   return { ok: true, count: moved.length };
 }
