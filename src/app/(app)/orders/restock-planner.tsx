@@ -656,11 +656,14 @@ function buildBuySheetSvg(products: PlanProduct[]): string {
   const headH = 92;
   const rowH = 30;
   const grpHeadH = 40;
+  /** The COLOUR/SIZE/NEED/HAVE/BUY column-label row drawn under each group's title bar. */
+  const colHeadH = 26;
   const grpGap = 14;
   const footH = 96;
 
   let bodyH = 0;
-  for (const g of groups) bodyH += grpHeadH + g.rows.length * rowH + rowH /* subtotal */ + grpGap;
+  for (const g of groups)
+    bodyH += grpHeadH + colHeadH + g.rows.length * rowH + rowH /* subtotal */ + grpGap;
   const H = headH + bodyH + footH;
 
   const now = new Date();
@@ -683,9 +686,9 @@ function buildBuySheetSvg(products: PlanProduct[]): string {
       `<text x="${col.need}" y="${y + 20}" font-size="9.5" font-weight="700" letter-spacing="1" fill="#8ba0b0" text-anchor="end">NEED</text>`,
       `<text x="${col.have}" y="${y + 20}" font-size="9.5" font-weight="700" letter-spacing="1" fill="#8ba0b0" text-anchor="end">HAVE</text>`,
       `<text x="${col.buy}" y="${y + 20}" font-size="9.5" font-weight="700" letter-spacing="1" fill="#8ba0b0" text-anchor="end">BUY</text>`,
-      `<line x1="0" y1="${y + 26}" x2="${W}" y2="${y + 26}" stroke="#cfe0e8"/>`,
+      `<line x1="0" y1="${y + colHeadH}" x2="${W}" y2="${y + colHeadH}" stroke="#cfe0e8"/>`,
     );
-    y += 26;
+    y += colHeadH;
     let sub = 0;
     g.rows.forEach((r, i) => {
       sub += r.buy;
