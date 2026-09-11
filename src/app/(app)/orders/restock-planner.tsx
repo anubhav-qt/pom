@@ -68,6 +68,8 @@ function recalc(products: PlanProduct[]): RestockPlan {
 export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
   const [plan, setPlan] = useState<RestockPlan>(initialPlan);
   const [activeKey, setActiveKey] = useState<string>(initialPlan.products[0]?.baseKey ?? "");
+  /** Mobile only: the rail and the detail are two full screens, not a stack. */
+  const [mobileScreen, setMobileScreen] = useState<"list" | "detail">("list");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<null | "reset" | "jpeg" | "pdf">(null);
   const [error, setError] = useState<string | null>(null);
@@ -203,8 +205,8 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
 
       {/* ---------------------------------------------------------- master / detail */}
       <div className="grid items-start gap-4 lg:grid-cols-[288px_minmax(0,1fr)]">
-        {/* rail */}
-        <div className="panel overflow-hidden">
+        {/* rail — its own full screen on mobile, a side panel from sm up */}
+        <div className={`panel overflow-hidden ${mobileScreen === "detail" ? "hidden sm:block" : ""}`}>
           <div
             className="flex items-center justify-between border-b px-3.5 py-2.5"
             style={{ borderColor: "var(--border)" }}
@@ -225,6 +227,7 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
                   onClick={() => {
                     setActiveKey(p.baseKey);
                     setSelected(new Set());
+                    setMobileScreen("detail");
                   }}
                   className="flex w-full items-center gap-3 border-b px-3.5 py-2.5 text-left transition-colors"
                   style={{
@@ -268,24 +271,42 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
                       </span>
                     </span>
                   </span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4 shrink-0 sm:hidden"
+                    fill="none"
+                    stroke="var(--muted-2)"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* detail */}
+        {/* detail — its own full screen on mobile, back-navigable to the rail */}
         {active ? (
-          <ProductPanel
-            key={active.baseKey}
-            product={active}
-            selected={selected}
-            setSelected={setSelected}
-            onHave={setHave}
-            onMarkInStock={markInStock}
-            onExclude={setExcluded}
-            onOpenImage={(src, alt) => setLightbox({ src, alt })}
-          />
+          <div className={mobileScreen === "list" ? "hidden sm:block" : ""}>
+            <ProductPanel
+              key={active.baseKey}
+              product={active}
+              selected={selected}
+              setSelected={setSelected}
+              onHave={setHave}
+              onMarkInStock={markInStock}
+              onExclude={setExcluded}
+              onOpenImage={(src, alt) => setLightbox({ src, alt })}
+              onBack={() => {
+                setSelected(new Set());
+                setMobileScreen("list");
+              }}
+            />
+          </div>
         ) : null}
       </div>
 
@@ -297,24 +318,55 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
       </p>
 
       {/* ------------------------------------------------------ mobile bottom bar */}
-      <div
-        className="fixed inset-x-0 bottom-0 z-40 border-t p-3 sm:hidden"
-        style={{ background: "var(--panel)", borderColor: "var(--border)", boxShadow: "0 -6px 20px rgba(15,37,54,0.08)" }}
-      >
-        {selIdsForActive.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 text-[12px]">
-            <b className="tabular-nums">{selIdsForActive.length}</b> selected
-            <button className="btn text-xs" onClick={() => markInStock(selIdsForActive)}>
-              In stock
-            </button>
-            <button className="btn text-xs" onClick={() => setExcluded(selIdsForActive, true)}>
-              Exclude
-            </button>
-            <button className="btn ml-auto text-xs" onClick={() => setSelected(new Set())}>
-              Clear
+      {selIdsForActive.length > 0 ? (
+        <div
+          className="fixed inset-x-0 bottom-0 z-40 flex flex-col gap-2.5 p-3 sm:hidden"
+          style={{ background: "#0f2536", boxShadow: "0 -8px 20px -10px rgba(15,37,54,0.35)" }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="tabular-nums text-[12.5px] font-extrabold text-white">
+              {selIdsForActive.length} selected
+            </span>
+            <button
+              className="ml-auto text-[11px] font-semibold text-white/65"
+              onClick={() => setSelected(new Set())}
+            >
+              Clear ✕
             </button>
           </div>
-        ) : (
+          <div className="flex items-center gap-1.5">
+            <button
+              className="h-[38px] flex-1 rounded-[9px] text-[11.5px] font-bold text-white"
+              style={{ background: "rgba(255,255,255,0.15)" }}
+              onClick={() => markInStock(selIdsForActive)}
+            >
+              Mark in stock
+            </button>
+            <button
+              className="h-[38px] flex-1 rounded-[9px] text-[11.5px] font-bold text-white"
+              style={{ background: "rgba(255,255,255,0.15)" }}
+              onClick={() => {
+                const v = window.prompt("Set have to:", "0");
+                if (v == null) return;
+                setHave(selIdsForActive, Math.max(0, Number(v) || 0));
+              }}
+            >
+              Set have
+            </button>
+            <button
+              className="h-[38px] flex-1 rounded-[9px] text-[11.5px] font-bold text-white"
+              style={{ background: "rgba(224,69,90,0.85)" }}
+              onClick={() => setExcluded(selIdsForActive, true)}
+            >
+              Exclude
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="fixed inset-x-0 bottom-0 z-40 border-t p-3 sm:hidden"
+          style={{ background: "var(--panel)", borderColor: "var(--border)", boxShadow: "0 -6px 20px rgba(15,37,54,0.08)" }}
+        >
           <div className="flex items-center gap-2">
             <button className="btn flex-1 text-xs" disabled={busy !== null} onClick={reset}>
               {busy === "reset" ? "Rebuilding…" : "Reset"}
@@ -334,8 +386,8 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
               {busy === "pdf" ? "…" : "PDF"}
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {lightbox ? (
         <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
@@ -356,6 +408,7 @@ function ProductPanel({
   onMarkInStock,
   onExclude,
   onOpenImage,
+  onBack,
 }: {
   product: PlanProduct;
   selected: Set<number>;
@@ -364,6 +417,8 @@ function ProductPanel({
   onMarkInStock: (ids: number[]) => void;
   onExclude: (ids: number[], excluded: boolean) => void;
   onOpenImage: (src: string, alt: string) => void;
+  /** Mobile only: returns to the product rail's own screen. */
+  onBack: () => void;
 }) {
   const [activeColor, setActiveColor] = useState<string>(product.colors[0] ?? "");
   const [selectMode, setSelectMode] = useState(false);
@@ -399,19 +454,36 @@ function ProductPanel({
   return (
     <div className="panel max-w-[900px] overflow-hidden">
       {/* header */}
-      <div className="flex gap-4 border-b p-5" style={{ borderColor: "var(--border)" }}>
+      <div className="flex gap-3 border-b p-4 sm:gap-4 sm:p-5" style={{ borderColor: "var(--border)" }}>
+        <button
+          onClick={onBack}
+          aria-label="Back to products"
+          className="mt-1 shrink-0 sm:hidden"
+        >
+          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="var(--muted)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
         <span
+          className="shrink-0"
           onClick={(e) => {
             if (!product.imageUrl) return;
             e.stopPropagation();
             onOpenImage(product.imageUrl, product.label);
           }}
         >
-          <Thumb src={product.imageUrl} size={128} />
+          <span className="block sm:hidden">
+            <Thumb src={product.imageUrl} size={44} />
+          </span>
+          <span className="hidden sm:block">
+            <Thumb src={product.imageUrl} size={128} />
+          </span>
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[17px] font-extrabold leading-tight tracking-tight">{product.label}</div>
-          <div className="mt-1.5 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
+          <div className="line-clamp-1 text-[14px] font-extrabold leading-tight tracking-tight sm:line-clamp-none sm:text-[17px]">
+            {product.label}
+          </div>
+          <div className="mt-1 text-[10.5px] sm:mt-1.5 sm:text-[11.5px]" style={{ color: "var(--muted-2)" }}>
             {product.skuCount} seller SKU{product.skuCount === 1 ? "" : "s"}
             {product.asin ? (
               <>
@@ -420,7 +492,7 @@ function ProductPanel({
               </>
             ) : null}
           </div>
-          <div className="mt-3 flex items-end gap-2">
+          <div className="mt-2 flex items-end gap-2 sm:mt-3">
             <Kpi label="need" value={product.needed} />
             <Kpi label="have" value={product.have} />
             <Kpi label="to buy" value={product.buy} tone="buy" />
@@ -428,13 +500,14 @@ function ProductPanel({
         </div>
         <button
           onClick={() => onExclude(product.cells.map((c) => c.id), !productExcluded)}
-          className="h-fit rounded-lg px-2.5 py-1.5 text-[11.5px] font-medium transition-colors"
+          className="h-fit shrink-0 rounded-lg px-2 py-1 text-[10.5px] font-medium transition-colors sm:px-2.5 sm:py-1.5 sm:text-[11.5px]"
           style={{
             color: productExcluded ? "var(--accent)" : "var(--muted)",
             background: productExcluded ? "var(--accent-soft)" : "transparent",
           }}
         >
-          {productExcluded ? "Re-include product" : "Exclude product"}
+          <span className="sm:hidden">{productExcluded ? "Include" : "Exclude"}</span>
+          <span className="hidden sm:inline">{productExcluded ? "Re-include product" : "Exclude product"}</span>
         </button>
       </div>
 
@@ -624,12 +697,20 @@ function ProductPanel({
             Colour
           </span>
           <button
-            className="text-[11.5px] font-semibold"
-            style={{ color: selectMode ? "var(--accent)" : "var(--muted)" }}
+            className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold"
+            style={{
+              color: selectMode ? "#0b7fb0" : "var(--muted)",
+              background: selectMode ? "var(--accent-soft)" : "transparent",
+            }}
             onClick={() => {
               setSelectMode((s) => !s);
             }}
           >
+            {selectMode ? (
+              <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="#0b7fb0" strokeWidth="4" strokeLinecap="round">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            ) : null}
             {selectMode ? "Done selecting" : "Select mode"}
           </button>
         </div>
@@ -659,6 +740,27 @@ function ProductPanel({
               </button>
             );
           })}
+        </div>
+
+        <div className="flex items-center justify-between px-0.5">
+          <span className="text-[10.5px] font-bold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+            Sizes — {activeColor || "—"}
+          </span>
+          {selectMode ? (
+            <button
+              className="flex items-center gap-1.5 text-[10.5px]"
+              style={{ color: "var(--muted-2)" }}
+              onClick={() => pickMany(rowIds(activeColor))}
+            >
+              <Box
+                on={
+                  rowIds(activeColor).length > 0 &&
+                  rowIds(activeColor).every((i) => selected.has(i))
+                }
+              />
+              select all
+            </button>
+          ) : null}
         </div>
 
         <div className="space-y-2">
