@@ -182,14 +182,13 @@ export function OrdersWorkspace({
         </div>
       ) : null}
 
-      {data.isQueueView ? (
-        <OrdersToolbar
-          activeView="list"
-          activeChannel={data.channel}
-          query={data.query}
-          rightSlot={<ScanBarcodeButton station="outbound" onDone={refresh} />}
-        />
-      ) : null}
+      <OrdersToolbar
+        activeView="list"
+        activeChannel={data.channel}
+        query={data.query}
+        showSwitcher={data.isQueueView}
+        rightSlot={data.isQueueView ? <ScanBarcodeButton station="outbound" onDone={refresh} /> : undefined}
+      />
 
       <OrderTable rows={data.rows} activeTab={data.activeTab} onChanged={refresh} />
 
