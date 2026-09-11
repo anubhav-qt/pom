@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { DropdownMenu } from "@/components/dropdown-menu";
 import {
   ordersViewKey,
   paramsToQuery,
@@ -101,7 +102,12 @@ export function AppHeader({
     >
       {/* ---------------------------------------------------------- band 1 -- */}
       <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 sm:gap-5 sm:px-6">
-        <Link href="/orders" className="flex shrink-0 items-center gap-2.5">
+        {/* Desktop: brand mark + wordmark, and the Dashboard/Orders switch
+            sits beside it. Below `sm` there's no room for both a switch and a
+            usable search box, so the switch collapses into the brand mark
+            itself — same corner square, hamburger glyph instead of "P",
+            opening the same dropdown the Orders breadcrumb uses. */}
+        <Link href="/orders" className="hidden shrink-0 items-center gap-2.5 sm:flex">
           <span
             className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold text-white"
             style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
@@ -109,23 +115,30 @@ export function AppHeader({
           >
             P
           </span>
-          <span className="hidden text-sm font-semibold tracking-tight sm:inline">Paribelle</span>
+          <span className="text-sm font-semibold tracking-tight">Paribelle</span>
         </Link>
+        <div className="sm:hidden">
+          <MobileScreenMenu effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
+        </div>
 
-        <AppSwitch effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
+        <div className="hidden sm:block">
+          <AppSwitch effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
+        </div>
 
-        <div className="flex-1" />
+        <div className="hidden flex-1 sm:block" />
 
         {/* Band 2's own search only ever shows from `md` up (see `OrdersTabs`)
-            — mobile has no search at all otherwise, so it gets this compact
-            stand-in here, right before Sync/avatar. Shrunk (not the full
-            w-56) because band 1 is already tight on a phone width; gone again
-            from `md` so the two never both show at once. */}
+            — mobile has no search at all otherwise, so it gets this stand-in
+            here, right before Sync/avatar, filling the width the switch
+            would otherwise take. Gone again from `md` so the two never both
+            show at once. */}
         {onOrders ? (
-          <div className="md:hidden">
+          <div className="flex-1 md:hidden">
             <HeaderSearch compact />
           </div>
-        ) : null}
+        ) : (
+          <div className="flex-1 sm:hidden" />
+        )}
 
         <SyncStatus lastSyncAt={lastSyncAt} />
 
@@ -167,6 +180,61 @@ function targetIsCached(screen: Screen): boolean {
     );
   }
   return useDashboardCache.getState().peek(useDashboardNav.getState().range) !== null;
+}
+
+/**
+ * Mobile's stand-in for `AppSwitch` — the brand mark itself becomes the
+ * trigger (hamburger glyph instead of "P"), opening the same `DropdownMenu`
+ * the Orders breadcrumb uses instead of a permanent segmented pill, since
+ * band 1 has no room for both that and a usable search box on a phone.
+ */
+function MobileScreenMenu({
+  effectiveScreen,
+  routeScreen,
+}: {
+  effectiveScreen: Screen | null;
+  routeScreen: Screen | null;
+}) {
+  const router = useRouter();
+
+  function select(screen: Screen) {
+    if (screen === effectiveScreen) return;
+    const href = withBasePath(screen === "orders" ? ordersHref() : dashboardHref());
+
+    if (screen === routeScreen) {
+      useScreenNav.getState().setOverride(null);
+      window.history.pushState(null, "", href);
+      return;
+    }
+    if (targetIsCached(screen)) {
+      window.history.pushState(null, "", href);
+      useScreenNav.getState().setOverride(screen);
+      return;
+    }
+    router.push(href);
+  }
+
+  return (
+    <DropdownMenu
+      trigger={
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-white"
+          style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
+          aria-hidden
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </span>
+      }
+      options={[
+        { id: "dashboard", label: "Dashboard" },
+        { id: "orders", label: "Orders" },
+      ]}
+      activeId={effectiveScreen ?? "orders"}
+      onSelect={(id) => select(id as Screen)}
+    />
+  );
 }
 
 function AppSwitch({
@@ -622,10 +690,10 @@ function HeaderSearch({ compact }: { compact?: boolean }) {
           placeholder={compact ? "Search…" : "Search order ID, buyer, pincode…"}
           className={cn(
             "rounded-lg py-1.5 pl-8 pr-3 text-[12.5px] outline-none transition-colors",
-            // Fixed, not growing on focus, for the compact mobile version —
-            // band 1 has no spare width for an input to expand into without
-            // shoving Sync/avatar out of the row.
-            compact ? "w-20" : "w-56 focus:w-72",
+            // Fills its flex-1 wrapper for the compact mobile version, rather
+            // than growing on focus like the desktop one — band 1 has no
+            // spare width for an input to expand into.
+            compact ? "w-full" : "w-56 focus:w-72",
           )}
           style={{ background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--text)" }}
         />

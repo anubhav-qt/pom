@@ -1,21 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-
 import { useOrderTabs } from "@/components/app-header";
+import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
 import { useHeaderCounts } from "@/lib/stores/header-counts";
-
-interface CrumbOption {
-  id: string;
-  label: string;
-  count?: number;
-  disabled?: boolean;
-}
 
 interface CrumbSub {
   activeId: string;
   activeLabel: string;
-  options: CrumbOption[];
+  options: DropdownOption[];
   onSelect: (id: string) => void;
 }
 
@@ -56,9 +48,12 @@ export function MobileOrdersCrumb({
       className="sticky z-30 -mx-4 -mt-6 flex items-center gap-1.5 px-4 py-2.5 sm:hidden"
       style={{ top: 56, borderTop: "1px solid var(--border)", background: "var(--panel)" }}
     >
-      <CrumbDropdown
-        trigger={activeLabel}
-        triggerWeight={600}
+      <DropdownMenu
+        trigger={
+          <span className="truncate text-[13px]" style={{ fontWeight: 600, color: "var(--text)" }}>
+            {activeLabel}
+          </span>
+        }
         options={tabs.map((t) => ({ id: t.key, label: t.label, count: badgeFor[t.key] }))}
         activeId={activeKey}
         onSelect={(id) => {
@@ -70,10 +65,12 @@ export function MobileOrdersCrumb({
       {sub ? (
         <>
           <Separator />
-          <CrumbDropdown
-            trigger={sub.activeLabel}
-            triggerWeight={500}
-            triggerColor="var(--muted)"
+          <DropdownMenu
+            trigger={
+              <span className="truncate text-[13px]" style={{ fontWeight: 500, color: "var(--muted)" }}>
+                {sub.activeLabel}
+              </span>
+            }
             options={sub.options}
             activeId={sub.activeId}
             onSelect={sub.onSelect}
@@ -101,89 +98,3 @@ function Separator() {
   );
 }
 
-/** One tap target + its anchored popover — the category and, when present, the sub-status segment each get one of these. */
-function CrumbDropdown({
-  trigger,
-  triggerWeight,
-  triggerColor = "var(--text)",
-  options,
-  activeId,
-  onSelect,
-}: {
-  trigger: string;
-  triggerWeight: number;
-  triggerColor?: string;
-  options: CrumbOption[];
-  activeId: string;
-  onSelect: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, []);
-
-  return (
-    <div className="relative shrink-0" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="truncate text-[13px]"
-        style={{ fontWeight: triggerWeight, color: triggerColor }}
-      >
-        {trigger}
-      </button>
-
-      {open ? (
-        <div
-          role="menu"
-          className="panel absolute left-0 top-full z-20 mt-2 w-52 origin-top-left p-1.5"
-          style={{ animation: "rise-in 0.15s var(--ease-premium)" }}
-        >
-          {options.map((o) => {
-            const active = o.id === activeId;
-            return (
-              <button
-                key={o.id}
-                type="button"
-                role="menuitem"
-                disabled={o.disabled}
-                onClick={() => {
-                  if (o.disabled) return;
-                  onSelect(o.id);
-                  setOpen(false);
-                }}
-                className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-[13px] transition-colors disabled:cursor-default"
-                style={{
-                  background: active ? "var(--accent-soft)" : undefined,
-                  color: o.disabled ? "var(--muted-2)" : active ? "#0b7fb0" : "var(--text)",
-                  fontWeight: active ? 600 : 500,
-                }}
-              >
-                <span>{o.label}</span>
-                {o.count !== undefined ? (
-                  <span
-                    className="shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-semibold tabular-nums"
-                    style={{
-                      background: active ? "var(--accent-soft)" : "var(--panel-2)",
-                      color: active ? "#0b7fb0" : "var(--muted)",
-                    }}
-                  >
-                    {o.count}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
-}
