@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Stat } from "@/components/ui";
+import { STATUS_LABELS, Stat } from "@/components/ui";
 import {
   invalidateOrderViews,
   ordersViewKey,
@@ -13,10 +13,11 @@ import {
 
 import { CancellationsPanel } from "./cancellations-panel";
 import { CollectionSheetButton } from "./collection-sheet";
+import { MobileOrdersCrumb } from "./mobile-orders-crumb";
 import { MobileOrdersNav } from "./mobile-orders-nav";
 import { OrderTable } from "./order-table";
 import { OrdersToolbar } from "./orders-toolbar";
-import { PickList } from "./pick-list";
+import { AllOrdersTiles, PickList } from "./pick-list";
 import { RailTabs } from "./rail-tabs";
 import { RestockPlanner } from "./restock-planner";
 import { ScanBarcodeButton } from "./scan/scan-button";
@@ -114,6 +115,7 @@ export function OrdersWorkspace({
   if (data.kind === "planner") {
     return (
       <div className={`space-y-5 ${busy}`}>
+        <MobileOrdersCrumb />
         <OrdersToolbar activeView="planner" activeChannel={data.channel} query={data.query} />
         <RestockPlanner initialPlan={data.plan} />
         <MobileOrdersNav activeView="planner" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
@@ -122,12 +124,46 @@ export function OrdersWorkspace({
   }
 
   if (data.kind === "collection") {
+    const isToShipUnshipped = data.category === "toShip";
+    const isAllRoot = data.category === "all" && !data.drillStatus;
+
+    const sub =
+      isToShipUnshipped
+        ? {
+            activeId: "unshipped",
+            activeLabel: "Unshipped",
+            // Collection has no defined meaning for Packed / Shipped (24h) yet —
+            // shown, not hidden, but disabled rather than pretending they work.
+            options: [
+              { id: "unshipped", label: "Unshipped" },
+              { id: "packed", label: "Packed", disabled: true },
+              { id: "shipped24h", label: "Shipped (24h)", disabled: true },
+            ],
+            onSelect: () => {},
+          }
+        : data.category === "cancellations"
+          ? {
+              activeId: data.resolved ? "completed" : "pending",
+              activeLabel: data.resolved ? "Completed" : "Pending",
+              options: [
+                { id: "pending", label: "Pending", count: data.cancellationCounts?.pending },
+                { id: "completed", label: "Completed", count: data.cancellationCounts?.completed },
+              ],
+              onSelect: (id: string) => go({ ...params, resolved: id === "completed" ? "1" : undefined }),
+            }
+          : undefined;
+
     return (
       <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
+        <MobileOrdersCrumb
+          sub={sub}
+          staticSubLabel={data.drillStatus ? STATUS_LABELS[data.drillStatus] : undefined}
+        />
         <OrdersToolbar
           activeView="collection"
           activeChannel={data.channel}
           query={data.query}
+          showSwitcher={data.category === "toShip"}
           rightSlot={
             <div className="flex items-center gap-2">
               <CollectionSheetButton rows={data.rows} />
@@ -135,20 +171,37 @@ export function OrdersWorkspace({
             </div>
           }
         />
-        <PickList rows={data.rows} />
+        {isAllRoot ? (
+          <AllOrdersTiles tiles={data.tiles ?? []} />
+        ) : (
+          <PickList rows={data.rows} category={data.category} />
+        )}
         <MobileOrdersNav activeView="collection" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
       </div>
     );
   }
 
   if (data.kind === "cancellations") {
+    const setResolved = (resolved: boolean) => go({ ...params, resolved: resolved ? "1" : undefined });
+
     return (
       <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
+        <MobileOrdersCrumb
+          sub={{
+            activeId: data.resolved ? "completed" : "pending",
+            activeLabel: data.resolved ? "Completed" : "Pending",
+            options: [
+              { id: "pending", label: "Pending", count: data.counts.pending },
+              { id: "completed", label: "Completed", count: data.counts.completed },
+            ],
+            onSelect: (id) => setResolved(id === "completed"),
+          }}
+        />
         <CancellationsPanel
           records={data.records}
           counts={data.counts}
           resolved={data.resolved}
-          onResolvedChange={(resolved) => go({ ...params, resolved: resolved ? "1" : undefined })}
+          onResolvedChange={setResolved}
           rightSlot={<ScanBarcodeButton station="inbound" onDone={refresh} />}
         />
         <MobileOrdersNav activeView={null} query="" scanStation="inbound" onScanDone={refresh} />
@@ -158,8 +211,28 @@ export function OrdersWorkspace({
 
   return (
     <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
+      <MobileOrdersCrumb
+        sub={
+          data.isQueueView && data.counts
+            ? {
+                activeId: data.activeTab,
+                activeLabel: { unshipped: "Unshipped", packed: "Packed", shipped24h: "Shipped (24h)" }[
+                  data.activeTab
+                ],
+                options: [
+                  { id: "unshipped", label: "Unshipped", count: data.counts.unshipped },
+                  { id: "packed", label: "Packed", count: data.counts.packed },
+                  { id: "shipped24h", label: "Shipped (24h)", count: data.counts.shipped24h },
+                ],
+                onSelect: (id) => go({ ...params, tab: id === "unshipped" ? undefined : (id as "packed" | "shipped24h") }),
+              }
+            : undefined
+        }
+      />
+
       {/* Styled and positioned to read as a direct continuation of the
-          header's own category rail — first thing in the page, no gap. */}
+          header's own category rail — first thing in the page, no gap.
+          Desktop only; mobile gets the crumb above instead. */}
       {data.isQueueView && data.counts ? (
         <RailTabs
           tabs={[
@@ -182,14 +255,13 @@ export function OrdersWorkspace({
         </div>
       ) : null}
 
-      {data.isQueueView ? (
-        <OrdersToolbar
-          activeView="list"
-          activeChannel={data.channel}
-          query={data.query}
-          rightSlot={<ScanBarcodeButton station="outbound" onDone={refresh} />}
-        />
-      ) : null}
+      <OrdersToolbar
+        activeView="list"
+        activeChannel={data.channel}
+        query={data.query}
+        showSwitcher={data.isQueueView}
+        rightSlot={data.isQueueView ? <ScanBarcodeButton station="outbound" onDone={refresh} /> : undefined}
+      />
 
       <OrderTable rows={data.rows} activeTab={data.activeTab} onChanged={refresh} />
 

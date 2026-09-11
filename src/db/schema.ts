@@ -395,6 +395,15 @@ export const orderFulfilment = pgTable(
     packedBy: integer("packed_by").references(() => users.id),
     manifestedAt: timestamp("manifested_at", { withTimezone: true }),
     manifestedBy: integer("manifested_by").references(() => users.id),
+    /**
+     * Set when someone clears a manifested order off the Shipped (24h) queue
+     * by hand — a purely local "stop showing me this" acknowledgement, not a
+     * status change. The order and its history are untouched everywhere else
+     * (Shipped/Delivered/All orders, dashboards, RTO tracking); this only
+     * gates the 24h queue's own filter.
+     */
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+    dismissedBy: integer("dismissed_by").references(() => users.id),
 
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

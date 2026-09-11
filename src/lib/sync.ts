@@ -589,9 +589,20 @@ export async function syncAccount(
           .map((r) => [r.externalOrderId, r.channelUpdatedAt!.getTime()] as const),
       );
 
+      // `limit` is a safety cap for the rare case a stale cursor already got
+      // rewound to MAX_CATCHUP_MS ago (`ordersWindow.truncated`) — a genuine
+      // multi-week backlog that must not try to walk itself in one invocation.
+      // The routine case (cursor recent, window merely forced back to the
+      // trailing 72h) has no such cap: fetchOrders pages until Amazon reports
+      // no more, however many orders that is. That backlog is mostly the free
+      // "unchanged" fast lane (see toCanonical), so paging it fully costs
+      // little — and a fixed cap here is exactly what let a real order sit
+      // un-synced through four consecutive manual syncs (see commit history).
+      const ordersLimit = ordersWindow.truncated ? limit : Infinity;
+
       const res = await adapter.fetchOrders({
         since,
-        limit,
+        limit: ordersLimit,
         unchangedSince,
         onProgress: async (info) => {
           // Live progress, written straight to the row so any request polling
@@ -686,6 +697,12 @@ export async function startManualOrderSync(accountId: number) {
   after(async () => {
     // Failure is already recorded on the run row inside syncAccount's own
     // catch block — nothing further to do with the rejection here.
+    //
+    // 100 here only ever applies when the cursor is stale enough to have hit
+    // MAX_CATCHUP_MS (`ordersWindow.truncated` inside syncAccount) — a real
+    // multi-week backlog that must be walked across several invocations, not
+    // one. The routine case ignores this cap entirely and pages until Amazon
+    // reports no more; see the comment at `ordersLimit` in syncAccount.
     await syncAccount(account, "orders", 100, { runId: run.id }).catch(() => {});
     // Returns piggyback on the same trigger, silently — currently a no-op for
     // Amazon and fast enough elsewhere that it doesn't need its own bar.

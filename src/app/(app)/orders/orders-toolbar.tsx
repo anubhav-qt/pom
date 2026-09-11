@@ -19,12 +19,21 @@ export function OrdersToolbar({
   activeView,
   query,
   rightSlot,
+  showSwitcher = true,
 }: {
   activeChannel?: Channel;
   activeView: View;
   query: string;
   /** Rendered at the right end of the toolbar row (e.g. the collection sheet button). */
   rightSlot?: React.ReactNode;
+  /**
+   * The List / Collection / Planner switch only makes sense on the unfiltered
+   * "to ship" queue — Collection and Planner are both scoped to open orders,
+   * so they'd silently drop a status filter (Shipped, Delivered, ...) if
+   * reached from one. Status-filtered lists get just the channel label and
+   * rightSlot, no pill switcher.
+   */
+  showSwitcher?: boolean;
 }) {
   const go = useOrdersNav((s) => s.go);
 
@@ -76,33 +85,37 @@ export function OrdersToolbar({
     // three destinations plus Scanner/AI — this row (and the Scan Barcode
     // button in rightSlot) is redundant with that below `sm`.
     <div className="hidden flex-wrap items-center justify-between gap-3 sm:flex">
-      <div
-        className="inline-flex rounded-[10px] p-[3px]"
-        style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-xs)" }}
-      >
-        {tabs.map((t) => {
-          const active = t.view === activeView;
-          return (
-            <button
-              key={t.view}
-              type="button"
-              onClick={() => select(t.view)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-medium transition-colors",
-                !active && "muted",
-              )}
-              style={
-                active
-                  ? { background: "var(--accent-soft)", color: "#0b7fb0" }
-                  : undefined
-              }
-            >
-              {t.icon}
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
+      {showSwitcher ? (
+        <div
+          className="inline-flex rounded-[10px] p-[3px]"
+          style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-xs)" }}
+        >
+          {tabs.map((t) => {
+            const active = t.view === activeView;
+            return (
+              <button
+                key={t.view}
+                type="button"
+                onClick={() => select(t.view)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-medium transition-colors",
+                  !active && "muted",
+                )}
+                style={
+                  active
+                    ? { background: "var(--accent-soft)", color: "#0b7fb0" }
+                    : undefined
+                }
+              >
+                {t.icon}
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <span />
+      )}
 
       <div className="flex items-center gap-3">
         {ENABLED_CHANNELS.length > 1 ? (

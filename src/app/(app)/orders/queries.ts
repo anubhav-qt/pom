@@ -11,6 +11,7 @@ import {
   products,
   users,
   type Channel,
+  type OrderStatus,
 } from "@/db/schema";
 
 /**
@@ -119,6 +120,99 @@ export async function getToShipPickList(channel?: Channel): Promise<PickRow[]> {
     earliestDispatchBy: r.earliest ? new Date(r.earliest).toISOString() : null,
     orderIds: (r.orderIds ?? []).filter(Boolean),
   }));
+}
+
+/**
+ * The same SKU rollup as `getToShipPickList`, for a category that isn't the
+ * live open queue: no `order_fulfilment` join, no manifested-exclusion, no
+ * dispatch-deadline math (`lateCount`/`earliestDispatchBy` come back inert —
+ * none of that means anything once an order isn't still awaiting dispatch).
+ * `null` statuses means no status filter at all (the "All orders" rollup).
+ */
+export async function getPickListByStatus(
+  statuses: readonly OrderStatus[] | null,
+  channel?: Channel,
+): Promise<PickRow[]> {
+  const filters: SQL[] = [
+    inArray(orders.channel, [...ENABLED_CHANNELS]),
+    eq(orderItems.cancelled, false),
+  ];
+  if (statuses) filters.push(inArray(orders.status, [...statuses]));
+  if (channel) filters.push(eq(orders.channel, channel));
+
+  const rows = await db
+    .select({
+      productId: orderItems.productId,
+      externalSku: orderItems.externalSku,
+      asin: sql<string | null>`max(${orderItems.externalAsin})`,
+      pSku: products.sku,
+      pName: products.name,
+      binLocation: products.binLocation,
+      pImage: products.imageUrl,
+      ciImage: sql<string | null>`max(${catalogImages.imageUrl})`,
+      itemTitle: sql<string | null>`max(${orderItems.title})`,
+      unitsNeeded: sql<number>`sum(${orderItems.quantity})::int`,
+      orderCount: sql<number>`count(distinct ${orders.id})::int`,
+      orderIds: sql<string[]>`array_agg(distinct ${orders.externalOrderId})`,
+    })
+    .from(orderItems)
+    .innerJoin(orders, eq(orders.id, orderItems.orderId))
+    .leftJoin(products, eq(products.id, orderItems.productId))
+    .leftJoin(
+      catalogImages,
+      and(
+        eq(catalogImages.channelAccountId, orders.channelAccountId),
+        eq(catalogImages.asin, orderItems.externalAsin),
+      ),
+    )
+    .where(and(...filters))
+    .groupBy(
+      orderItems.productId,
+      orderItems.externalSku,
+      products.id,
+      products.sku,
+      products.name,
+      products.binLocation,
+      products.imageUrl,
+    )
+    .orderBy(desc(sql`sum(${orderItems.quantity})`));
+
+  return rows.map((r) => ({
+    key: r.productId !== null ? `p:${r.productId}` : `s:${r.externalSku}`,
+    sku: r.pSku ?? r.externalSku,
+    externalSku: r.externalSku,
+    asin: r.asin,
+    title: r.pName ?? r.itemTitle,
+    productId: r.productId,
+    mapped: r.productId !== null,
+    binLocation: r.binLocation,
+    imageUrl: r.pImage ?? r.ciImage,
+    unitsNeeded: Number(r.unitsNeeded ?? 0),
+    orderCount: Number(r.orderCount ?? 0),
+    lateCount: 0,
+    earliestDispatchBy: null,
+    orderIds: (r.orderIds ?? []).filter(Boolean),
+  }));
+}
+
+/**
+ * How many live orders sit in each status, for the "All orders" Collection
+ * view's tile breakdown. Real counts straight off `orders.status` — nothing
+ * invented, nothing beyond what the column itself already tracks.
+ */
+export async function getOrderStatusBreakdown(
+  channel?: Channel,
+): Promise<{ status: OrderStatus; count: number }[]> {
+  const filters: SQL[] = [inArray(orders.channel, [...ENABLED_CHANNELS])];
+  if (channel) filters.push(eq(orders.channel, channel));
+
+  const rows = await db
+    .select({ status: orders.status, count: sql<number>`count(*)::int` })
+    .from(orders)
+    .where(and(...filters))
+    .groupBy(orders.status);
+
+  return rows.map((r) => ({ status: r.status, count: Number(r.count) }));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -278,6 +372,66 @@ export async function getCancellationRecords(opts: {
       items: itemsByOrder.get(r.orderId) ?? [],
     };
   });
+}
+
+/**
+ * The Cancelled & RTO Collection rollup: every line item on the pending or
+ * completed cancellation/RTO/return records, grouped by SKU.
+ *
+ * Built entirely from `getCancellationRecords`'s already-real `items` — not a
+ * fresh query against `orders`/`orderItems` — because that's the one place
+ * this app actually knows what a cancelled or returned order contained.
+ * `fetchReturns` (see `channels/amazon.ts`) is an unimplemented stub, so there
+ * is no real pipeline-stage data (no "awaiting pickup" / "in transit" / etc.)
+ * to group by; SKU is the only honest axis here.
+ *
+ * Those records don't carry `productId`/`binLocation` (their query never
+ * joins `products`), so every row here comes back unmapped rather than
+ * guessing — `PickList` knows not to flag that as a data-quality problem for
+ * this one category.
+ */
+export async function getCancellationPickList(resolved: boolean): Promise<PickRow[]> {
+  const records = await getCancellationRecords({ resolved, sinceDays: 30 });
+
+  const bySku = new Map<
+    string,
+    { sku: string; title: string | null; imageUrl: string | null; units: number; orderIds: Set<string> }
+  >();
+  for (const r of records) {
+    for (const it of r.items) {
+      const entry = bySku.get(it.sku) ?? {
+        sku: it.sku,
+        title: it.title,
+        imageUrl: it.imageUrl,
+        units: 0,
+        orderIds: new Set<string>(),
+      };
+      entry.units += it.quantity;
+      entry.orderIds.add(r.externalOrderId);
+      if (!entry.title && it.title) entry.title = it.title;
+      if (!entry.imageUrl && it.imageUrl) entry.imageUrl = it.imageUrl;
+      bySku.set(it.sku, entry);
+    }
+  }
+
+  return [...bySku.values()]
+    .map((e) => ({
+      key: `s:${e.sku}`,
+      sku: e.sku,
+      externalSku: e.sku,
+      asin: null,
+      title: e.title,
+      productId: null,
+      mapped: false,
+      binLocation: null,
+      imageUrl: e.imageUrl,
+      unitsNeeded: e.units,
+      orderCount: e.orderIds.size,
+      lateCount: 0,
+      earliestDispatchBy: null,
+      orderIds: [...e.orderIds],
+    }))
+    .sort((a, b) => b.unitsNeeded - a.unitsNeeded);
 }
 
 export async function getCancellationCounts(sinceDays = 30) {

@@ -13,8 +13,10 @@ import {
   useOrdersNav,
 } from "@/lib/stores/orders-cache";
 import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
+import { useHeaderCounts } from "@/lib/stores/header-counts";
 import { resolveScreen, screenFromPath, screenHref, useScreenNav, type Screen } from "@/lib/stores/screen-nav";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
+import { STATUS_LABELS } from "@/components/ui";
 import { withBasePath } from "@/lib/base-path";
 import { cn } from "@/lib/utils";
 
@@ -85,6 +87,13 @@ export function AppHeader({
   const effectiveScreen = resolveScreen(pathname, override);
   const onOrders = effectiveScreen === "orders";
 
+  // Mirrored into a store so the mobile category dropdown (rendered in the
+  // page body, below the header) can read the same real counts instead of
+  // running a second query for them.
+  useEffect(() => {
+    useHeaderCounts.getState().set(counts);
+  }, [counts.toShip, counts.shipped, counts.cancelledRto]);
+
   return (
     <header
       className="no-print sticky top-0 z-40"
@@ -106,6 +115,17 @@ export function AppHeader({
         <AppSwitch effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
 
         <div className="flex-1" />
+
+        {/* Band 2's own search only ever shows from `md` up (see `OrdersTabs`)
+            — mobile has no search at all otherwise, so it gets this compact
+            stand-in here, right before Sync/avatar. Shrunk (not the full
+            w-56) because band 1 is already tight on a phone width; gone again
+            from `md` so the two never both show at once. */}
+        {onOrders ? (
+          <div className="md:hidden">
+            <HeaderSearch compact />
+          </div>
+        ) : null}
 
         <SyncStatus lastSyncAt={lastSyncAt} />
 
@@ -458,9 +478,9 @@ function AvatarMenu({
 /* Band 2 — Orders status tabs                                                */
 /* -------------------------------------------------------------------------- */
 
-type TabKey = "toShip" | "shipped" | "delivered" | "cancellations" | "all";
+export type TabKey = "toShip" | "shipped" | "delivered" | "cancellations" | "all";
 
-const ORDER_TABS: { key: TabKey; label: string; params: OrdersViewParams }[] = [
+export const ORDER_TABS: { key: TabKey; label: string; params: OrdersViewParams }[] = [
   { key: "toShip", label: "To Ship", params: {} },
   { key: "shipped", label: "Shipped", params: { status: "shipped" } },
   { key: "delivered", label: "Delivered", params: { status: "delivered" } },
@@ -468,7 +488,19 @@ const ORDER_TABS: { key: TabKey; label: string; params: OrdersViewParams }[] = [
   { key: "all", label: "All orders", params: { status: "all" } },
 ];
 
-function OrdersTabs({ counts }: { counts: HeaderCounts }) {
+/**
+ * The single source of truth for "which of the 5 category tabs is active" and
+ * "how to switch to another one" — shared by the desktop tab band below and
+ * the mobile category dropdown (`MobileOrdersCrumb`), so the two can never
+ * disagree about what's showing, same as `RailTabs` already does for the
+ * sub-status rail.
+ *
+ * A `status` outside {shipped, delivered, all} but still a real `OrderStatus`
+ * (e.g. `cancelled`, reached by drilling into a tile from All orders'
+ * Collection view) is a sub-state of "All orders", not a tab of its own —
+ * there is no 6th tab for it.
+ */
+export function useOrderTabs() {
   const params = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -488,6 +520,15 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
   else if (status === "all") activeKey = "all";
   else if (status === "shipped") activeKey = "shipped";
   else if (status === "delivered") activeKey = "delivered";
+  else if (status === "cancellations") activeKey = "cancellations";
+  else if (status && status in STATUS_LABELS) activeKey = "all";
+
+  return { activeKey, select, tabs: ORDER_TABS };
+}
+
+function OrdersTabs({ counts }: { counts: HeaderCounts }) {
+  const params = useSearchParams();
+  const { activeKey, select, tabs } = useOrderTabs();
 
   const badgeFor: Partial<Record<TabKey, number>> = {
     toShip: counts.toShip,
@@ -495,19 +536,14 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
     cancellations: counts.cancelledRto,
   };
 
-  // Search keeps the tab you are on; it only sets/clears `q`.
-  function onSearch(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const value = String(new FormData(e.currentTarget).get("q") ?? "").trim();
-    go({ ...queryToParams(params.toString()), q: value || undefined });
-  }
-
   return (
     <div
-      className="mx-auto flex max-w-7xl items-center gap-6 overflow-x-auto px-4 sm:px-6"
+      // Desktop-only: mobile gets `MobileOrdersCrumb`'s compact dropdown
+      // instead, rendered in the page body just under this header.
+      className="mx-auto hidden max-w-7xl items-center gap-6 overflow-x-auto px-4 sm:flex sm:px-6"
       style={{ borderTop: "1px solid var(--border)", scrollbarWidth: "none" }}
     >
-      {ORDER_TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = tab.key === activeKey;
         const badge = badgeFor[tab.key];
         return (
@@ -543,29 +579,57 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
 
       <div className="flex-1" />
 
-      <form onSubmit={onSearch} className="hidden py-2 md:block">
-        <div className="relative">
-          <svg
-            viewBox="0 0 24 24"
-            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
-            fill="none"
-            stroke="var(--muted-2)"
-            strokeWidth="2"
-            strokeLinecap="round"
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="m20 20-3.5-3.5" />
-          </svg>
-          <input
-            key={params.get("q") ?? ""}
-            name="q"
-            defaultValue={params.get("q") ?? ""}
-            placeholder="Search order ID, buyer, pincode…"
-            className="w-56 rounded-lg py-1.5 pl-8 pr-3 text-[12.5px] outline-none transition-colors focus:w-72"
-            style={{ background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--text)" }}
-          />
-        </div>
-      </form>
+      <div className="hidden py-2 md:block">
+        <HeaderSearch />
+      </div>
     </div>
+  );
+}
+
+/**
+ * The order search box — band 2's own version (desktop, `md` up) and band 1's
+ * compact mobile stand-in (`compact`) both render this, so search keeps
+ * behaving identically (same `q` param, same "keep whatever tab you're on")
+ * everywhere it appears.
+ */
+function HeaderSearch({ compact }: { compact?: boolean }) {
+  const params = useSearchParams();
+
+  function onSearch(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const value = String(new FormData(e.currentTarget).get("q") ?? "").trim();
+    useOrdersNav.getState().go({ ...queryToParams(params.toString()), q: value || undefined });
+  }
+
+  return (
+    <form onSubmit={onSearch}>
+      <div className="relative">
+        <svg
+          viewBox="0 0 24 24"
+          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
+          fill="none"
+          stroke="var(--muted-2)"
+          strokeWidth="2"
+          strokeLinecap="round"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <input
+          key={params.get("q") ?? ""}
+          name="q"
+          defaultValue={params.get("q") ?? ""}
+          placeholder={compact ? "Search…" : "Search order ID, buyer, pincode…"}
+          className={cn(
+            "rounded-lg py-1.5 pl-8 pr-3 text-[12.5px] outline-none transition-colors",
+            // Fixed, not growing on focus, for the compact mobile version —
+            // band 1 has no spare width for an input to expand into without
+            // shoving Sync/avatar out of the row.
+            compact ? "w-20" : "w-56 focus:w-72",
+          )}
+          style={{ background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--text)" }}
+        />
+      </div>
+    </form>
   );
 }
