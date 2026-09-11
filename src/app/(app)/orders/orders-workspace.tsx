@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Stat } from "@/components/ui";
-import { cn } from "@/lib/utils";
 import {
   invalidateOrderViews,
   ordersViewKey,
@@ -14,9 +13,11 @@ import {
 
 import { CancellationsPanel } from "./cancellations-panel";
 import { CollectionSheetButton } from "./collection-sheet";
+import { MobileOrdersNav } from "./mobile-orders-nav";
 import { OrderTable } from "./order-table";
 import { OrdersToolbar } from "./orders-toolbar";
 import { PickList } from "./pick-list";
+import { RailTabs } from "./rail-tabs";
 import { RestockPlanner } from "./restock-planner";
 import { ScanBarcodeButton } from "./scan/scan-button";
 import { getOrdersView, type OrdersView, type OrdersViewParams } from "./view-actions";
@@ -115,13 +116,14 @@ export function OrdersWorkspace({
       <div className={`space-y-5 ${busy}`}>
         <OrdersToolbar activeView="planner" activeChannel={data.channel} query={data.query} />
         <RestockPlanner initialPlan={data.plan} />
+        <MobileOrdersNav activeView="planner" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
       </div>
     );
   }
 
   if (data.kind === "collection") {
     return (
-      <div className={`space-y-5 ${busy}`}>
+      <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
         <OrdersToolbar
           activeView="collection"
           activeChannel={data.channel}
@@ -134,13 +136,14 @@ export function OrdersWorkspace({
           }
         />
         <PickList rows={data.rows} />
+        <MobileOrdersNav activeView="collection" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
       </div>
     );
   }
 
   if (data.kind === "cancellations") {
     return (
-      <div className={`space-y-5 ${busy}`}>
+      <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
         <CancellationsPanel
           records={data.records}
           counts={data.counts}
@@ -148,12 +151,37 @@ export function OrdersWorkspace({
           onResolvedChange={(resolved) => go({ ...params, resolved: resolved ? "1" : undefined })}
           rightSlot={<ScanBarcodeButton station="inbound" onDone={refresh} />}
         />
+        <MobileOrdersNav activeView={null} query="" scanStation="inbound" onScanDone={refresh} />
       </div>
     );
   }
 
   return (
-    <div className={`space-y-5 ${busy}`}>
+    <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
+      {/* Styled and positioned to read as a direct continuation of the
+          header's own category rail — first thing in the page, no gap. */}
+      {data.isQueueView && data.counts ? (
+        <RailTabs
+          tabs={[
+            { id: "unshipped" as const, label: "Unshipped", count: data.counts.unshipped },
+            { id: "packed" as const, label: "Packed", count: data.counts.packed },
+            { id: "shipped24h" as const, label: "Shipped (24h)", count: data.counts.shipped24h },
+          ]}
+          active={data.activeTab}
+          onSelect={(tab) => go({ ...params, tab: tab === "unshipped" ? undefined : tab })}
+        />
+      ) : null}
+
+      {data.isQueueView && data.counts && data.activeTab === "unshipped" && data.counts.late > 0 ? (
+        <div
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
+          style={{ background: "var(--danger-soft)", color: "var(--danger)" }}
+        >
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--danger)" }} />
+          <span>{data.counts.late} past dispatch deadline</span>
+        </div>
+      ) : null}
+
       {data.isQueueView ? (
         <OrdersToolbar
           activeView="list"
@@ -163,61 +191,9 @@ export function OrdersWorkspace({
         />
       ) : null}
 
-      {data.isQueueView && data.counts ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div
-            className="inline-flex items-center gap-1 rounded-full border p-1"
-            style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-          >
-            {[
-              { id: "unshipped" as const, label: "Unshipped", count: data.counts.unshipped },
-              { id: "packed" as const, label: "Packed", count: data.counts.packed },
-              { id: "shipped24h" as const, label: "Shipped (24h)", count: data.counts.shipped24h },
-            ].map((tab) => {
-              const active = data.activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => go({ ...params, tab: tab.id === "unshipped" ? undefined : tab.id })}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
-                    active ? "text-white" : "muted hover:text-[var(--text)]",
-                  )}
-                  style={
-                    active
-                      ? { background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }
-                      : undefined
-                  }
-                >
-                  <span>{tab.label}</span>
-                  <span
-                    className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                    style={{
-                      background: active ? "rgba(255,255,255,0.2)" : "var(--panel-2)",
-                      color: active ? "white" : "var(--muted)",
-                    }}
-                  >
-                    {tab.count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+      <OrderTable rows={data.rows} activeTab={data.activeTab} onChanged={refresh} />
 
-          {data.activeTab === "unshipped" && data.counts.late > 0 ? (
-            <div
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
-              style={{ background: "var(--danger-soft)", color: "var(--danger)" }}
-            >
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--danger)" }} />
-              <span>{data.counts.late} past dispatch deadline</span>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <OrderTable rows={data.rows} />
+      <MobileOrdersNav activeView="list" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
     </div>
   );
 }

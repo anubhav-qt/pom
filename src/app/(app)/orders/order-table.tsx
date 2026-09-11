@@ -37,7 +37,17 @@ export interface OrderRow {
   }[];
 }
 
-export function OrderTable({ rows }: { rows: OrderRow[] }) {
+export function OrderTable({
+  rows,
+  activeTab,
+  onChanged,
+}: {
+  rows: OrderRow[];
+  /** Which queue tab these rows came from, if any — drives the Packed-only bulk-ship fallback. */
+  activeTab?: "unshipped" | "packed" | "shipped24h";
+  /** Called after a bulk action commits, so the caller can refetch its cache. */
+  onChanged?: () => void;
+}) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [pending, startTransition] = useTransition();
@@ -45,6 +55,14 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
   const [cropLabels, setCropLabels] = useState(true);
   const [openOrderId, setOpenOrderId] = useState<number | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+
+  // A packed order normally leaves this tab when its label gets scanned at
+  // the outbound bench (that scan is what actually calls `createManifest`).
+  // Forget to scan one and it sits here forever — nothing else ever flips
+  // its state. This is the manual escape hatch, independent of the
+  // print-labels feature flag, since it isn't about labels at all.
+  const canBulkShip = activeTab === "packed";
+  const showSelection = FEATURES.labelPrinting || canBulkShip;
 
   const allSelected = rows.length > 0 && selected.size === rows.length;
   const selectedIds = useMemo(() => [...selected], [selected]);
@@ -96,6 +114,7 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
       setMessage(res.ok ? null : (res.error ?? "Something went wrong."));
       if (res.ok) setSelected(new Set());
       router.refresh();
+      onChanged?.();
     });
   }
 
@@ -104,46 +123,64 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
       {/* Status filtering and search live in the header (band 2) now. */}
 
       {/* ------------------------------------------------------ bulk actions */}
-      {FEATURES.labelPrinting ? (
+      {showSelection && rows.length > 0 ? (
         <div className="no-print panel flex flex-wrap items-center gap-2 p-2">
           <span className="muted px-1 text-sm tabular-nums">{selected.size} selected</span>
 
-          <button className="btn btn-primary" disabled={selected.size === 0} onClick={printLabels}>
-            Print labels
-          </button>
+          {FEATURES.labelPrinting ? (
+            <>
+              <button className="btn btn-primary" disabled={selected.size === 0} onClick={printLabels}>
+                Print labels
+              </button>
 
-          <label className="muted flex items-center gap-1.5 text-xs">
-            <input
-              type="checkbox"
-              checked={cropLabels}
-              onChange={(e) => setCropLabels(e.target.checked)}
-            />
-            Crop off invoice
-          </label>
+              <label className="muted flex items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={cropLabels}
+                  onChange={(e) => setCropLabels(e.target.checked)}
+                />
+                Crop off invoice
+              </label>
 
-          <button
-            className="btn"
-            disabled={selected.size === 0 || pending}
-            onClick={() => run(() => markPacked(selectedIds))}
-          >
-            Mark packed
-          </button>
+              <button
+                className="btn"
+                disabled={selected.size === 0 || pending}
+                onClick={() => run(() => markPacked(selectedIds))}
+              >
+                Mark packed
+              </button>
 
-          <button
-            className="btn"
-            disabled={selected.size === 0 || pending}
-            onClick={() => run(() => createManifest(selectedIds))}
-          >
-            Create manifest
-          </button>
+              <button
+                className="btn"
+                disabled={selected.size === 0 || pending}
+                onClick={() => run(() => createManifest(selectedIds))}
+              >
+                Create manifest
+              </button>
 
-          <button
-            className="btn ml-auto"
-            disabled={selected.size === 0 || pending}
-            onClick={() => run(() => revertToNew(selectedIds))}
-          >
-            Undo
-          </button>
+              <button
+                className="btn ml-auto"
+                disabled={selected.size === 0 || pending}
+                onClick={() => run(() => revertToNew(selectedIds))}
+              >
+                Undo
+              </button>
+            </>
+          ) : null}
+
+          {/* Forgot to scan a packed order at the bench? This is the fallback —
+              same underlying transition (packed → manifested) a scan would have
+              made, without needing a label to scan. */}
+          {canBulkShip && !FEATURES.labelPrinting ? (
+            <button
+              className="btn btn-primary ml-auto"
+              disabled={selected.size === 0 || pending}
+              onClick={() => run(() => createManifest(selectedIds))}
+              title="For orders you packed but never scanned — moves them straight to Shipped."
+            >
+              Mark shipped
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -173,6 +210,9 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
               <OrderCard
                 key={row.id}
                 row={row}
+                selectable={showSelection}
+                selected={selected.has(row.id)}
+                onToggleSelect={() => toggle(row.id)}
                 onOpen={() => setOpenOrderId(row.id)}
                 onOpenImage={(src, alt) => setLightbox({ src, alt })}
               />
@@ -184,7 +224,7 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
             <thead>
               <tr>
                 {/* Selection only exists to feed the bulk actions above. */}
-                {FEATURES.labelPrinting ? (
+                {showSelection ? (
                   <th className="w-8">
                     <input
                       type="checkbox"
@@ -215,7 +255,7 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
                     onClick={() => setOpenOrderId(row.id)}
                     className="cursor-pointer"
                   >
-                    {FEATURES.labelPrinting ? (
+                    {showSelection ? (
                       <td onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
@@ -380,22 +420,40 @@ function OrderCard({
   row,
   onOpen,
   onOpenImage,
+  selectable,
+  selected,
+  onToggleSelect,
 }: {
   row: OrderRow;
   onOpen: () => void;
   onOpenImage: (src: string, alt: string) => void;
+  /** Packed-tab (or label-printing) bulk selection — a checkbox floats over the card. */
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const { deadline, hasUnmapped } = orderMeta(row);
   const thumbSrc = row.items.find((i) => i.imageUrl)?.imageUrl ?? null;
   const thumbAlt = row.items[0]?.title ?? row.externalOrderId;
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="panel flex gap-3 p-3 text-left active:scale-[0.99]"
-      style={{ transition: "transform 0.1s var(--ease-premium)" }}
-    >
+    <div className="relative">
+      {selectable ? (
+        <input
+          type="checkbox"
+          checked={selected ?? false}
+          onChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Select ${row.externalOrderId}`}
+          className="absolute left-3 top-3 z-10 h-4 w-4"
+        />
+      ) : null}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="panel flex w-full gap-3 p-3 text-left active:scale-[0.99]"
+        style={{ transition: "transform 0.1s var(--ease-premium)", paddingLeft: selectable ? "2.25rem" : undefined }}
+      >
       <span
         className="relative w-14 shrink-0"
         onClick={(e) => {
@@ -458,11 +516,12 @@ function OrderCard({
           </span>
         ) : null}
       </div>
-    </button>
+      </button>
+    </div>
   );
 }
 
-function OrderThumb({
+export function OrderThumb({
   src,
   alt,
   size = "h-11 w-11",
