@@ -687,7 +687,7 @@ function HeaderSearch({ compact }: { compact?: boolean }) {
           key={params.get("q") ?? ""}
           name="q"
           defaultValue={params.get("q") ?? ""}
-          placeholder={compact ? "Search…" : "Search order ID, buyer, pincode…"}
+          placeholder="Search order ID, buyer, pincode, SKU…"
           className={cn(
             "rounded-lg py-1.5 pl-8 pr-3 text-[12.5px] outline-none transition-colors",
             // Fills its flex-1 wrapper for the compact mobile version, rather

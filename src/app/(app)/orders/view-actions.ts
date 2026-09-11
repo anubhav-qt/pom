@@ -241,6 +241,14 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
         sql`${orders.externalOrderId} ILIKE ${like}`,
         sql`${orders.buyerName} ILIKE ${like}`,
         sql`${orders.shipPincode} ILIKE ${like}`,
+        // Either the channel's own SKU or, where mapped, our product SKU —
+        // a picker searching by either should find the order.
+        sql`EXISTS (
+          SELECT 1 FROM ${orderItems} oi
+          LEFT JOIN ${products} p ON p.id = oi.product_id
+          WHERE oi.order_id = ${orders.id}
+            AND (oi.external_sku ILIKE ${like} OR p.sku ILIKE ${like})
+        )`,
       )!,
     );
   }

@@ -13,7 +13,6 @@ const Body = z.object({
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() }))
     .max(12)
     .optional(),
-  displayMode: z.enum(["cards", "html"]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -33,7 +32,6 @@ export async function POST(request: Request) {
     const result = await runAssistant(
       (parsed.data.history ?? []) as ChatTurn[],
       parsed.data.question,
-      parsed.data.displayMode ?? "cards",
     );
     return NextResponse.json(result);
   } catch (err) {

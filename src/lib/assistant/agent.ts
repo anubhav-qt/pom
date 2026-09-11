@@ -2,11 +2,9 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 
 import { ASSISTANT_DB_TOOLS } from "./db-tools";
-import { ASSISTANT_TOOL_MAP, ASSISTANT_TOOLS, renderHtmlTool } from "./tools";
+import { ASSISTANT_TOOL_MAP, ASSISTANT_TOOLS } from "./tools";
 
-export type DisplayMode = "cards" | "html";
-
-const BASE_SYSTEM_PROMPT = `You are the built-in data assistant inside Paribelle OMS, an
+const SYSTEM_PROMPT = `You are the built-in data assistant inside Paribelle OMS, an
 order-management tool for a small clothing seller on Amazon (and eventually other
 marketplaces). You are talking directly to the business owner.
 
@@ -32,19 +30,6 @@ Rules:
 - You cannot take any action (no packing, no order changes) — you can only look things
   up and report them.`;
 
-const HTML_MODE_ADDENDUM = `
-
-You are in custom-page display mode. After you've gathered the data you need from the
-tools above, call render_html exactly once, as your last tool call, with a hand-designed
-HTML fragment presenting that specific answer — pick whatever layout actually fits (a
-table, a ranked list, a stat grid, grouped sections) rather than defaulting to one shape
-every time. Base it only on data you already have from this turn's tool results — don't
-restate the schema or invent rows. Then give your normal short prose reply.`;
-
-function systemPrompt(mode: DisplayMode): string {
-  return mode === "html" ? BASE_SYSTEM_PROMPT + HTML_MODE_ADDENDUM : BASE_SYSTEM_PROMPT;
-}
-
 /** How many think→act cycles one question is allowed before it gets cut off. */
 const MAX_STEPS = 4;
 
@@ -63,7 +48,7 @@ export interface AssistantResult {
   cards: AssistantCard[];
 }
 
-async function chatModel(mode: DisplayMode) {
+async function chatModel() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY is not set — add it to .env.local to enable the assistant.");
@@ -73,14 +58,7 @@ async function chatModel(mode: DisplayMode) {
     model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
     temperature: 0.2,
   });
-  // render_html is only offered in "html" mode — in "cards" mode the fixed
-  // React components own presentation, and there's nothing for the model to
-  // render itself.
-  const tools =
-    mode === "html"
-      ? [...ASSISTANT_TOOLS, renderHtmlTool, ...ASSISTANT_DB_TOOLS]
-      : [...ASSISTANT_TOOLS, ...ASSISTANT_DB_TOOLS];
-  return model.bindTools(tools);
+  return model.bindTools([...ASSISTANT_TOOLS, ...ASSISTANT_DB_TOOLS]);
 }
 
 function tryParseRunSqlResult(text: string): AssistantCard | null {
@@ -119,21 +97,19 @@ function contentToText(content: AIMessage["content"]): string {
 export async function runAssistant(
   history: ChatTurn[],
   question: string,
-  displayMode: DisplayMode = "cards",
 ): Promise<AssistantResult> {
-  const chat = await chatModel(displayMode);
+  const chat = await chatModel();
   // Every tool here has its own zod-typed `invoke` signature, so the union
   // isn't statically callable; narrow the merged map to the one shared
   // surface we actually use. Safe because every tool re-validates its args
   // against its own schema regardless of this cast.
   const toolMap = {
     ...ASSISTANT_TOOL_MAP,
-    render_html: renderHtmlTool,
     ...Object.fromEntries(ASSISTANT_DB_TOOLS.map((t) => [t.name, t])),
   } as unknown as Record<string, { invoke: (args: unknown) => Promise<unknown> }>;
 
   const messages: BaseMessage[] = [
-    new SystemMessage(systemPrompt(displayMode)),
+    new SystemMessage(SYSTEM_PROMPT),
     // Only recent turns — this is a lookup tool, not a long-memory chat, and a
     // shorter context keeps latency and cost predictable.
     ...history.slice(-8).map((h) => (h.role === "user" ? new HumanMessage(h.content) : new AIMessage(h.content))),

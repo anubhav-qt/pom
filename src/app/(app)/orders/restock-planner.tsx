@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { Empty } from "@/components/ui";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { Modal } from "@/components/modal";
 import { colorSwatch } from "@/lib/variant-title";
 
 import { MOBILE_NAV_HEIGHT } from "./mobile-orders-nav";
@@ -73,6 +74,7 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
   const [mobileScreen, setMobileScreen] = useState<"list" | "detail">("list");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<null | "reset" | "jpeg" | "pdf">(null);
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(initialPlan.generatedAt);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -103,10 +105,8 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
     apply(ids, (c) => ({ ...c, excluded }), () => updateRestockItems(ids, { excluded }));
   }
 
-  async function reset() {
-    if (!confirm("Rebuild the planner from the latest synced orders? Every 'have' you have typed will be cleared.")) {
-      return;
-    }
+  async function doReset() {
+    setConfirmingReset(false);
     setBusy("reset");
     setError(null);
     try {
@@ -174,7 +174,7 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
           {generatedAt ? (
             <span className="muted text-[11px]">built {relTime(generatedAt)}</span>
           ) : null}
-          <button className="btn text-xs" disabled={busy !== null} onClick={reset}>
+          <button className="btn text-xs" disabled={busy !== null} onClick={() => setConfirmingReset(true)}>
             {busy === "reset" ? "Rebuilding…" : "Reset from latest sync"}
           </button>
           <button
@@ -374,7 +374,7 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
           }}
         >
           <div className="flex items-center gap-2">
-            <button className="btn flex-1 text-xs" disabled={busy !== null} onClick={reset}>
+            <button className="btn flex-1 text-xs" disabled={busy !== null} onClick={() => setConfirmingReset(true)}>
               {busy === "reset" ? "Rebuilding…" : "Reset"}
             </button>
             <button
@@ -397,6 +397,23 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
 
       {lightbox ? (
         <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
+      ) : null}
+
+      {confirmingReset ? (
+        <Modal title="Reset from latest sync" onClose={() => setConfirmingReset(false)} width="26rem">
+          <p className="text-sm" style={{ color: "var(--text)" }}>
+            Rebuild the planner from the latest synced orders? Every <b>have</b> you have typed will
+            be cleared.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button className="btn text-sm" onClick={() => setConfirmingReset(false)}>
+              Cancel
+            </button>
+            <button className="btn btn-primary text-sm" onClick={doReset}>
+              Reset
+            </button>
+          </div>
+        </Modal>
       ) : null}
     </div>
   );
