@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Sparkles, X } from "lucide-react";
+import { Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { AssistantCard } from "@/lib/assistant/agent";
@@ -8,9 +8,6 @@ import { withBasePath } from "@/lib/base-path";
 import { useAssistantUi } from "@/lib/stores/assistant-ui";
 
 import { AssistantCardView } from "./cards";
-import { wrapHtmlFragment } from "./render-html";
-
-type DisplayMode = "cards" | "html";
 
 interface Message {
   role: "user" | "assistant";
@@ -26,58 +23,13 @@ const SUGGESTIONS = [
   "How many orders are cancelled?",
 ];
 
-/**
- * Downloads the model's HTML fragment as a standalone .html file, instead of
- * trying to open it in a new tab — new-tab approaches (blob: navigation,
- * document.write into window.open) turned out unreliable across browsers
- * (blocked popups, blob: URLs failing to resolve once handed to a new
- * renderer process). A download via a temporary <a download> anchor doesn't
- * hit either failure mode — it never has to resolve as a navigable page.
- * The fragment is already sanitized server-side (sanitize-html.ts strips
- * scripts/handlers before it's ever returned).
- */
-function downloadHtmlPage(html: string) {
-  const blob = new Blob([wrapHtmlFragment(html)], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `assistant-answer-${Date.now()}.html`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function HtmlPageLink({ html }: { html: string }) {
-  return (
-    <button
-      type="button"
-      onClick={() => downloadHtmlPage(html)}
-      className="flex w-fit items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-colors hover:bg-[var(--accent-soft)]"
-      style={{ borderColor: "var(--border)" }}
-    >
-      <Download className="h-3.5 w-3.5" style={{ color: "var(--accent)" }} />
-      Download page
-    </button>
-  );
-}
-
 export function ChatWidget() {
   const open = useAssistantUi((s) => s.open);
   const setOpen = useAssistantUi((s) => s.setOpen);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [displayMode, setDisplayMode] = useState<DisplayMode>("cards");
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("assistant-display-mode");
-    if (saved === "cards" || saved === "html") setDisplayMode(saved);
-  }, []);
-
-  function changeDisplayMode(mode: DisplayMode) {
-    setDisplayMode(mode);
-    localStorage.setItem("assistant-display-mode", mode);
-  }
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -95,7 +47,7 @@ export function ChatWidget() {
       const res = await fetch(withBasePath("/api/assistant/chat"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question, history, displayMode }),
+        body: JSON.stringify({ question, history }),
       });
 
       // Read as text first: a request that failed before it ever reached our
@@ -168,29 +120,6 @@ export function ChatWidget() {
               <div className="text-sm font-semibold leading-tight">Ask about your data</div>
               <div className="muted text-[11px]">Answers come straight from your orders</div>
             </div>
-            <div
-              className="flex rounded-lg border p-0.5 text-[11px]"
-              style={{ borderColor: "var(--border)" }}
-              role="radiogroup"
-              aria-label="Answer display mode"
-            >
-              {(["cards", "html"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  role="radio"
-                  aria-checked={displayMode === mode}
-                  onClick={() => changeDisplayMode(mode)}
-                  className="rounded-md px-2 py-1 transition-colors"
-                  style={{
-                    background: displayMode === mode ? "var(--accent-soft)" : "transparent",
-                    color: displayMode === mode ? "var(--accent)" : "var(--muted)",
-                  }}
-                >
-                  {mode === "cards" ? "Cards" : "Page"}
-                </button>
-              ))}
-            </div>
             {/* The floating trigger doubles as a close button on desktop, but
                 it's hidden on mobile (superseded by the bottom nav's "AI"
                 tab) — without this the panel would have no way to close. */}
@@ -241,13 +170,7 @@ export function ChatWidget() {
                     >
                       {m.content}
                     </div>
-                    {(() => {
-                      const htmlCard = m.cards?.find((c) => c.type === "html") as { html: string } | undefined;
-                      if (!m.error && displayMode === "html" && htmlCard) {
-                        return <HtmlPageLink html={htmlCard.html} />;
-                      }
-                      return m.cards?.filter((c) => c.type !== "html").map((c, ci) => <AssistantCardView key={ci} card={c} />);
-                    })()}
+                    {m.cards?.map((c, ci) => <AssistantCardView key={ci} card={c} />)}
                   </div>
                 )}
               </div>

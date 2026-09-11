@@ -1,3 +1,9 @@
+/**
+ * ARCHIVED — part of the assistant's "custom page" display mode, removed
+ * from the live chat UI (which is cards-only now). Kept here, unwired, in
+ * case that mode comes back; see also archive/html-mode.ts and
+ * components/assistant/archive/.
+ */
 import DOMPurify from "isomorphic-dompurify";
 
 /**

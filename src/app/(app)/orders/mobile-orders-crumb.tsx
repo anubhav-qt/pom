@@ -43,6 +43,8 @@ export function MobileOrdersCrumb({
     ? { toShip: counts.toShip, shipped: counts.shipped, cancellations: counts.cancelledRto }
     : {};
 
+  const subCount = sub?.options.find((o) => o.id === sub.activeId)?.count;
+
   return (
     <div
       className="sticky z-30 -mx-4 -mt-6 flex items-center gap-1.5 px-4 py-2.5 sm:hidden"
@@ -50,8 +52,11 @@ export function MobileOrdersCrumb({
     >
       <DropdownMenu
         trigger={
-          <span className="truncate text-[13px]" style={{ fontWeight: 600, color: "var(--text)" }}>
-            {activeLabel}
+          <span className="flex items-center gap-1.5">
+            <span className="truncate text-[13px]" style={{ fontWeight: 600, color: "var(--text)" }}>
+              {activeLabel}
+            </span>
+            <CountBadge count={badgeFor[activeKey]} />
           </span>
         }
         options={tabs.map((t) => ({ id: t.key, label: t.label, count: badgeFor[t.key] }))}
@@ -67,8 +72,11 @@ export function MobileOrdersCrumb({
           <Separator />
           <DropdownMenu
             trigger={
-              <span className="truncate text-[13px]" style={{ fontWeight: 500, color: "var(--muted)" }}>
-                {sub.activeLabel}
+              <span className="flex items-center gap-1.5">
+                <span className="truncate text-[13px]" style={{ fontWeight: 500, color: "var(--muted)" }}>
+                  {sub.activeLabel}
+                </span>
+                <CountBadge count={subCount} />
               </span>
             }
             options={sub.options}
@@ -94,6 +102,20 @@ function Separator() {
   return (
     <span className="shrink-0 text-[13px]" style={{ color: "var(--muted-2)" }} aria-hidden>
       ›
+    </span>
+  );
+}
+
+/** Same pill shape as the dropdown's own per-option counts — shown always
+ *  next to the trigger label now, not just inside the open dropdown. */
+function CountBadge({ count }: { count?: number }) {
+  if (count === undefined) return null;
+  return (
+    <span
+      className="shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-semibold tabular-nums"
+      style={{ background: "var(--panel-2)", color: "var(--muted)" }}
+    >
+      {count}
     </span>
   );
 }

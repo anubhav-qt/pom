@@ -13,16 +13,13 @@ import {
   getTopSkus,
 } from "@/app/(app)/dashboard/queries";
 
-import { sanitizeAssistantHtml } from "./sanitize-html";
-
 /**
  * The fixed, reviewed tools the assistant reaches for first — a small set of
  * parameterized queries covering what an owner actually asks, where every
  * number a card shows was computed by our own code, never guessed by the
  * model. agent.ts additionally offers the freeform get_schema/run_sql tools
  * (db-tools.ts) for questions these don't cover (read-only, guarded — see
- * sql-guard.ts) and, in custom-page display mode, renderHtmlTool below for
- * the model to design its own presentation instead of one of the fixed cards.
+ * sql-guard.ts).
  */
 
 const RANGE = z
@@ -245,31 +242,3 @@ export const ASSISTANT_TOOLS = [
 ];
 
 export const ASSISTANT_TOOL_MAP = Object.fromEntries(ASSISTANT_TOOLS.map((t) => [t.name, t]));
-
-/**
- * Only offered to the model in "custom page" display mode (see agent.ts) — in
- * the default card mode the fixed React components above are what render, and
- * this tool isn't bound at all. The model designs its own HTML instead of
- * fitting the answer into one of the fixed card shapes; sanitize-html.ts
- * strips anything that could execute or phone home before it's ever returned.
- */
-export const renderHtmlTool = tool(
-  async ({ html }) => ({ type: "html" as const, html: sanitizeAssistantHtml(html) }),
-  {
-    name: "render_html",
-    description:
-      "Renders a custom HTML snippet as the visual answer to this question, instead of a predetermined " +
-      "card. Design the layout to fit what was actually asked — a table, a stat grid, a ranked list, " +
-      "whatever communicates the specific data best — using only the values you already got back from " +
-      "other tool calls this turn. Inline CSS only (no <style> block, no external stylesheets); no " +
-      "<script>, <iframe>, <form>, or any external resource (images, fonts) — all of those are stripped " +
-      "before the page is shown, so don't rely on them. Write a fragment (no <html>/<head>/<body>), and " +
-      "call this once you have the data, as your final step.",
-    schema: z.object({
-      html: z
-        .string()
-        .min(1)
-        .describe("A self-contained HTML fragment using inline style attributes, e.g. <div style=\"...\">…</div>."),
-    }),
-  },
-);

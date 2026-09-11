@@ -1,4 +1,8 @@
 /**
+ * ARCHIVED — part of the assistant's "custom page" display mode, removed
+ * from the live chat widget (which is cards-only now). Kept here, unwired,
+ * in case that mode comes back; see also lib/assistant/archive/.
+ *
  * Wraps a sanitized HTML fragment (already stripped of scripts/handlers/
  * external resources server-side — see sanitize-html.ts) with just enough
  * page shell to look presentable in the sandboxed iframe: a CSS reset and
