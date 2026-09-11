@@ -5,6 +5,7 @@ import { useMemo, useState, useTransition } from "react";
 
 import { ChannelTag, Empty, StatusBadge } from "@/components/ui";
 import { FEATURES } from "@/config/features";
+import { ImageLightbox } from "@/components/image-lightbox";
 import type { Channel, FulfilmentState, OrderStatus } from "@/db/schema";
 import { withBasePath } from "@/lib/base-path";
 import { cn, dayLabel, money, timeLeft } from "@/lib/utils";
@@ -43,6 +44,7 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
   const [message, setMessage] = useState<string | null>(null);
   const [cropLabels, setCropLabels] = useState(true);
   const [openOrderId, setOpenOrderId] = useState<number | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   const allSelected = rows.length > 0 && selected.size === rows.length;
   const selectedIds = useMemo(() => [...selected], [selected]);
@@ -155,13 +157,29 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
       ) : null}
 
       {/* -------------------------------------------------------------- table */}
-      <div className="panel overflow-x-auto">
-        {rows.length === 0 ? (
+      {rows.length === 0 ? (
+        <div className="panel">
           <Empty
             title="Nothing waiting"
             hint="New orders appear here automatically as channels sync."
           />
-        ) : (
+        </div>
+      ) : (
+        <>
+          {/* Cards below sm, the dense grid from sm up — same data, same
+              actions, just no room on a phone for seven columns. */}
+          <div className="flex flex-col gap-2.5 sm:hidden">
+            {rows.map((row) => (
+              <OrderCard
+                key={row.id}
+                row={row}
+                onOpen={() => setOpenOrderId(row.id)}
+                onOpenImage={(src, alt) => setLightbox({ src, alt })}
+              />
+            ))}
+          </div>
+
+          <div className="panel hidden overflow-x-auto sm:block">
           <table className="grid-table">
             <thead>
               <tr>
@@ -189,23 +207,7 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
             </thead>
             <tbody>
               {rows.map((row) => {
-                // A dispatch deadline only means something for an order still
-                // waiting to go out — once it has shipped, been cancelled, or
-                // come back as a return, "3 days late" is just noise left over
-                // from before the order was actioned.
-                //
-                // Both halves are needed: the channel decides whether the order
-                // is still live, and our own state decides whether it is still
-                // on the bench. Amazon calls an Easy Ship order `Unshipped`
-                // until the courier scans it, so without the second check a
-                // parcel we packed this morning would keep counting down.
-                const stillAwaitingDispatch =
-                  ["new", "ready_to_pack", "packed"].includes(row.status) &&
-                  row.fulfilmentState === "to_pack";
-                const deadline = stillAwaitingDispatch
-                  ? timeLeft(row.dispatchBy ? new Date(row.dispatchBy) : null)
-                  : null;
-                const hasUnmapped = row.items.some((i) => !i.mapped);
+                const { deadline, hasUnmapped } = orderMeta(row);
 
                 return (
                   <tr
@@ -334,31 +336,155 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
               })}
             </tbody>
           </table>
-        )}
-      </div>
+          </div>
+        </>
+      )}
 
       {openOrderId !== null ? (
         <OrderDetailModal orderId={openOrderId} onClose={() => setOpenOrderId(null)} />
+      ) : null}
+
+      {lightbox ? (
+        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
       ) : null}
     </div>
   );
 }
 
-function OrderThumb({ src, alt }: { src: string | null; alt: string }) {
+/** Shared between the table row and the mobile card — same rule either way. */
+function orderMeta(row: OrderRow) {
+  // A dispatch deadline only means something for an order still waiting to go
+  // out — once it has shipped, been cancelled, or come back as a return,
+  // "3 days late" is just noise left over from before the order was actioned.
+  //
+  // Both halves are needed: the channel decides whether the order is still
+  // live, and our own state decides whether it is still on the bench. Amazon
+  // calls an Easy Ship order `Unshipped` until the courier scans it, so
+  // without the second check a parcel we packed this morning would keep
+  // counting down.
+  const stillAwaitingDispatch =
+    ["new", "ready_to_pack", "packed"].includes(row.status) && row.fulfilmentState === "to_pack";
+  const deadline = stillAwaitingDispatch
+    ? timeLeft(row.dispatchBy ? new Date(row.dispatchBy) : null)
+    : null;
+  const hasUnmapped = row.items.some((i) => !i.mapped);
+  return { deadline, hasUnmapped };
+}
+
+/**
+ * Mobile stand-in for a table row. Tapping the thumbnail opens just the image
+ * (a quick look at the product); tapping anywhere else on the card opens the
+ * same order detail sheet a row click would.
+ */
+function OrderCard({
+  row,
+  onOpen,
+  onOpenImage,
+}: {
+  row: OrderRow;
+  onOpen: () => void;
+  onOpenImage: (src: string, alt: string) => void;
+}) {
+  const { deadline, hasUnmapped } = orderMeta(row);
+  const thumbSrc = row.items.find((i) => i.imageUrl)?.imageUrl ?? null;
+  const thumbAlt = row.items[0]?.title ?? row.externalOrderId;
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="panel flex gap-3 p-3 text-left active:scale-[0.99]"
+      style={{ transition: "transform 0.1s var(--ease-premium)" }}
+    >
+      <span
+        className="relative w-14 shrink-0"
+        onClick={(e) => {
+          if (!thumbSrc) return;
+          e.stopPropagation();
+          onOpenImage(thumbSrc, thumbAlt);
+        }}
+      >
+        <OrderThumb src={thumbSrc} alt={thumbAlt} size="h-14 w-14" />
+        {row.items.length > 1 ? (
+          <span
+            className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
+            style={{ background: "var(--accent)" }}
+          >
+            +{row.items.length - 1}
+          </span>
+        ) : null}
+      </span>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <ChannelTag channel={row.channel} />
+          {row.isCod ? (
+            <span
+              className="rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide"
+              style={{ background: "var(--warn-soft)", color: "var(--warn)" }}
+            >
+              COD
+            </span>
+          ) : null}
+          <StatusBadge status={row.status} />
+        </div>
+
+        <div className="line-clamp-1 text-[13px] font-medium leading-snug">
+          {row.items[0]?.title ?? <span className="muted italic">Unnamed item</span>}
+          {row.items.length > 1 ? ` +${row.items.length - 1} more` : ""}
+        </div>
+
+        <div className="font-mono text-xs" style={{ color: "var(--muted)" }}>
+          {row.externalOrderId}
+        </div>
+
+        <div className="muted flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+          <span>{[row.shipCity, row.shipState].filter(Boolean).join(", ") || "—"}</span>
+          <span>·</span>
+          <span className="tabular-nums">{money(row.totalAmount)}</span>
+          {hasUnmapped ? (
+            <span className="font-semibold" style={{ color: "var(--danger)" }}>
+              Unmapped SKU
+            </span>
+          ) : null}
+        </div>
+
+        {deadline ? (
+          <span
+            className="text-xs font-medium"
+            style={deadline.late ? { color: "var(--danger)" } : { color: "var(--muted)" }}
+          >
+            {deadline.text}
+          </span>
+        ) : null}
+      </div>
+    </button>
+  );
+}
+
+function OrderThumb({
+  src,
+  alt,
+  size = "h-11 w-11",
+}: {
+  src: string | null;
+  alt: string;
+  size?: string;
+}) {
   if (src) {
     // eslint-disable-next-line @next/next/no-img-element
     return (
       <img
         src={src}
         alt={alt}
-        className="h-11 w-11 rounded-lg border object-cover"
+        className={cn(size, "rounded-lg border object-cover")}
         style={{ borderColor: "var(--border)", background: "var(--panel-2)" }}
       />
     );
   }
   return (
     <div
-      className="flex h-11 w-11 items-center justify-center rounded-lg border"
+      className={cn(size, "flex items-center justify-center rounded-lg border")}
       style={{ borderColor: "var(--border)", background: "var(--panel-2)" }}
       aria-hidden
     >

@@ -69,8 +69,8 @@ export function CancellationsPanel({
         {rightSlot}
       </div>
 
-      <div className="panel overflow-x-auto">
-        {records.length === 0 ? (
+      {records.length === 0 ? (
+        <div className="panel">
           <Empty
             title={resolved ? "Nothing checked in yet" : "No pending cancellations"}
             hint={
@@ -79,7 +79,25 @@ export function CancellationsPanel({
                 : "Cancellations and RTOs waiting on a physical check-in show up here."
             }
           />
-        ) : (
+        </div>
+      ) : (
+        <>
+          {/* Cards below sm, the dense grid from sm up. */}
+          <div className="flex flex-col gap-2.5 sm:hidden">
+            {records.map((r) => (
+              <CancellationCard
+                key={r.eventId}
+                record={r}
+                resolved={resolved}
+                busy={busyId === r.eventId && pending}
+                onReceived={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: true }))}
+                onNotReturning={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: false }))}
+                onReopen={() => act(r.eventId, () => reopenCancellation(r.eventId))}
+              />
+            ))}
+          </div>
+
+          <div className="panel hidden overflow-x-auto sm:block">
           <table className="grid-table">
             <thead>
               <tr>
@@ -159,6 +177,84 @@ export function CancellationsPanel({
               ))}
             </tbody>
           </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Mobile stand-in for a table row: same fields, same actions, stacked instead
+ * of columned since a 6-column table has nowhere to go on a phone.
+ */
+function CancellationCard({
+  record,
+  resolved,
+  busy,
+  onReceived,
+  onNotReturning,
+  onReopen,
+}: {
+  record: CancellationRecord;
+  resolved: boolean;
+  busy: boolean;
+  onReceived: () => void;
+  onNotReturning: () => void;
+  onReopen: () => void;
+}) {
+  return (
+    <div className="panel flex flex-col gap-2 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <ChannelTag channel={record.channel as never} />
+        <span className="font-mono text-xs">{record.externalOrderId}</span>
+      </div>
+
+      <div className="flex items-center gap-2 text-xs">
+        {record.fromStatus ? (
+          <StatusBadge status={record.fromStatus as OrderStatus} />
+        ) : (
+          <span className="muted">first seen</span>
+        )}
+        <span className="muted">→</span>
+        <StatusBadge status={record.toStatus as OrderStatus} />
+      </div>
+
+      <div className="space-y-1">
+        {record.items.map((it, i) => (
+          <div key={i} className="text-[13px] leading-snug">
+            <span className="font-medium">
+              {it.title ?? <span className="muted italic">Unnamed item</span>}
+            </span>
+            <span className="muted">
+              {" "}
+              · {it.quantity}× <span className="font-mono">{it.sku}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="muted flex flex-wrap items-center gap-x-2 text-xs">
+        <span>Ordered {dayLabel(new Date(record.orderedAt))}</span>
+        <span>·</span>
+        <span>Detected {dayLabel(new Date(record.detectedAt))}</span>
+        <span>·</span>
+        <span className="tabular-nums">{money(record.totalAmount)}</span>
+      </div>
+
+      <div
+        className="flex items-center justify-between pt-1"
+        style={{ borderTop: "1px solid var(--border)" }}
+      >
+        {resolved ? (
+          <ResolvedCell record={record} onReopen={onReopen} busy={busy} />
+        ) : (
+          <PendingCell
+            record={record}
+            busy={busy}
+            onReceived={onReceived}
+            onNotReturning={onNotReturning}
+          />
         )}
       </div>
     </div>

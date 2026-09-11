@@ -5,10 +5,14 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
 /**
- * A centred modal on a blurred scrim. Portaled to `document.body` so it
+ * A centred modal on a blurred scrim, portaled to `document.body` so it
  * escapes any `overflow-hidden`/`transform` ancestor (the sticky-header
  * wrapper, table containers) that would otherwise clip or mis-position a
  * `fixed` element nested inside them.
+ *
+ * Below `sm` there is no room to centre anything, so it becomes a full-screen
+ * sheet instead — same header/body structure, just filling the viewport with
+ * no rounded corners or scrim gap to fumble with a thumb.
  */
 export function Modal({
   title,
@@ -36,7 +40,7 @@ export function Modal({
   }, [onClose]);
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 pb-10 pt-20 sm:pt-28">
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center overflow-y-auto sm:items-start sm:px-4 sm:pb-10 sm:pt-20 lg:pt-28">
       <div
         className="fixed inset-0"
         style={{ background: "rgba(10, 20, 30, 0.35)", backdropFilter: "blur(3px)" }}
@@ -48,11 +52,11 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="panel relative w-full overflow-hidden"
+        className="panel relative flex h-full w-full flex-col overflow-hidden rounded-none sm:h-auto sm:rounded-2xl"
         style={{ maxWidth: width, animation: "rise-in 0.18s var(--ease-premium)" }}
       >
         <div
-          className="flex items-center justify-between border-b px-5 py-4"
+          className="flex shrink-0 items-center justify-between border-b px-5 py-4"
           style={{ borderColor: "var(--border)" }}
         >
           <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
@@ -61,7 +65,7 @@ export function Modal({
           </button>
         </div>
 
-        <div className="max-h-[75vh] overflow-y-auto p-5">{children}</div>
+        <div className="flex-1 overflow-y-auto p-5 sm:max-h-[75vh] sm:flex-none">{children}</div>
       </div>
     </div>,
     document.body,
