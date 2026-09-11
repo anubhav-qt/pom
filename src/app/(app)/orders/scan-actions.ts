@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { orderFulfilment, orderItems, orders, returns } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
-import { markManifestedLocal, recordScan } from "@/lib/fulfilment";
+import { listUnmappedPackedOrders, mapAwbToOrder, markManifestedLocal, recordScan } from "@/lib/fulfilment";
 import { adjustStock } from "@/lib/inventory";
 import { lookupScan, type ScanLookup, type ScanStation } from "@/lib/scan";
 import { recomputeReserved } from "@/lib/sync";
@@ -24,6 +24,40 @@ import { checkInCancellation } from "./actions";
 export async function scanLookup(station: ScanStation, code: string): Promise<ScanLookup> {
   await requireUser();
   return lookupScan(station, code);
+}
+
+/**
+ * Packed orders with no AWB yet, for the "map this scan" picker. An order
+ * drops off this list the moment it gets one.
+ */
+export async function scanListUnmappedOrders() {
+  await requireUser();
+  return listUnmappedPackedOrders();
+}
+
+/**
+ * Tie a scanned code (an AWB Amazon never handed us through sync) to a packed
+ * order the operator picks by hand. On success this behaves exactly like a
+ * normal outbound scan of that order, since the code now resolves on its own.
+ */
+export async function scanMapAwb(orderId: number, code: string): Promise<ScanLookup | { ok: false; error: string }> {
+  const user = await requireUser();
+
+  const res = await mapAwbToOrder(orderId, code, user.id);
+  await recordScan({
+    orderId,
+    station: "outbound",
+    code,
+    matchedOn: "awb",
+    applied: res.ok,
+    rejectedReason: res.ok ? null : res.error,
+    scannedBy: user.id,
+  });
+
+  if (!res.ok) return res;
+
+  revalidatePath("/orders");
+  return lookupScan("outbound", code);
 }
 
 /* ------------------------------------------------------------- outbound -- */

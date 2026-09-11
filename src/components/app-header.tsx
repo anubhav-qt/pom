@@ -502,8 +502,8 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
 
   return (
     <div
-      className="mx-auto flex max-w-7xl items-center gap-6 px-4 sm:px-6"
-      style={{ borderTop: "1px solid var(--border)" }}
+      className="mx-auto flex max-w-7xl items-center gap-6 overflow-x-auto px-4 sm:px-6"
+      style={{ borderTop: "1px solid var(--border)", scrollbarWidth: "none" }}
     >
       {ORDER_TABS.map((tab) => {
         const active = tab.key === activeKey;
@@ -514,7 +514,7 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
             type="button"
             onClick={() => select(tab.params)}
             className={cn(
-              "inline-flex items-center gap-2 whitespace-nowrap border-b-2 py-3 text-[13.5px] font-medium transition-colors",
+              "inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 py-3 text-[13.5px] font-medium transition-colors",
               !active && "muted hover:text-[var(--text)]",
             )}
             style={{

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -176,6 +176,77 @@ export async function markManifestedLocal(orderIds: number[], userId: number | n
   }
 
   return { moved: eligible };
+}
+
+/**
+ * Tie a scanned AWB to a packed order.
+ *
+ * Amazon does not hand us the AWB through the sync API (that needs the
+ * "shipping role" entitlement we don't have — see docs/CHANNELS.md), so the
+ * only place it ever shows up is printed on the courier's own label at
+ * pickup. This is how that gets into the database: a packer scans the label,
+ * picks which packed parcel it belongs to, and from then on that AWB resolves
+ * like any other.
+ *
+ * Refuses to steal an AWB that is already sitting on a different order — that
+ * almost always means a misscan or the wrong order was picked, and silently
+ * overwriting would leave the original order's label stuck without one.
+ */
+export async function mapAwbToOrder(orderId: number, rawCode: string, userId: number | null) {
+  const code = rawCode.trim();
+  if (!code) return { ok: false as const, error: "Nothing scanned." };
+
+  const [order] = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+  if (!order) return { ok: false as const, error: "Order not found." };
+
+  const [conflict] = await db
+    .select({ orderId: shipments.orderId })
+    .from(shipments)
+    .where(sql`lower(${shipments.awb}) = ${code.toLowerCase()}`)
+    .limit(1);
+  if (conflict && conflict.orderId !== orderId) {
+    return { ok: false as const, error: `That AWB is already mapped to a different order.` };
+  }
+
+  const [existing] = await db
+    .select({ id: shipments.id })
+    .from(shipments)
+    .where(eq(shipments.orderId, orderId))
+    .limit(1);
+
+  if (existing) {
+    await db.update(shipments).set({ awb: code }).where(eq(shipments.id, existing.id));
+  } else {
+    await db.insert(shipments).values({ orderId, awb: code, packedAt: new Date(), packedBy: userId });
+  }
+
+  return { ok: true as const };
+}
+
+/**
+ * Packed orders whose AWB is still unknown, for the "map this scan" picker.
+ * Once an order gets an AWB it drops off this list on its own.
+ */
+export async function listUnmappedPackedOrders(limit = 40) {
+  return db
+    .select({
+      orderId: orders.id,
+      externalOrderId: orders.externalOrderId,
+      buyerName: orders.buyerName,
+      shipCity: orders.shipCity,
+      shipState: orders.shipState,
+      packedAt: orderFulfilment.packedAt,
+    })
+    .from(orderFulfilment)
+    .innerJoin(orders, eq(orders.id, orderFulfilment.orderId))
+    .leftJoin(shipments, eq(shipments.orderId, orders.id))
+    .where(and(eq(orderFulfilment.state, "packed"), isNull(shipments.awb)))
+    .orderBy(sql`${orderFulfilment.packedAt} DESC NULLS LAST`)
+    .limit(limit);
 }
 
 /** Put parcels back on the bench when something was scanned or clicked wrongly. */

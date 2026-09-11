@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Modal } from "@/components/modal";
 import type { ScanLookup, ScanStation } from "@/lib/scan";
 
-import { scanCheckIn, scanConfirmPacked, scanLookup } from "../scan-actions";
+import { scanCheckIn, scanConfirmPacked, scanListUnmappedOrders, scanLookup, scanMapAwb } from "../scan-actions";
 import { useBarcodeScanner } from "./use-barcode-scanner";
 
 /**
@@ -52,6 +52,8 @@ export function ScanModal({
   const [log, setLog] = useState<Entry[]>([]);
   const [pending, startTransition] = useTransition();
   const [committing, setCommitting] = useState(false);
+  /** Set when an outbound scan matched nothing, so it can be offered up for AWB mapping. */
+  const [unmapped, setUnmapped] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const nextId = useRef(1);
@@ -74,6 +76,47 @@ export function ScanModal({
 
   /* ------------------------------------------------------------- lookup -- */
 
+  /**
+   * Render whatever a lookup came back with — a hit, a block, a miss — and
+   * say whether the code should stay in the box (there is something on
+   * screen for it now) or be cleared (nothing to do, ready for the next scan).
+   * Shared by a direct scan and by a code that just got mapped to an order.
+   */
+  const applyLookup = useCallback(
+    (res: ScanLookup, code: string) => {
+      setLookup(res);
+      setUnmapped(null);
+
+      if (!res.ok) {
+        if (res.reason === "blocked") {
+          setFeedback({ tone: "stop", title: "STOP, do not ship this parcel", text: res.message });
+          push(code, "Blocked", "stop");
+        } else if (res.reason !== "empty") {
+          setFeedback({ tone: "warn", text: res.message });
+          push(code, "No match", "warn");
+          // Amazon never hands us an AWB through sync, so "no match" at the
+          // packing bench usually means this is one, not a bad scan.
+          if (outbound) {
+            setUnmapped(code);
+            return true;
+          }
+        }
+        return false;
+      }
+
+      if (res.outbound?.alreadyPacked) {
+        setFeedback({
+          tone: "warn",
+          text: "This parcel was already scanned and dispatched. Nothing changed.",
+        });
+      } else if (res.inbound?.alreadyReceived) {
+        setFeedback({ tone: "warn", text: "This one was already checked in. Nothing changed." });
+      }
+      return true;
+    },
+    [push, outbound],
+  );
+
   const handleCode = useCallback(
     (raw: string) => {
       const code = raw.trim();
@@ -81,37 +124,16 @@ export function ScanModal({
 
       setFeedback(null);
       setNote("");
+      setUnmapped(null);
       startTransition(async () => {
+        // The code stays visible in the box only while there is something
+        // pending on screen for it (a hit to review, or a map-to-order
+        // picker). Otherwise it is cleared once the lookup resolves so a
+        // bench scanner's next code doesn't get typed onto the end of this one.
+        let keepInBox = false;
         try {
           const res = await scanLookup(station, code);
-          setLookup(res);
-
-          if (!res.ok) {
-            if (res.reason === "blocked") {
-              setFeedback({
-                tone: "stop",
-                title: "STOP, do not ship this parcel",
-                text: res.message,
-              });
-              push(code, "Blocked", "stop");
-            } else if (res.reason !== "empty") {
-              setFeedback({ tone: "warn", text: res.message });
-              push(code, "No match", "warn");
-            }
-            return;
-          }
-
-          if (res.outbound?.alreadyPacked) {
-            setFeedback({
-              tone: "warn",
-              text: "This parcel was already scanned and dispatched. Nothing changed.",
-            });
-          } else if (res.inbound?.alreadyReceived) {
-            setFeedback({
-              tone: "warn",
-              text: "This one was already checked in. Nothing changed.",
-            });
-          }
+          keepInBox = applyLookup(res, code);
         } catch (err) {
           // Never fail quietly here: someone who sees nothing happen assumes
           // the scan worked and ships the parcel anyway.
@@ -120,13 +142,26 @@ export function ScanModal({
             title: "Lookup failed",
             text: err instanceof Error ? err.message : String(err),
           });
+        } finally {
+          if (!keepInBox && inputRef.current) inputRef.current.value = "";
         }
       });
     },
-    [committing, push, station],
+    [committing, station, applyLookup],
   );
 
-  const scanner = useBarcodeScanner(handleCode);
+  // Camera detections land in the bottom bar first, exactly like a typed or
+  // bench-scanner code, so the operator sees what was read before the lookup
+  // resolves rather than lookup results just appearing out of nowhere.
+  const handleDetected = useCallback(
+    (code: string) => {
+      if (inputRef.current) inputRef.current.value = code;
+      handleCode(code);
+    },
+    [handleCode],
+  );
+
+  const scanner = useBarcodeScanner(handleDetected);
 
   // The bench scanner acts as a keyboard, so the box must keep focus.
   useEffect(() => {
@@ -140,9 +175,10 @@ export function ScanModal({
     e.preventDefault();
     const input = inputRef.current;
     if (!input) return;
-    const value = input.value;
-    input.value = "";
-    handleCode(value);
+    // The code stays in the box while the lookup runs — cleared only once the
+    // scan is actually resolved (see reset()), so the bar always shows what
+    // was scanned rather than going blank mid-lookup.
+    handleCode(input.value);
   }
 
   /* ------------------------------------------------------------ commit -- */
@@ -150,6 +186,7 @@ export function ScanModal({
   function reset() {
     setLookup(null);
     setNote("");
+    setUnmapped(null);
     if (inputRef.current) inputRef.current.value = "";
     inputRef.current?.focus();
   }
@@ -279,6 +316,18 @@ export function ScanModal({
 
         {feedback ? <FeedbackBanner feedback={feedback} /> : null}
 
+        {unmapped ? (
+          <AwbMapper
+            code={unmapped}
+            busy={busy}
+            onClose={() => setUnmapped(null)}
+            onMapped={(res, code) => {
+              if (res.ok) push(res.order.externalOrderId, "AWB mapped", "ok");
+              applyLookup(res, code);
+            }}
+          />
+        ) : null}
+
         {hit ? (
           <div
             className="overflow-hidden rounded-xl border"
@@ -354,6 +403,138 @@ export function ScanModal({
 }
 
 /* -------------------------------------------------------------------------- */
+
+type UnmappedOrder = Awaited<ReturnType<typeof scanListUnmappedOrders>>[number];
+
+/**
+ * "No match" at the packing bench: offer to tie the scanned code to whichever
+ * packed order it belongs to, since it is almost always an AWB Amazon never
+ * gave us through sync rather than a bad scan.
+ */
+function AwbMapper({
+  code,
+  busy,
+  onClose,
+  onMapped,
+}: {
+  code: string;
+  busy: boolean;
+  onClose: () => void;
+  onMapped: (res: ScanLookup, code: string) => void;
+}) {
+  const [orders, setOrders] = useState<UnmappedOrder[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [mapping, setMapping] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    scanListUnmappedOrders().then((rows) => {
+      if (!cancelled) setOrders(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const filtered = orders?.filter(
+    (o) =>
+      !q ||
+      o.externalOrderId.toLowerCase().includes(q) ||
+      o.buyerName?.toLowerCase().includes(q),
+  );
+
+  async function pick(orderId: number) {
+    setMapping(orderId);
+    setError(null);
+    try {
+      const res = await scanMapAwb(orderId, code);
+      if ("error" in res) {
+        setError(res.error);
+        return;
+      }
+      onMapped(res, code);
+    } finally {
+      setMapping(null);
+    }
+  }
+
+  return (
+    <div
+      className="flex flex-col gap-2.5 rounded-xl border p-3.5"
+      style={{ borderColor: "var(--border)", background: "var(--panel-2)" }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[13.5px] font-medium">No order has this code yet</p>
+          <p className="muted text-xs">
+            Amazon doesn&rsquo;t give us the AWB automatically. Pick which packed order{" "}
+            <span className="font-mono">{code}</span> belongs to, and it&rsquo;ll scan straight
+            away next time.
+          </p>
+        </div>
+        <button type="button" className="btn shrink-0 px-2.5 py-1 text-xs" onClick={onClose}>
+          Dismiss
+        </button>
+      </div>
+
+      {error ? (
+        <p className="text-xs" style={{ color: "var(--danger)" }}>
+          {error}
+        </p>
+      ) : null}
+
+      {orders === null ? (
+        <p className="muted text-xs">Loading packed orders&hellip;</p>
+      ) : orders.length === 0 ? (
+        <p className="muted text-xs">No packed orders are waiting on an AWB right now.</p>
+      ) : (
+        <>
+          <input
+            className="input text-[13px]"
+            placeholder="Filter by order id or buyer"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <div
+            className="flex max-h-56 flex-col overflow-y-auto rounded-lg border"
+            style={{ borderColor: "var(--border)" }}
+          >
+            {filtered?.length === 0 ? (
+              <p className="muted p-3 text-xs">No packed orders match &ldquo;{query}&rdquo;.</p>
+            ) : (
+              filtered?.map((o, i) => (
+                <button
+                  key={o.orderId}
+                  type="button"
+                  disabled={busy || mapping !== null}
+                  onClick={() => pick(o.orderId)}
+                  className="flex items-center justify-between gap-3 px-3 py-2.5 text-left"
+                  style={{
+                    background: "var(--panel)",
+                    borderTop: i === 0 ? undefined : "1px solid var(--border)",
+                  }}
+                >
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="font-mono text-[12.5px]">{o.externalOrderId}</span>
+                    <span className="muted truncate text-xs">
+                      {o.buyerName ?? "No name"}
+                      {o.shipCity ? ` · ${o.shipCity}${o.shipState ? `, ${o.shipState}` : ""}` : ""}
+                    </span>
+                  </span>
+                  <span className="btn shrink-0 px-2.5 py-1 text-xs" aria-hidden>
+                    {mapping === o.orderId ? "Mapping" : "Map"}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function Viewfinder({ scanner }: { scanner: ReturnType<typeof useBarcodeScanner> }) {
   const { videoRef, state, start, stop } = scanner;
