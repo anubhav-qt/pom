@@ -1,16 +1,18 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { ImageLightbox } from "@/components/image-lightbox";
 import { ChannelTag, StatusBadge } from "@/components/ui";
 import { Empty } from "@/components/ui";
 import type { OrderStatus } from "@/db/schema";
-import { cn, dayLabel, money } from "@/lib/utils";
+import { dayLabel, money } from "@/lib/utils";
 
 import { checkInCancellation, reopenCancellation } from "./actions";
+import { OrderThumb } from "./order-table";
 import type { CancellationRecord } from "./queries";
+import { RailTabs } from "./rail-tabs";
 
 export function CancellationsPanel({
   records,
@@ -33,6 +35,7 @@ export function CancellationsPanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   function act(eventId: number, fn: () => Promise<{ ok: boolean; error?: string }>) {
     setBusyId(eventId);
@@ -43,31 +46,27 @@ export function CancellationsPanel({
     });
   }
 
+  function selectResolved(resolvedNext: boolean) {
+    if (onResolvedChange) onResolvedChange(resolvedNext);
+    else router.push(`/orders?view=cancellations${resolvedNext ? "&resolved=1" : ""}`);
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div
-          className="inline-flex rounded-[10px] p-[3px]"
-          style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-xs)" }}
-        >
-          <SubTab
-            href="/orders?view=cancellations"
-            active={!resolved}
-            onSelect={onResolvedChange ? () => onResolvedChange(false) : undefined}
-          >
-            Pending <Count n={counts.pending} />
-          </SubTab>
-          <SubTab
-            href="/orders?view=cancellations&resolved=1"
-            active={resolved}
-            onSelect={onResolvedChange ? () => onResolvedChange(true) : undefined}
-          >
-            Completed <Count n={counts.completed} />
-          </SubTab>
-        </div>
+      {/* Styled and positioned to read as a direct continuation of the
+          header's own category rail — first thing in the page, no gap. */}
+      <RailTabs
+        tabs={[
+          { id: "pending" as const, label: "Pending", count: counts.pending },
+          { id: "completed" as const, label: "Completed", count: counts.completed },
+        ]}
+        active={resolved ? "completed" : "pending"}
+        onSelect={(id) => selectResolved(id === "completed")}
+      />
 
-        {rightSlot}
-      </div>
+      {/* Scan Barcode moves to the mobile bottom nav's "Scanner" tab; this
+          stays for desktop, which has no such nav. */}
+      <div className="hidden justify-end sm:flex">{rightSlot}</div>
 
       {records.length === 0 ? (
         <div className="panel">
@@ -93,6 +92,7 @@ export function CancellationsPanel({
                 onReceived={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: true }))}
                 onNotReturning={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: false }))}
                 onReopen={() => act(r.eventId, () => reopenCancellation(r.eventId))}
+                onOpenImage={(src, alt) => setLightbox({ src, alt })}
               />
             ))}
           </div>
@@ -101,6 +101,7 @@ export function CancellationsPanel({
           <table className="grid-table">
             <thead>
               <tr>
+                <th className="w-14">Item</th>
                 <th>Order</th>
                 <th>Items</th>
                 <th>Status change</th>
@@ -110,8 +111,34 @@ export function CancellationsPanel({
               </tr>
             </thead>
             <tbody>
-              {records.map((r) => (
+              {records.map((r) => {
+                const thumbSrc = r.items.find((it) => it.imageUrl)?.imageUrl ?? null;
+                const thumbAlt = r.items[0]?.title ?? r.externalOrderId;
+                return (
                 <tr key={r.eventId}>
+                  <td>
+                    <div className="relative w-11">
+                      <span
+                        onClick={(e) => {
+                          if (!thumbSrc) return;
+                          e.stopPropagation();
+                          setLightbox({ src: thumbSrc, alt: thumbAlt });
+                        }}
+                      >
+                        <OrderThumb src={thumbSrc} alt={thumbAlt} />
+                      </span>
+                      {r.items.length > 1 ? (
+                        <span
+                          className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
+                          style={{ background: "var(--accent)" }}
+                          title={`${r.items.length} different items in this order`}
+                        >
+                          +{r.items.length - 1}
+                        </span>
+                      ) : null}
+                    </div>
+                  </td>
+
                   <td>
                     <div className="flex items-center gap-2">
                       <ChannelTag channel={r.channel as never} />
@@ -174,12 +201,17 @@ export function CancellationsPanel({
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           </div>
         </>
       )}
+
+      {lightbox ? (
+        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
+      ) : null}
     </div>
   );
 }
@@ -195,6 +227,7 @@ function CancellationCard({
   onReceived,
   onNotReturning,
   onReopen,
+  onOpenImage,
 }: {
   record: CancellationRecord;
   resolved: boolean;
@@ -202,9 +235,33 @@ function CancellationCard({
   onReceived: () => void;
   onNotReturning: () => void;
   onReopen: () => void;
+  onOpenImage: (src: string, alt: string) => void;
 }) {
+  const thumbSrc = record.items.find((it) => it.imageUrl)?.imageUrl ?? null;
+  const thumbAlt = record.items[0]?.title ?? record.externalOrderId;
+
   return (
-    <div className="panel flex flex-col gap-2 p-3">
+    <div className="panel flex gap-3 p-3">
+      <span
+        className="relative w-14 shrink-0"
+        onClick={(e) => {
+          if (!thumbSrc) return;
+          e.stopPropagation();
+          onOpenImage(thumbSrc, thumbAlt);
+        }}
+      >
+        <OrderThumb src={thumbSrc} alt={thumbAlt} size="h-14 w-14" />
+        {record.items.length > 1 ? (
+          <span
+            className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
+            style={{ background: "var(--accent)" }}
+          >
+            +{record.items.length - 1}
+          </span>
+        ) : null}
+      </span>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <ChannelTag channel={record.channel as never} />
         <span className="font-mono text-xs">{record.externalOrderId}</span>
@@ -257,45 +314,9 @@ function CancellationCard({
           />
         )}
       </div>
+      </div>
     </div>
   );
-}
-
-function SubTab({
-  href,
-  active,
-  onSelect,
-  children,
-}: {
-  href: string;
-  active: boolean;
-  /** When given, the tab switches in place instead of navigating. */
-  onSelect?: () => void;
-  children: React.ReactNode;
-}) {
-  const className = cn(
-    "inline-flex items-center gap-1.5 rounded-[7px] px-3 py-1.5 text-sm font-medium transition-colors",
-    !active && "muted",
-  );
-  const style = active ? { background: "var(--accent-soft)", color: "#0b7fb0" } : undefined;
-
-  if (onSelect) {
-    return (
-      <button type="button" onClick={onSelect} className={className} style={style}>
-        {children}
-      </button>
-    );
-  }
-
-  return (
-    <Link href={href} className={className} style={style}>
-      {children}
-    </Link>
-  );
-}
-
-function Count({ n }: { n: number }) {
-  return <span className="ml-1 tabular-nums opacity-70">{n}</span>;
 }
 
 function PendingCell({

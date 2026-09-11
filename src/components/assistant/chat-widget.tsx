@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { AssistantCard } from "@/lib/assistant/agent";
 import { withBasePath } from "@/lib/base-path";
+import { useAssistantUi } from "@/lib/stores/assistant-ui";
 
 import { AssistantCardView } from "./cards";
 import { wrapHtmlFragment } from "./render-html";
@@ -60,7 +61,8 @@ function HtmlPageLink({ html }: { html: string }) {
 }
 
 export function ChatWidget() {
-  const [open, setOpen] = useState(false);
+  const open = useAssistantUi((s) => s.open);
+  const setOpen = useAssistantUi((s) => s.setOpen);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -137,11 +139,13 @@ export function ChatWidget() {
   return (
     <>
       {/* The trigger — a plain sticky icon until clicked, exactly as asked:
-          it does not look like a chat entry point until it opens into one. */}
+          it does not look like a chat entry point until it opens into one.
+          Hidden on mobile: the bottom nav's "AI" tab opens the same panel,
+          and a floating circle there would just sit on top of that bar. */}
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         aria-label={open ? "Close assistant" : "Ask the assistant"}
-        className="no-print fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full text-white transition-transform hover:scale-105 active:scale-95"
+        className="no-print fixed bottom-5 right-5 z-40 hidden h-14 w-14 items-center justify-center rounded-full text-white transition-transform hover:scale-105 active:scale-95 sm:flex"
         style={{
           background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
           boxShadow: "0 10px 30px -8px color-mix(in srgb, var(--accent) 60%, transparent)",
@@ -152,8 +156,8 @@ export function ChatWidget() {
 
       {open ? (
         <div
-          className="panel no-print fixed bottom-24 right-5 z-40 flex w-[min(24rem,calc(100vw-2.5rem))] flex-col overflow-hidden"
-          style={{ height: "min(32rem, calc(100vh - 8rem))", animation: "rise-in 0.18s var(--ease-premium)" }}
+          className="panel no-print fixed inset-x-3 bottom-[calc(3.25rem+env(safe-area-inset-bottom))] z-40 flex flex-col overflow-hidden sm:inset-x-auto sm:bottom-24 sm:right-5 sm:w-[min(24rem,calc(100vw-2.5rem))]"
+          style={{ height: "min(32rem, calc(100vh - 10rem))", animation: "rise-in 0.18s var(--ease-premium)" }}
         >
           <div
             className="flex items-center gap-2 border-b px-4 py-3"
@@ -187,6 +191,17 @@ export function ChatWidget() {
                 </button>
               ))}
             </div>
+            {/* The floating trigger doubles as a close button on desktop, but
+                it's hidden on mobile (superseded by the bottom nav's "AI"
+                tab) — without this the panel would have no way to close. */}
+            <button
+              onClick={() => setOpen(false)}
+              aria-label="Close assistant"
+              className="-mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:hidden"
+              style={{ color: "var(--muted)" }}
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
 
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">

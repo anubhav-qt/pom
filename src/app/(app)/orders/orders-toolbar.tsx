@@ -60,7 +60,7 @@ export function OrdersToolbar({
     },
     {
       view: "planner",
-      label: "Restock planner",
+      label: "Planner",
       icon: (
         <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <rect x="8" y="3" width="8" height="4" rx="1" />
@@ -72,7 +72,10 @@ export function OrdersToolbar({
   ];
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    // Mobile gets its own fixed bottom nav (MobileOrdersNav) with the same
+    // three destinations plus Scanner/AI — this row (and the Scan Barcode
+    // button in rightSlot) is redundant with that below `sm`.
+    <div className="hidden flex-wrap items-center justify-between gap-3 sm:flex">
       <div
         className="inline-flex rounded-[10px] p-[3px]"
         style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-xs)" }}

@@ -6,6 +6,7 @@ import { Empty } from "@/components/ui";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { colorSwatch } from "@/lib/variant-title";
 
+import { MOBILE_NAV_HEIGHT } from "./mobile-orders-nav";
 import {
   getRestockPlan,
   markRestockInStock,
@@ -159,7 +160,7 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
     : [];
 
   return (
-    <div className="space-y-4 pb-24 sm:pb-0">
+    <div className="space-y-4 pb-[calc(96px+44px+env(safe-area-inset-bottom))] sm:pb-0">
       {/* ---------------------------------------------------------- top strip */}
       <div className="panel flex flex-wrap items-center justify-between gap-3 p-4">
         <div className="flex items-end gap-2">
@@ -320,8 +321,8 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
       {/* ------------------------------------------------------ mobile bottom bar */}
       {selIdsForActive.length > 0 ? (
         <div
-          className="fixed inset-x-0 bottom-0 z-40 flex flex-col gap-2.5 p-3 sm:hidden"
-          style={{ background: "#0f2536", boxShadow: "0 -8px 20px -10px rgba(15,37,54,0.35)" }}
+          className="fixed inset-x-0 z-40 flex flex-col gap-2.5 p-3 sm:hidden"
+          style={{ background: "#0f2536", boxShadow: "0 -8px 20px -10px rgba(15,37,54,0.35)", bottom: MOBILE_NAV_HEIGHT }}
         >
           <div className="flex items-center gap-2">
             <span className="tabular-nums text-[12.5px] font-extrabold text-white">
@@ -364,8 +365,13 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
         </div>
       ) : (
         <div
-          className="fixed inset-x-0 bottom-0 z-40 border-t p-3 sm:hidden"
-          style={{ background: "var(--panel)", borderColor: "var(--border)", boxShadow: "0 -6px 20px rgba(15,37,54,0.08)" }}
+          className="fixed inset-x-0 z-40 border-t p-3 sm:hidden"
+          style={{
+            background: "var(--panel)",
+            borderColor: "var(--border)",
+            boxShadow: "0 -6px 20px rgba(15,37,54,0.08)",
+            bottom: MOBILE_NAV_HEIGHT,
+          }}
         >
           <div className="flex items-center gap-2">
             <button className="btn flex-1 text-xs" disabled={busy !== null} onClick={reset}>
