@@ -2,38 +2,86 @@
 
 import { useState } from "react";
 
-import { Empty } from "@/components/ui";
+import { Empty, STATUS_TONE } from "@/components/ui";
 import { ImageLightbox } from "@/components/image-lightbox";
-import { timeLeft } from "@/lib/utils";
+import type { OrderStatus } from "@/db/schema";
+import { useOrdersNav } from "@/lib/stores/orders-cache";
+import { cn, timeLeft } from "@/lib/utils";
 
 import { CollectionDetailModal } from "./collection-detail-modal";
 import type { PickRow } from "./queries";
+import type { CollectionCategory } from "./view-actions";
 
 /**
- * The collection view: every open order line rolled up by product. Sorted by
- * how many units need pulling, so the shelf run works top-to-bottom. A card
- * opens the product's orders.
+ * Per-category copy. Only `toShip` is the live open queue — dispatch
+ * deadlines and "to pick" framing don't mean anything once an order has
+ * shipped, delivered, or been cancelled, so every other category gets
+ * neutral wording instead of Ship-specific language.
  */
-export function PickList({ rows }: { rows: PickRow[] }) {
+const CATEGORY_COPY: Record<
+  CollectionCategory,
+  { empty: string; emptyHint: string; unitWord: string; showDeadline: boolean }
+> = {
+  toShip: {
+    empty: "Nothing to ship",
+    emptyHint: "Open orders roll up here by product as channels sync.",
+    unitWord: "to pick",
+    showDeadline: true,
+  },
+  shipped: {
+    empty: "Nothing shipped yet",
+    emptyHint: "Shipped orders roll up here by product.",
+    unitWord: "shipped",
+    showDeadline: false,
+  },
+  delivered: {
+    empty: "Nothing delivered yet",
+    emptyHint: "Delivered orders roll up here by product.",
+    unitWord: "delivered",
+    showDeadline: false,
+  },
+  cancellations: {
+    empty: "Nothing cancelled or returned",
+    emptyHint: "Cancelled and RTO orders roll up here by product.",
+    unitWord: "units",
+    showDeadline: false,
+  },
+  all: {
+    empty: "No orders yet",
+    emptyHint: "Every order rolls up here by product as channels sync.",
+    unitWord: "units",
+    showDeadline: false,
+  },
+};
+
+/**
+ * The collection view: every order line for the active category, rolled up
+ * by product. Sorted by how many units are involved, so the busiest products
+ * lead. A card opens the product's orders.
+ */
+export function PickList({ rows, category }: { rows: PickRow[]; category: CollectionCategory }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  const copy = CATEGORY_COPY[category];
 
   if (rows.length === 0) {
-    return <Empty title="Nothing to ship" hint="Open orders roll up here by product as channels sync." />;
+    return <Empty title={copy.empty} hint={copy.emptyHint} />;
   }
 
   const totalUnits = rows.reduce((a, r) => a + r.unitsNeeded, 0);
   const totalOrders = new Set(rows.flatMap((r) => r.orderIds)).size;
-  const lateSkus = rows.filter((r) => r.lateCount > 0).length;
+  const lateSkus = copy.showDeadline ? rows.filter((r) => r.lateCount > 0).length : 0;
   const openRow = rows.find((r) => r.key === openKey) ?? null;
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <MiniStat label="Products to pick" value={rows.length} />
+      <div className={cn("grid grid-cols-2 gap-3", copy.showDeadline ? "sm:grid-cols-4" : "sm:grid-cols-3")}>
+        <MiniStat label="Products" value={rows.length} />
         <MiniStat label="Units total" value={totalUnits} />
         <MiniStat label="Orders covered" value={totalOrders} />
-        <MiniStat label="Products with a late order" value={lateSkus} tone={lateSkus > 0 ? "danger" : undefined} />
+        {copy.showDeadline ? (
+          <MiniStat label="Products with a late order" value={lateSkus} tone={lateSkus > 0 ? "danger" : undefined} />
+        ) : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -41,6 +89,7 @@ export function PickList({ rows }: { rows: PickRow[] }) {
           <PickCard
             key={r.key}
             row={r}
+            category={category}
             onOpen={() => setOpenKey(r.key)}
             onOpenImage={(src, alt) => setLightbox({ src, alt })}
           />
@@ -52,6 +101,48 @@ export function PickList({ rows }: { rows: PickRow[] }) {
       {lightbox ? (
         <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * "All orders"' own Collection root: not a SKU rollup (there is no single
+ * meaningful grouping across every status at once) but a tap-through
+ * breakdown by real `orders.status` counts — tapping one drills into that
+ * status's own SKU rollup, reusing the same `view=collection` + `status`
+ * params every other category already navigates with.
+ */
+export function AllOrdersTiles({
+  tiles,
+}: {
+  tiles: { status: OrderStatus; label: string; count: number }[];
+}) {
+  const go = useOrdersNav((s) => s.go);
+  const visible = tiles.filter((t) => t.count > 0);
+
+  if (visible.length === 0) {
+    return <Empty title="No orders yet" hint="Every order rolls up here by product as channels sync." />;
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      {visible.map((t) => {
+        const tone = STATUS_TONE[t.status];
+        return (
+          <button
+            key={t.status}
+            type="button"
+            onClick={() => go({ view: "collection", status: t.status })}
+            className="panel flex flex-col gap-2 p-3.5 text-left transition-colors hover:bg-[var(--accent-soft)]"
+          >
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: tone.dot }} aria-hidden />
+              <span className="text-[13px] font-medium">{t.label}</span>
+            </span>
+            <span className="text-2xl font-bold leading-none tabular-nums">{t.count}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -72,17 +163,26 @@ function MiniStat({ label, value, tone }: { label: string; value: number; tone?:
 
 function PickCard({
   row,
+  category,
   onOpen,
   onOpenImage,
 }: {
   row: PickRow;
+  category: CollectionCategory;
   onOpen: () => void;
   onOpenImage: (src: string, alt: string) => void;
 }) {
-  const deadline = timeLeft(row.earliestDispatchBy ? new Date(row.earliestDispatchBy) : null);
+  const copy = CATEGORY_COPY[category];
+  const deadline = copy.showDeadline
+    ? timeLeft(row.earliestDispatchBy ? new Date(row.earliestDispatchBy) : null)
+    : null;
   const shownOrders = row.orderIds.slice(0, 4);
   const more = row.orderIds.length - shownOrders.length;
   const alt = row.title ?? row.sku;
+  // Cancelled & RTO's rollup comes from cancellation records, which never
+  // carry `productId` — every row reads `mapped: false` there regardless of
+  // whether the SKU is actually mapped, so the badge would be misleading.
+  const showUnmappedBadge = category !== "cancellations" && !row.mapped;
 
   return (
     <button
@@ -107,7 +207,7 @@ function PickCard({
           </div>
           <div className="muted mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
             <span className="font-mono">{row.sku}</span>
-            {!row.mapped ? (
+            {showUnmappedBadge ? (
               <span
                 className="rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide"
                 style={{ background: "var(--danger-soft)", color: "var(--danger)" }}
@@ -123,7 +223,7 @@ function PickCard({
               {row.unitsNeeded}
             </span>
             <span className="muted text-[11px]">
-              to pick · {row.orderCount} order{row.orderCount === 1 ? "" : "s"}
+              {copy.unitWord} · {row.orderCount} order{row.orderCount === 1 ? "" : "s"}
             </span>
           </div>
         </div>

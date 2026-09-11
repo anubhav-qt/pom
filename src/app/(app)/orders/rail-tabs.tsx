@@ -7,6 +7,9 @@
  * chrome. Used for the Unshipped/Packed/Shipped(24h) queue tabs and the
  * Cancelled & RTO Pending/Completed tabs, both of which sit as the first
  * thing in the page body, immediately under the sticky header.
+ *
+ * Desktop-only: mobile gets the compact category+sub-status dropdown
+ * (`MobileOrdersCrumb`) instead of this and the header's own tab band.
  */
 export function RailTabs<T extends string>({
   tabs,
@@ -25,7 +28,7 @@ export function RailTabs<T extends string>({
       // 104px, stable across breakpoints since band 2 doesn't reflow), so it
       // stays docked under the header instead of scrolling away with the
       // list — the same way the header's own tabs behave.
-      className="sticky z-30 -mx-4 -mt-6 flex items-center gap-6 overflow-x-auto px-4 sm:-mx-6 sm:px-6"
+      className="sticky z-30 -mx-4 -mt-6 hidden items-center gap-6 overflow-x-auto px-4 sm:-mx-6 sm:flex sm:px-6"
       style={{
         top: 104,
         borderTop: "1px solid var(--border)",

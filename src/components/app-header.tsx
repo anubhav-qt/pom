@@ -13,8 +13,10 @@ import {
   useOrdersNav,
 } from "@/lib/stores/orders-cache";
 import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
+import { useHeaderCounts } from "@/lib/stores/header-counts";
 import { resolveScreen, screenFromPath, screenHref, useScreenNav, type Screen } from "@/lib/stores/screen-nav";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
+import { STATUS_LABELS } from "@/components/ui";
 import { withBasePath } from "@/lib/base-path";
 import { cn } from "@/lib/utils";
 
@@ -84,6 +86,13 @@ export function AppHeader({
   // is showing.
   const effectiveScreen = resolveScreen(pathname, override);
   const onOrders = effectiveScreen === "orders";
+
+  // Mirrored into a store so the mobile category dropdown (rendered in the
+  // page body, below the header) can read the same real counts instead of
+  // running a second query for them.
+  useEffect(() => {
+    useHeaderCounts.getState().set(counts);
+  }, [counts.toShip, counts.shipped, counts.cancelledRto]);
 
   return (
     <header
@@ -458,9 +467,9 @@ function AvatarMenu({
 /* Band 2 — Orders status tabs                                                */
 /* -------------------------------------------------------------------------- */
 
-type TabKey = "toShip" | "shipped" | "delivered" | "cancellations" | "all";
+export type TabKey = "toShip" | "shipped" | "delivered" | "cancellations" | "all";
 
-const ORDER_TABS: { key: TabKey; label: string; params: OrdersViewParams }[] = [
+export const ORDER_TABS: { key: TabKey; label: string; params: OrdersViewParams }[] = [
   { key: "toShip", label: "To Ship", params: {} },
   { key: "shipped", label: "Shipped", params: { status: "shipped" } },
   { key: "delivered", label: "Delivered", params: { status: "delivered" } },
@@ -468,7 +477,19 @@ const ORDER_TABS: { key: TabKey; label: string; params: OrdersViewParams }[] = [
   { key: "all", label: "All orders", params: { status: "all" } },
 ];
 
-function OrdersTabs({ counts }: { counts: HeaderCounts }) {
+/**
+ * The single source of truth for "which of the 5 category tabs is active" and
+ * "how to switch to another one" — shared by the desktop tab band below and
+ * the mobile category dropdown (`MobileOrdersCrumb`), so the two can never
+ * disagree about what's showing, same as `RailTabs` already does for the
+ * sub-status rail.
+ *
+ * A `status` outside {shipped, delivered, all} but still a real `OrderStatus`
+ * (e.g. `cancelled`, reached by drilling into a tile from All orders'
+ * Collection view) is a sub-state of "All orders", not a tab of its own —
+ * there is no 6th tab for it.
+ */
+export function useOrderTabs() {
   const params = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -488,6 +509,15 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
   else if (status === "all") activeKey = "all";
   else if (status === "shipped") activeKey = "shipped";
   else if (status === "delivered") activeKey = "delivered";
+  else if (status === "cancellations") activeKey = "cancellations";
+  else if (status && status in STATUS_LABELS) activeKey = "all";
+
+  return { activeKey, select, tabs: ORDER_TABS };
+}
+
+function OrdersTabs({ counts }: { counts: HeaderCounts }) {
+  const params = useSearchParams();
+  const { activeKey, select, tabs } = useOrderTabs();
 
   const badgeFor: Partial<Record<TabKey, number>> = {
     toShip: counts.toShip,
@@ -499,15 +529,17 @@ function OrdersTabs({ counts }: { counts: HeaderCounts }) {
   function onSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const value = String(new FormData(e.currentTarget).get("q") ?? "").trim();
-    go({ ...queryToParams(params.toString()), q: value || undefined });
+    useOrdersNav.getState().go({ ...queryToParams(params.toString()), q: value || undefined });
   }
 
   return (
     <div
-      className="mx-auto flex max-w-7xl items-center gap-6 overflow-x-auto px-4 sm:px-6"
+      // Desktop-only: mobile gets `MobileOrdersCrumb`'s compact dropdown
+      // instead, rendered in the page body just under this header.
+      className="mx-auto hidden max-w-7xl items-center gap-6 overflow-x-auto px-4 sm:flex sm:px-6"
       style={{ borderTop: "1px solid var(--border)", scrollbarWidth: "none" }}
     >
-      {ORDER_TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = tab.key === activeKey;
         const badge = badgeFor[tab.key];
         return (

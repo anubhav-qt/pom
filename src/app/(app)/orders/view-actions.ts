@@ -12,7 +12,9 @@ import {
   orderStatusEnum,
   products,
   type Channel,
+  type OrderStatus,
 } from "@/db/schema";
+import { STATUS_LABELS } from "@/components/ui";
 import { ENABLED_CHANNELS, isChannelEnabled } from "@/config/features";
 import { requireUser } from "@/lib/auth";
 import { OPEN_STATUSES } from "@/lib/fulfilment";
@@ -22,7 +24,10 @@ import { getRestockPlan } from "./planner-actions";
 import type { RestockPlan } from "./planner-actions";
 import {
   getCancellationCounts,
+  getCancellationPickList,
   getCancellationRecords,
+  getOrderStatusBreakdown,
+  getPickListByStatus,
   getToShipPickList,
   type CancellationRecord,
   type PickRow,
@@ -52,9 +57,26 @@ export interface OrdersViewParams {
   tab?: "unshipped" | "packed" | "shipped24h";
 }
 
+/** The 5 header categories, as the Collection view groups by them. */
+export type CollectionCategory = "toShip" | "shipped" | "delivered" | "cancellations" | "all";
+
 export type OrdersView =
   | { kind: "planner"; channel?: Channel; query: string; plan: RestockPlan }
-  | { kind: "collection"; channel?: Channel; query: string; rows: PickRow[] }
+  | {
+      kind: "collection";
+      category: CollectionCategory;
+      channel?: Channel;
+      query: string;
+      /** SKU rollup. Empty (and unused) for the "all" root, which shows `tiles` instead. */
+      rows: PickRow[];
+      /** Only set for `category: "all"` with no `drillStatus`: a per-status breakdown to tap into, in place of a flat rollup. */
+      tiles?: { status: OrderStatus; label: string; count: number }[];
+      /** Set when this is a single-status drill-down reached by tapping a tile — `category` stays `"all"`. */
+      drillStatus?: OrderStatus;
+      /** Only meaningful for `category: "cancellations"`. */
+      resolved?: boolean;
+      cancellationCounts?: { pending: number; completed: number };
+    }
   | {
       kind: "cancellations";
       resolved: boolean;
@@ -93,8 +115,75 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
   }
 
   if (view === "collection") {
+    const rawStatus = params.status;
+
+    if (!rawStatus) {
+      return {
+        kind: "collection",
+        category: "toShip",
+        channel,
+        query: q ?? "",
+        rows: await getToShipPickList(channel),
+      };
+    }
+
+    if (rawStatus === "shipped" || rawStatus === "delivered") {
+      return {
+        kind: "collection",
+        category: rawStatus,
+        channel,
+        query: q ?? "",
+        rows: await getPickListByStatus([rawStatus], channel),
+      };
+    }
+
+    if (rawStatus === "cancellations") {
+      const resolved = params.resolved === "1";
+      const [rows, cancellationCounts] = await Promise.all([
+        getCancellationPickList(resolved),
+        getCancellationCounts(30),
+      ]);
+      return {
+        kind: "collection",
+        category: "cancellations",
+        channel,
+        query: q ?? "",
+        resolved,
+        cancellationCounts,
+        rows,
+      };
+    }
+
+    if (rawStatus === "all") {
+      const breakdown = await getOrderStatusBreakdown(channel);
+      return {
+        kind: "collection",
+        category: "all",
+        channel,
+        query: q ?? "",
+        rows: [],
+        tiles: breakdown.map((b) => ({ status: b.status, label: STATUS_LABELS[b.status], count: b.count })),
+      };
+    }
+
+    // A raw OrderStatus outside {shipped, delivered} — reached only by
+    // tapping a tile in "All orders"' own Collection breakdown.
+    const drill = orderStatusEnum.enumValues.find((s) => s === rawStatus);
+    if (drill) {
+      return {
+        kind: "collection",
+        category: "all",
+        drillStatus: drill,
+        channel,
+        query: q ?? "",
+        rows: await getPickListByStatus([drill], channel),
+      };
+    }
+
+    // Unrecognized value — fall back to the open queue rather than error.
     return {
       kind: "collection",
+      category: "toShip",
       channel,
       query: q ?? "",
       rows: await getToShipPickList(channel),
