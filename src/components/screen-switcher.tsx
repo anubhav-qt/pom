@@ -29,9 +29,21 @@ const DashboardWorkspace = dynamic(
  * component decides what to actually show.
  *
  * Two things keep the override honest:
- *  - Any genuine navigation changes `usePathname()` (pushState does not), so
- *    that is the signal to drop the override. Without this, a `<Link>` to
- *    /settings would render under a stale "show dashboard" override.
+ *  - Any genuine navigation gives this component a new `children` (Next
+ *    re-renders the route and hands down a fresh element), so that is the
+ *    signal to drop the override. Without this, a `<Link>` to /settings would
+ *    render under a stale "show dashboard" override.
+ *
+ *    This deliberately does NOT key off `usePathname()`: Next's own router
+ *    patches `history.pushState`/`replaceState` to mirror *any* history
+ *    mutation into its internal state, including the plain `pushState` calls
+ *    `AppSwitch` makes for an in-place swap. That means `usePathname()` now
+ *    changes even though nothing was actually re-rendered — keying the
+ *    cleanup off it would clear the override the instant it was set, and the
+ *    body would fall back to stale `children` while the header (reading the
+ *    same, now-null override) still looked right. `children`'s identity is
+ *    unaffected by that mirroring, so it stays a reliable "did Next actually
+ *    navigate" signal.
  *  - `popstate` recomputes the override from the path the browser landed on.
  */
 export function ScreenSwitcher({ children }: { children: React.ReactNode }) {
@@ -45,7 +57,7 @@ export function ScreenSwitcher({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     useScreenNav.getState().setOverride(null);
-  }, [routePath]);
+  }, [children]);
 
   useEffect(() => {
     const onPop = () => {
@@ -77,13 +89,20 @@ export function ScreenSwitcher({ children }: { children: React.ReactNode }) {
     if (override !== null && resolved !== override) useScreenNav.getState().setOverride(null);
   }, [override, resolved]);
 
-  if (resolved === "orders" && screenFromPath(routePath) !== "orders") {
+  // Deliberately keyed on `override`, not on comparing `routePath` to the
+  // target screen: Next mirrors `usePathname()` to match our own pushState
+  // (see the class comment), so right after a cached swap `routePath` already
+  // reads as the target screen even though `children` is still whatever was
+  // last actually rendered. `override` only reflects our own swap intent, so
+  // it stays a reliable "is there a swap to render" signal regardless of what
+  // Next's router does with the URL behind it.
+  if (override === "orders" && resolved === "orders") {
     const params = useOrdersNav.getState().params;
     const data = useOrdersCache.getState().peek(ordersViewKey(params));
     if (data) return <OrdersWorkspace initialParams={params} initialData={data} />;
   }
 
-  if (resolved === "dashboard" && screenFromPath(routePath) !== "dashboard") {
+  if (override === "dashboard" && resolved === "dashboard") {
     const view = useDashboardCache.getState().peek(useDashboardNav.getState().range);
     if (view) return <DashboardWorkspace initialView={view} />;
   }
