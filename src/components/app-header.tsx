@@ -13,7 +13,7 @@ import {
   useOrdersNav,
 } from "@/lib/stores/orders-cache";
 import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
-import { screenFromPath, screenHref, useScreenNav, type Screen } from "@/lib/stores/screen-nav";
+import { resolveScreen, screenFromPath, screenHref, useScreenNav, type Screen } from "@/lib/stores/screen-nav";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
 import { withBasePath } from "@/lib/base-path";
 import { cn } from "@/lib/utils";
@@ -79,8 +79,10 @@ export function AppHeader({
   const override = useScreenNav((s) => s.override);
   // What is actually on screen: the toggle can swap in a cached screen without
   // moving the Next route, so band 2 and the switch highlight follow this, not
-  // the pathname.
-  const effectiveScreen = override ?? screenFromPath(pathname);
+  // the pathname. Resolved the same way `ScreenSwitcher` decides what to
+  // render, so the tabs and the body can never disagree about which screen
+  // is showing.
+  const effectiveScreen = resolveScreen(pathname, override);
   const onOrders = effectiveScreen === "orders";
 
   return (

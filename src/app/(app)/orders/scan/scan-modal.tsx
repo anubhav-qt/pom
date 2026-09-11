@@ -6,6 +6,7 @@ import { Modal } from "@/components/modal";
 import type { ScanLookup, ScanStation } from "@/lib/scan";
 
 import { scanCheckIn, scanConfirmPacked, scanListUnmappedOrders, scanLookup, scanMapAwb } from "../scan-actions";
+import { playScanBeep } from "./beep";
 import { useBarcodeScanner } from "./use-barcode-scanner";
 
 /**
@@ -156,6 +157,7 @@ export function ScanModal({
   const handleDetected = useCallback(
     (code: string) => {
       if (inputRef.current) inputRef.current.value = code;
+      playScanBeep();
       handleCode(code);
     },
     [handleCode],
@@ -178,6 +180,7 @@ export function ScanModal({
     // The code stays in the box while the lookup runs — cleared only once the
     // scan is actually resolved (see reset()), so the bar always shows what
     // was scanned rather than going blank mid-lookup.
+    if (input.value.trim()) playScanBeep();
     handleCode(input.value);
   }
 
