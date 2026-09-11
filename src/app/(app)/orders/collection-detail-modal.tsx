@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { ImageLightbox } from "@/components/image-lightbox";
 import { Modal } from "@/components/modal";
 import { dayLabel, money, timeLeft } from "@/lib/utils";
 
@@ -17,6 +18,7 @@ export function CollectionDetailModal({ row, onClose }: { row: PickRow; onClose:
   const [orders, setOrders] = useState<CollectionOrderRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openOrderId, setOpenOrderId] = useState<number | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,7 +36,17 @@ export function CollectionDetailModal({ row, onClose }: { row: PickRow; onClose:
         <div className="space-y-5">
           {/* product header */}
           <div className="flex gap-4">
-            <Thumb src={row.imageUrl} alt={row.title ?? row.sku} />
+            <button
+              type="button"
+              onClick={() => {
+                if (row.imageUrl) setLightbox({ src: row.imageUrl, alt: row.title ?? row.sku });
+              }}
+              className="shrink-0"
+              style={{ cursor: row.imageUrl ? "zoom-in" : "default" }}
+              disabled={!row.imageUrl}
+            >
+              <Thumb src={row.imageUrl} alt={row.title ?? row.sku} />
+            </button>
             <div className="min-w-0 flex-1">
               <div className="text-[15px] font-semibold leading-snug" style={{ textWrap: "pretty" } as React.CSSProperties}>
                 {row.title ?? <span className="muted italic">Unnamed product</span>}
@@ -139,6 +151,10 @@ export function CollectionDetailModal({ row, onClose }: { row: PickRow; onClose:
 
       {openOrderId !== null ? (
         <OrderDetailModal orderId={openOrderId} onClose={() => setOpenOrderId(null)} />
+      ) : null}
+
+      {lightbox ? (
+        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
       ) : null}
     </>
   );

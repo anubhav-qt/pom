@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
+import { ImageLightbox } from "@/components/image-lightbox";
 import { Modal } from "@/components/modal";
 import type { ScanLookup, ScanStation } from "@/lib/scan";
 
@@ -55,6 +56,7 @@ export function ScanModal({
   const [committing, setCommitting] = useState(false);
   /** Set when an outbound scan matched nothing, so it can be offered up for AWB mapping. */
   const [unmapped, setUnmapped] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const nextId = useRef(1);
@@ -336,7 +338,7 @@ export function ScanModal({
             className="overflow-hidden rounded-xl border"
             style={{ borderColor: "var(--border)", background: "var(--panel-2)" }}
           >
-            <OrderCard lookup={hit} />
+            <OrderCard lookup={hit} onOpenImage={(src, alt) => setLightbox({ src, alt })} />
 
             {outbound ? (
               <div
@@ -401,6 +403,10 @@ export function ScanModal({
 
         {log.length > 0 ? <SessionLog log={log} /> : null}
       </div>
+
+      {lightbox ? (
+        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
+      ) : null}
     </Modal>
   );
 }
@@ -658,20 +664,33 @@ function FeedbackBanner({ feedback }: { feedback: NonNullable<Feedback> }) {
 
 type ScanHit = Extract<ScanLookup, { ok: true }>;
 
-function OrderCard({ lookup }: { lookup: ScanHit }) {
+function OrderCard({
+  lookup,
+  onOpenImage,
+}: {
+  lookup: ScanHit;
+  onOpenImage: (src: string, alt: string) => void;
+}) {
   const { order, inbound } = lookup;
   const first = order.items[0];
 
   return (
     <div className="flex gap-3.5 p-3.5">
       {first?.imageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={first.imageUrl}
-          alt=""
-          className="h-20 w-16 shrink-0 rounded-lg object-cover"
-          style={{ background: "var(--panel)" }}
-        />
+        <button
+          type="button"
+          onClick={() => onOpenImage(first.imageUrl!, first.title ?? first.sku)}
+          className="shrink-0"
+          style={{ cursor: "zoom-in" }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={first.imageUrl}
+            alt=""
+            className="h-20 w-16 rounded-lg object-cover"
+            style={{ background: "var(--panel)" }}
+          />
+        </button>
       ) : (
         <div className="h-20 w-16 shrink-0 rounded-lg" style={{ background: "var(--bg-subtle)" }} />
       )}
