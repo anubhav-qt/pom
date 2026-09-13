@@ -6,12 +6,14 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { orderFulfilment, orderItems, orders, returns } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
-import { listUnmappedPackedOrders, mapAwbToOrder, markManifestedLocal, recordScan } from "@/lib/fulfilment";
+import { mapAwbToOrder, markManifestedLocal, recordScan } from "@/lib/fulfilment";
 import { adjustStock } from "@/lib/inventory";
 import { lookupScan, type ScanLookup, type ScanStation } from "@/lib/scan";
 import { recomputeReserved } from "@/lib/sync";
 
 import { checkInCancellation } from "./actions";
+import { getCancellationRecords } from "./queries";
+import { getOrdersView } from "./view-actions";
 
 /**
  * Server actions behind the Scan Barcode modal.
@@ -27,12 +29,16 @@ export async function scanLookup(station: ScanStation, code: string): Promise<Sc
 }
 
 /**
- * Packed orders with no AWB yet, for the "map this scan" picker. An order
- * drops off this list the moment it gets one.
+ * Packed orders for the "map this scan" picker — the exact same rows, in the
+ * exact same order, as the Orders page's Packed tab (all enabled channels, no
+ * search). Mapping an order that already has an AWB just replaces it, so
+ * there is no "already mapped" filtering here; `mapAwbToOrder` still refuses
+ * a code already tied to a *different* order.
  */
-export async function scanListUnmappedOrders() {
+export async function scanListPackedOrders() {
   await requireUser();
-  return listUnmappedPackedOrders();
+  const view = await getOrdersView({ tab: "packed" });
+  return view.kind === "list" ? view.rows : [];
 }
 
 /**
@@ -58,6 +64,28 @@ export async function scanMapAwb(orderId: number, code: string): Promise<ScanLoo
 
   revalidatePath("/orders");
   return lookupScan("outbound", code);
+}
+
+/**
+ * Map an AWB to an order and immediately mark it dispatched. A manual AWB
+ * entry — from the "no match" picker or mapTo mode — means the parcel is
+ * already in hand and going out; there is no separate packing step to wait
+ * for, so this always finishes the job in one round trip rather than leaving
+ * the operator to hit a second "Confirm dispatch".
+ *
+ * Reuses `scanMapAwb` and `scanConfirmPacked` as-is (both already record
+ * their own scan and are idempotent) instead of duplicating either.
+ */
+export async function scanMapAndDispatch(
+  orderId: number,
+  code: string,
+): Promise<{ ok: true; externalOrderId: string; already: boolean } | { ok: false; error: string }> {
+  const mapped = await scanMapAwb(orderId, code);
+  if (!mapped.ok) {
+    return { ok: false, error: "error" in mapped ? mapped.error : mapped.message };
+  }
+
+  return scanConfirmPacked(orderId);
 }
 
 /* ------------------------------------------------------------- outbound -- */
@@ -149,6 +177,38 @@ export async function scanConfirmPacked(orderId: number) {
 }
 
 /* -------------------------------------------------------------- inbound -- */
+
+/**
+ * Cancellations, RTOs and customer returns still waiting on a physical
+ * check-in — the exact same rows the Cancellations tab's Pending list shows
+ * (customer returns live on the separate /returns page with its own action
+ * and aren't part of this rollup). Backs the "scan return for this order"
+ * picker when a goods-in scan matches nothing.
+ */
+export async function scanListAwaitingCheckIn() {
+  await requireUser();
+  return getCancellationRecords({ resolved: false, sinceDays: 30 });
+}
+
+/**
+ * Log a code scanned mid check-in that matched no order of its own — almost
+ * always the return parcel's own AWB or tracking sticker. `order_status_events`
+ * (cancellations/RTOs) has no field to hold that, so rather than invent one,
+ * this just files it into the scan log against the order; the log is enough
+ * for someone to trace it back later.
+ */
+export async function scanRecordReturnCode(orderId: number, code: string) {
+  const user = await requireUser();
+  await recordScan({
+    orderId,
+    station: "inbound",
+    code,
+    matchedOn: "return_code",
+    applied: true,
+    scannedBy: user.id,
+  });
+  return { ok: true as const };
+}
 
 /**
  * Check a scanned parcel back in.

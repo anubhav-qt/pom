@@ -10,9 +10,10 @@ import type { OrderStatus } from "@/db/schema";
 import { dayLabel, money } from "@/lib/utils";
 
 import { checkInCancellation, reopenCancellation } from "./actions";
-import { OrderThumb } from "./order-table";
+import { BarcodeIcon, OrderThumb } from "./order-table";
 import type { CancellationRecord } from "./queries";
 import { RailTabs } from "./rail-tabs";
+import { ScanModal } from "./scan/scan-modal";
 
 export function CancellationsPanel({
   records,
@@ -36,6 +37,15 @@ export function CancellationsPanel({
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<number | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  // Row scan icon on a "ready" (physically back) record: scan the return's
+  // own label to confirm it, then ask sellable/damaged — same modal the
+  // goods-in bench uses, just pre-told which record it's for.
+  const [checkTarget, setCheckTarget] = useState<{
+    orderId: number;
+    externalOrderId: string;
+    kind: "cancellation";
+    recordId: number;
+  } | null>(null);
 
   function act(eventId: number, fn: () => Promise<{ ok: boolean; error?: string }>) {
     setBusyId(eventId);
@@ -93,6 +103,17 @@ export function CancellationsPanel({
                 onNotReturning={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: false }))}
                 onReopen={() => act(r.eventId, () => reopenCancellation(r.eventId))}
                 onOpenImage={(src, alt) => setLightbox({ src, alt })}
+                onScan={
+                  !resolved && r.stage === "ready"
+                    ? () =>
+                        setCheckTarget({
+                          orderId: r.orderId,
+                          externalOrderId: r.externalOrderId,
+                          kind: "cancellation",
+                          recordId: r.eventId,
+                        })
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -197,6 +218,17 @@ export function CancellationsPanel({
                         busy={busyId === r.eventId && pending}
                         onReceived={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: true }))}
                         onNotReturning={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: false }))}
+                        onScan={
+                          r.stage === "ready"
+                            ? () =>
+                                setCheckTarget({
+                                  orderId: r.orderId,
+                                  externalOrderId: r.externalOrderId,
+                                  kind: "cancellation",
+                                  recordId: r.eventId,
+                                })
+                            : undefined
+                        }
                       />
                     )}
                   </td>
@@ -212,6 +244,15 @@ export function CancellationsPanel({
       {lightbox ? (
         <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
       ) : null}
+
+      {checkTarget ? (
+        <ScanModal
+          station="inbound"
+          checkInFor={checkTarget}
+          onClose={() => setCheckTarget(null)}
+          onDone={() => router.refresh()}
+        />
+      ) : null}
     </div>
   );
 }
@@ -220,7 +261,7 @@ export function CancellationsPanel({
  * Mobile stand-in for a table row: same fields, same actions, stacked instead
  * of columned since a 6-column table has nowhere to go on a phone.
  */
-function CancellationCard({
+export function CancellationCard({
   record,
   resolved,
   busy,
@@ -228,14 +269,24 @@ function CancellationCard({
   onNotReturning,
   onReopen,
   onOpenImage,
+  onScan,
+  onPick,
 }: {
   record: CancellationRecord;
   resolved: boolean;
   busy: boolean;
-  onReceived: () => void;
-  onNotReturning: () => void;
-  onReopen: () => void;
+  onReceived?: () => void;
+  onNotReturning?: () => void;
+  onReopen?: () => void;
   onOpenImage: (src: string, alt: string) => void;
+  /** Row scan icon (only meaningful for a "ready" pending record). */
+  onScan?: () => void;
+  /**
+   * Picker mode: this card is a row in the goods-in "no match" picker, not
+   * the Cancellations tab itself. Tapping it selects the record instead of
+   * doing anything to it, so the normal received/reopen controls don't show.
+   */
+  onPick?: () => void;
 }) {
   const thumbSrc = record.items.find((it) => it.imageUrl)?.imageUrl ?? null;
   const thumbAlt = record.items[0]?.title ?? record.externalOrderId;
@@ -303,14 +354,24 @@ function CancellationCard({
         className="flex items-center justify-between pt-1"
         style={{ borderTop: "1px solid var(--border)" }}
       >
-        {resolved ? (
-          <ResolvedCell record={record} onReopen={onReopen} busy={busy} />
+        {onPick ? (
+          <button
+            type="button"
+            className="btn btn-primary ml-auto whitespace-nowrap"
+            onClick={onPick}
+            disabled={busy}
+          >
+            {busy ? "Matching" : "Match"}
+          </button>
+        ) : resolved ? (
+          <ResolvedCell record={record} onReopen={onReopen!} busy={busy} />
         ) : (
           <PendingCell
             record={record}
             busy={busy}
-            onReceived={onReceived}
-            onNotReturning={onNotReturning}
+            onReceived={onReceived!}
+            onNotReturning={onNotReturning!}
+            onScan={onScan}
           />
         )}
       </div>
@@ -324,11 +385,14 @@ function PendingCell({
   busy,
   onReceived,
   onNotReturning,
+  onScan,
 }: {
   record: CancellationRecord;
   busy: boolean;
   onReceived: () => void;
   onNotReturning: () => void;
+  /** Scan the return's own label instead of ticking it by hand. */
+  onScan?: () => void;
 }) {
   // "awaiting" = shipped then cancelled, but Amazon hasn't reported the parcel
   // coming back yet. Nothing to tick — the item may still be in transit or lost.
@@ -358,14 +422,31 @@ function PendingCell({
       <span className="muted text-[11px]">
         Amazon returned it {dayLabel(new Date(record.detectedAt))}
       </span>
-      <button
-        className="text-[11px] underline"
-        style={{ color: "var(--muted)" }}
-        disabled={busy}
-        onClick={onNotReturning}
-      >
-        not returning
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          className="text-[11px] underline"
+          style={{ color: "var(--muted)" }}
+          disabled={busy}
+          onClick={onNotReturning}
+        >
+          not returning
+        </button>
+        {onScan ? (
+          <button
+            type="button"
+            className="btn px-2 py-1"
+            onClick={(e) => {
+              e.stopPropagation();
+              onScan();
+            }}
+            disabled={busy}
+            aria-label={`Scan return for ${record.externalOrderId}`}
+            title="Scan return"
+          >
+            <BarcodeIcon />
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

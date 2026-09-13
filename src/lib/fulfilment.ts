@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -73,8 +73,18 @@ async function setState(
     state === "packed"
       ? { packedAt: now, packedBy: userId }
       : state === "manifested"
-        ? { packedAt: now, packedBy: userId, manifestedAt: now, manifestedBy: userId }
-        : { packedAt: null, packedBy: null, manifestedAt: null, manifestedBy: null };
+        ? {
+            packedAt: now,
+            packedBy: userId,
+            manifestedAt: now,
+            manifestedBy: userId,
+          }
+        : {
+            packedAt: null,
+            packedBy: null,
+            manifestedAt: null,
+            manifestedBy: null,
+          };
 
   const rows = await db
     .insert(orderFulfilment)
@@ -93,8 +103,10 @@ async function setState(
           state === "to_pack"
             ? sql`NULL`
             : sql`COALESCE(${orderFulfilment.packedBy}, excluded.packed_by)`,
-        manifestedAt: state === "manifested" ? sql`excluded.manifested_at` : sql`NULL`,
-        manifestedBy: state === "manifested" ? sql`excluded.manifested_by` : sql`NULL`,
+        manifestedAt:
+          state === "manifested" ? sql`excluded.manifested_at` : sql`NULL`,
+        manifestedBy:
+          state === "manifested" ? sql`excluded.manifested_by` : sql`NULL`,
         updatedAt: sql`now()`,
       },
     })
@@ -108,7 +120,10 @@ async function setState(
  * no-op rather than an error, because a scanner firing twice is normal.
  * Returns the ids that actually moved, so the caller knows what to count.
  */
-export async function markPackedLocal(orderIds: number[], userId: number | null) {
+export async function markPackedLocal(
+  orderIds: number[],
+  userId: number | null,
+) {
   if (orderIds.length === 0) return { moved: [] as number[] };
 
   const current = await db
@@ -137,7 +152,9 @@ export async function markPackedLocal(orderIds: number[], userId: number | null)
         .set({ packedAt: new Date(), packedBy: userId })
         .where(eq(shipments.id, existing.id));
     } else {
-      await db.insert(shipments).values({ orderId, packedAt: new Date(), packedBy: userId });
+      await db
+        .insert(shipments)
+        .values({ orderId, packedAt: new Date(), packedBy: userId });
     }
   }
 
@@ -145,7 +162,10 @@ export async function markPackedLocal(orderIds: number[], userId: number | null)
 }
 
 /** Hand parcels to courier or mark dispatched on outbound scan. */
-export async function markManifestedLocal(orderIds: number[], userId: number | null) {
+export async function markManifestedLocal(
+  orderIds: number[],
+  userId: number | null,
+) {
   if (orderIds.length === 0) return { moved: [] as number[] };
 
   const current = await db
@@ -192,7 +212,11 @@ export async function markManifestedLocal(orderIds: number[], userId: number | n
  * almost always means a misscan or the wrong order was picked, and silently
  * overwriting would leave the original order's label stuck without one.
  */
-export async function mapAwbToOrder(orderId: number, rawCode: string, userId: number | null) {
+export async function mapAwbToOrder(
+  orderId: number,
+  rawCode: string,
+  userId: number | null,
+) {
   const code = rawCode.trim();
   if (!code) return { ok: false as const, error: "Nothing scanned." };
 
@@ -209,7 +233,10 @@ export async function mapAwbToOrder(orderId: number, rawCode: string, userId: nu
     .where(sql`lower(${shipments.awb}) = ${code.toLowerCase()}`)
     .limit(1);
   if (conflict && conflict.orderId !== orderId) {
-    return { ok: false as const, error: `That AWB is already mapped to a different order.` };
+    return {
+      ok: false as const,
+      error: `That AWB is already mapped to a different order.`,
+    };
   }
 
   const [existing] = await db
@@ -219,34 +246,17 @@ export async function mapAwbToOrder(orderId: number, rawCode: string, userId: nu
     .limit(1);
 
   if (existing) {
-    await db.update(shipments).set({ awb: code }).where(eq(shipments.id, existing.id));
+    await db
+      .update(shipments)
+      .set({ awb: code })
+      .where(eq(shipments.id, existing.id));
   } else {
-    await db.insert(shipments).values({ orderId, awb: code, packedAt: new Date(), packedBy: userId });
+    await db
+      .insert(shipments)
+      .values({ orderId, awb: code, packedAt: new Date(), packedBy: userId });
   }
 
   return { ok: true as const };
-}
-
-/**
- * Packed orders whose AWB is still unknown, for the "map this scan" picker.
- * Once an order gets an AWB it drops off this list on its own.
- */
-export async function listUnmappedPackedOrders(limit = 40) {
-  return db
-    .select({
-      orderId: orders.id,
-      externalOrderId: orders.externalOrderId,
-      buyerName: orders.buyerName,
-      shipCity: orders.shipCity,
-      shipState: orders.shipState,
-      packedAt: orderFulfilment.packedAt,
-    })
-    .from(orderFulfilment)
-    .innerJoin(orders, eq(orders.id, orderFulfilment.orderId))
-    .leftJoin(shipments, eq(shipments.orderId, orders.id))
-    .where(and(eq(orderFulfilment.state, "packed"), isNull(shipments.awb)))
-    .orderBy(sql`${orderFulfilment.packedAt} DESC NULLS LAST`)
-    .limit(limit);
 }
 
 /**
@@ -257,13 +267,25 @@ export async function listUnmappedPackedOrders(limit = 40) {
  * anything else is silently skipped rather than erroring, since a stale
  * selection re-checked after the list refreshed is normal.
  */
-export async function dismissShipped24hLocal(orderIds: number[], userId: number | null) {
+export async function dismissShipped24hLocal(
+  orderIds: number[],
+  userId: number | null,
+) {
   if (orderIds.length === 0) return { moved: [] as number[] };
 
   const rows = await db
     .update(orderFulfilment)
-    .set({ dismissedAt: new Date(), dismissedBy: userId, updatedAt: sql`now()` })
-    .where(and(inArray(orderFulfilment.orderId, orderIds), eq(orderFulfilment.state, "manifested")))
+    .set({
+      dismissedAt: new Date(),
+      dismissedBy: userId,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        inArray(orderFulfilment.orderId, orderIds),
+        eq(orderFulfilment.state, "manifested"),
+      ),
+    )
     .returning({ orderId: orderFulfilment.orderId });
 
   return { moved: rows.map((r) => r.orderId) };
