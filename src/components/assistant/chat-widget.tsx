@@ -205,7 +205,7 @@ export function ChatWidget() {
               onChange={(e) => setInput(e.target.value)}
               placeholder="Ask a question…"
               disabled={busy}
-              className="input"
+              className="input text-base sm:text-sm"
             />
             <button type="submit" disabled={busy || !input.trim()} className="btn btn-primary px-3.5">
               Ask
