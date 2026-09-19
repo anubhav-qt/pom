@@ -1,5 +1,6 @@
 "use client";
 
+import { ItemTitle } from "@/components/item-title";
 import { useEffect, useState } from "react";
 
 import { ChannelTag, StatusBadge } from "@/components/ui";
@@ -195,9 +196,7 @@ function ItemCard({
       </button>
 
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="text-[13px] font-medium leading-snug" style={{ textWrap: "pretty" } as React.CSSProperties}>
-          {item.title ?? <span className="muted italic">Unnamed item</span>}
-        </div>
+        <ItemTitle title={item.title} />
 
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[13px] font-semibold tabular-nums" style={{ color: "var(--accent)" }}>

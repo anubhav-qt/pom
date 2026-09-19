@@ -311,13 +311,6 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
         ) : null}
       </div>
 
-      <p className="muted hidden max-w-[820px] text-[11.5px] sm:block">
-        <b>need</b> = units in today’s open orders for that size + colour · <b>have</b> = what you
-        count on the shelf · <b>buy</b> = need − have. Click a cell, a colour, or a size header to
-        select in bulk. <b>Reset from latest sync</b> rebuilds the grid and drops every edit. The buy
-        sheet exports only the <b>buy</b> quantities for the wholesaler.
-      </p>
-
       {/* ------------------------------------------------------ mobile bottom bar */}
       {selIdsForActive.length > 0 ? (
         <div
@@ -475,7 +468,7 @@ function ProductPanel({
   const selIds = [...selected].filter((id) => product.cells.some((c) => c.id === id));
 
   return (
-    <div className="panel max-w-[900px] overflow-hidden">
+    <div className="panel overflow-hidden">
       {/* header */}
       <div className="flex gap-3 border-b p-4 sm:gap-4 sm:p-5" style={{ borderColor: "var(--border)" }}>
         <button
@@ -577,9 +570,16 @@ function ProductPanel({
           <thead>
             <tr>
               <th
-                className="border text-left"
-                style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-              />
+                className="relative h-11 border text-[11.5px] font-extrabold"
+                style={{
+                  borderColor: "var(--border)",
+                  background:
+                    "linear-gradient(to bottom right, var(--panel) calc(50% - 0.5px), var(--border) calc(50% - 0.5px), var(--border) calc(50% + 0.5px), var(--panel) calc(50% + 0.5px))",
+                }}
+              >
+                <span className="absolute right-2.5 top-1">Size</span>
+                <span className="absolute bottom-1 left-2.5">Color</span>
+              </th>
               {product.sizes.map((s) => {
                 const ids = colIds(s);
                 const on = ids.length > 0 && ids.every((i) => selected.has(i));

@@ -1,5 +1,6 @@
 "use client";
 
+import { ItemTitle } from "@/components/item-title";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
@@ -32,6 +33,7 @@ export interface OrderRow {
   items: {
     sku: string;
     title: string | null;
+    asin?: string | null;
     quantity: number;
     mapped: boolean;
     imageUrl?: string | null;
@@ -350,11 +352,14 @@ export function OrderTable({
                       <div className="space-y-1.5">
                         {row.items.map((item, i) => (
                           <div key={i}>
-                            <div className="line-clamp-2 text-[13px] font-medium leading-snug">
-                              {item.title ?? (
-                                <span className="muted italic">Unnamed item</span>
-                              )}
-                            </div>
+                            <ItemTitle
+                              title={item.title}
+                              meta={[
+                                [row.shipCity, row.shipState].filter(Boolean).join(", "),
+                                item.asin ? `ASIN ${item.asin}` : null,
+                                row.externalOrderId,
+                              ]}
+                            />
                             <div className="muted mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px]">
                               <span className="tabular-nums">{item.quantity}×</span>
                               <span className="font-mono">{item.sku}</span>
@@ -591,10 +596,11 @@ export function OrderCard({
           <StatusBadge status={row.status} />
         </div>
 
-        <div className="line-clamp-1 text-[13px] font-medium leading-snug">
-          {row.items[0]?.title ?? <span className="muted italic">Unnamed item</span>}
-          {row.items.length > 1 ? ` +${row.items.length - 1} more` : ""}
-        </div>
+        <ItemTitle
+          title={row.items[0]?.title ?? null}
+          suffix={row.items.length > 1 ? ` +${row.items.length - 1} more` : ""}
+          meta={[row.items[0]?.asin ? `ASIN ${row.items[0].asin}` : null]}
+        />
 
         <div className="font-mono text-xs" style={{ color: "var(--muted)" }}>
           {row.externalOrderId}

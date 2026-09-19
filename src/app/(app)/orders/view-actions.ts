@@ -334,6 +334,7 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
       items: (itemsByOrder.get(o.id) ?? []).map((it) => ({
         sku: it.externalSku,
         title: it.title,
+        asin: it.asin,
         quantity: it.quantity,
         mapped: it.productId !== null,
         imageUrl: it.pImage ?? it.ciImage ?? null,
