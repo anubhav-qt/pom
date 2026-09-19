@@ -3,7 +3,7 @@
 import { ItemTitle } from "@/components/item-title";
 import { useEffect, useRef, useState, useTransition } from "react";
 
-import { ChannelTag } from "@/components/ui";
+import { ChannelTag, Spinner } from "@/components/ui";
 import type { Channel } from "@/db/schema";
 
 import { confirmPacked, scanOrder, type ScanResult } from "./actions";
@@ -186,7 +186,7 @@ export function PackStation({ initial }: { initial: { remaining: number; packedT
             onClick={pack}
             disabled={pending}
           >
-            {pending ? "Saving…" : "Confirm packed"}
+            {pending ? <Spinner size="1rem" color="currentColor" /> : "Confirm packed"}
           </button>
         </div>
       ) : null}

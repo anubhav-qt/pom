@@ -3,7 +3,7 @@
 import { ItemTitle } from "@/components/item-title";
 import { useEffect, useState } from "react";
 
-import { ChannelTag, StatusBadge } from "@/components/ui";
+import { ChannelTag, StatusBadge, CenteredSpinner } from "@/components/ui";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Modal } from "@/components/modal";
 import type { Channel, OrderStatus } from "@/db/schema";
@@ -77,11 +77,7 @@ export function OrderDetailModal({ orderId, onClose }: { orderId: number; onClos
           {error}
         </p>
       ) : !detail ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-4 animate-pulse rounded" style={{ background: "var(--panel-2)" }} />
-          ))}
-        </div>
+        <CenteredSpinner />
       ) : (
         <div className="space-y-5">
           <div className="flex flex-wrap items-center gap-2">

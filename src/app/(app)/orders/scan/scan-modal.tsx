@@ -1,5 +1,6 @@
 "use client";
 
+import { CenteredSpinner, Spinner } from "@/components/ui";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
 import { ImageLightbox } from "@/components/image-lightbox";
@@ -390,7 +391,7 @@ export function ScanModal({
               </svg>
             </div>
             <button type="submit" className="btn btn-primary shrink-0 whitespace-nowrap" disabled={busy}>
-              {busy ? "Working" : mapTo ? "Map AWB" : "Look up"}
+              {busy ? <Spinner size="1rem" color="currentColor" /> : mapTo ? "Map AWB" : "Look up"}
             </button>
           </div>
           <p className="muted text-xs">
@@ -568,7 +569,7 @@ function AwbMapper({
       ) : null}
 
       {orders === null ? (
-        <p className="muted text-xs">Loading packed orders&hellip;</p>
+        <CenteredSpinner className="py-4" />
       ) : (
         <>
           {orders.length > 5 ? (
@@ -672,7 +673,7 @@ function CheckInPicker({
       </p>
 
       {records === null ? (
-        <p className="muted text-xs">Loading&hellip;</p>
+        <CenteredSpinner className="py-4" />
       ) : (
         <>
           {records.length > 5 ? (

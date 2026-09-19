@@ -105,6 +105,14 @@ function skippedSummary(f: RunFileReport) {
  */
 export function PrinterView(props: PrinterViewProps) {
   const { files, phase, result, error } = props;
+
+  // Always open at the top, and keep the page itself still on phones.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    const root = document.documentElement;
+    root.classList.add("printer-lock");
+    return () => root.classList.remove("printer-lock");
+  }, []);
   const total = files.reduce((n, f) => n + f.size, 0);
   const overSize = total > MAX_TOTAL_BYTES;
   const overCount = files.length > MAX_FILES;
@@ -112,14 +120,16 @@ export function PrinterView(props: PrinterViewProps) {
   const canBuild = files.length > 0 && !overSize && !overCount && !busy;
 
   return (
-    <div className="printer-surface pb-28 sm:pb-0">
-      <div className="grid gap-x-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+    // Below `lg` this is exactly one screen tall: the viewport minus the header,
+    // the page padding and the docked action bar. Nothing scrolls the page.
+    <div className="printer-surface flex h-[calc(100dvh-57px-24px-76px-env(safe-area-inset-bottom))] flex-col overflow-hidden lg:block lg:h-auto lg:overflow-visible lg:pb-0">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-x-5 lg:flex-none lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-none">
         {/* ------------------------------------------------------ left column -- */}
-        <div className="min-w-0">
+        <div className="flex min-h-0 min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain lg:block lg:overflow-visible">
           <Presence value={phase === "done" && result}>{(r) => <ResultHead result={r} />}</Presence>
           <Presence value={phase === "done" && result && hasWarnings(result) && result}>{(r) => <Warnings result={r} />}</Presence>
           <Presence value={phase === "error" && error}>{(e) => <ErrorHead error={e} />}</Presence>
-          <div className="pb-5">
+          <div className={cn("pb-3 lg:pb-5", files.length === 0 && "flex flex-1 flex-col lg:block")}>
             <Dropzone {...props} disabled={busy} compact={files.length > 0} />
           </div>
           <Presence value={files.length > 0}>
@@ -244,7 +254,9 @@ function Dropzone({
       }}
       className={cn(
         "panel flex flex-col items-center justify-center text-center transition-colors",
-        compact ? "gap-3 px-5 py-6 sm:flex-row sm:justify-between sm:text-left" : "gap-4 px-6 py-12 sm:py-16",
+        compact
+          ? "gap-2 px-4 py-3 sm:flex-row sm:justify-between sm:gap-3 sm:px-5 sm:py-6 sm:text-left"
+          : "flex-1 gap-4 px-6 py-8 sm:py-16 lg:flex-none",
       )}
       style={{
         borderStyle: "dashed",

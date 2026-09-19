@@ -70,13 +70,31 @@ export function Spinner({ size = "2.8rem", color, className }: { size?: string; 
   return (
     <div
       className={cn("dot-spinner", className)}
-      style={{ "--uib-size": size, ...(color ? { "--uib-color": color } : {}) } as React.CSSProperties}
+      style={{ "--uib-size": size, ...(color ? { "--uib-color": color, "--uib-glow": "transparent" } : {}) } as React.CSSProperties}
       role="status"
       aria-label="Loading"
     >
       {Array.from({ length: 8 }, (_, i) => (
         <div key={i} className="dot-spinner__dot" />
       ))}
+    </div>
+  );
+}
+
+/** The spinner centred in its own block, for a panel or modal waiting on data. */
+export function CenteredSpinner({ className }: { className?: string }) {
+  return (
+    <div className={cn("flex justify-center py-10", className)}>
+      <Spinner />
+    </div>
+  );
+}
+
+/** The spinner over the whole screen while a view is fetched; lets clicks through. */
+export function LoadingOverlay() {
+  return (
+    <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center">
+      <Spinner size="3rem" />
     </div>
   );
 }

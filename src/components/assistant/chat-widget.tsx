@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@/components/ui";
 import { Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -177,17 +178,8 @@ export function ChatWidget() {
             ))}
 
             {busy ? (
-              <div className="flex items-center gap-1.5 px-1">
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{
-                      background: "var(--muted-2)",
-                      animation: `typing-bounce 1.1s ease-in-out ${i * 0.15}s infinite`,
-                    }}
-                  />
-                ))}
+              <div className="px-1">
+                <Spinner size="1.25rem" />
               </div>
             ) : null}
           </div>

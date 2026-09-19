@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { Empty } from "@/components/ui";
+import { Empty, Spinner } from "@/components/ui";
 import { cn, compareByTail } from "@/lib/utils";
 
 import { adoptUnmappedSku, setBuffer, setStock, syncStockToChannels } from "./actions";
@@ -66,7 +66,7 @@ export function InventoryTable({ rows }: { rows: StockRow[] }) {
           onChange={(e) => setFilter(e.target.value)}
         />
         <button className="btn btn-primary" onClick={pushAll} disabled={pending}>
-          {pending ? "Pushing…" : "Push stock to channels"}
+          {pending ? <Spinner size="1rem" color="currentColor" /> : "Push stock to channels"}
         </button>
       </div>
 

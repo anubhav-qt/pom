@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@/components/ui";
 import { ItemTitle } from "@/components/item-title";
 import { useState } from "react";
 
@@ -70,14 +71,14 @@ function CollectionSheetModal({ rows, onClose }: { rows: PickRow[]; onClose: () 
           </p>
           <div className="flex gap-2">
             <button className="btn text-xs" disabled={busy !== null} onClick={() => exportAs("jpeg")}>
-              {busy === "jpeg" ? "Saving…" : "Save JPEG"}
+              {busy === "jpeg" ? <Spinner size="1rem" color="currentColor" /> : "Save JPEG"}
             </button>
             <button
               className="btn btn-primary text-xs"
               disabled={busy !== null}
               onClick={() => exportAs("pdf")}
             >
-              {busy === "pdf" ? "Saving…" : "Save PDF"}
+              {busy === "pdf" ? <Spinner size="1rem" color="currentColor" /> : "Save PDF"}
             </button>
           </div>
         </div>

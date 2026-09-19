@@ -1,5 +1,6 @@
 "use client";
 
+import { CenteredSpinner } from "@/components/ui";
 import { ItemTitle } from "@/components/item-title";
 import { useEffect, useState } from "react";
 
@@ -83,11 +84,7 @@ export function CollectionDetailModal({ row, onClose }: { row: PickRow; onClose:
                 {error}
               </p>
             ) : !orders ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-9 animate-pulse rounded" style={{ background: "var(--panel-2)" }} />
-                ))}
-              </div>
+              <CenteredSpinner />
             ) : (
               <div className="panel overflow-x-auto">
                 <table className="grid-table">

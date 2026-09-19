@@ -20,12 +20,14 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Lets env(safe-area-inset-*) work, so the bottom bars clear the iPhone home indicator.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={cn(sans.variable, mono.variable, logo.variable)}>
-      <body className="min-h-screen font-sans antialiased">{children}</body>
+      <body className="min-h-screen min-h-[100dvh] font-sans antialiased">{children}</body>
     </html>
   );
 }
