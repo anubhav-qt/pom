@@ -12,6 +12,15 @@ import type {
 import { withBasePath } from "@/lib/base-path";
 
 const MAX_FILES = 20;
+/** What the new tab shows until the sheet is ready, so a blank tab never looks broken. */
+const LOADER_HTML = `<!doctype html><title>POM</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+background:linear-gradient(180deg,#eef7fb,#f8fbfd);font:500 14px system-ui,sans-serif;color:#3a2a30}
+.s{width:34px;height:34px;border-radius:50%;border:3px solid #cdeaf5;border-top-color:#0ea5d9;animation:r .8s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+</style><div class="s"></div><div>Building your label sheet</div>`;
 const isPdf = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
 
 interface PrinterState {
@@ -82,6 +91,12 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
     // it is pointed at the sheet once that exists. If blocked, the result card
     // still has an "Open sheet" link.
     const tab = window.open("", "_blank");
+    try {
+      tab?.document.write(LOADER_HTML);
+      tab?.document.close();
+    } catch {
+      // A tab we cannot write to just stays blank until the sheet lands.
+    }
     set({ phase: "processing", result: null, error: null, popupBlocked: false });
 
     const body = new FormData();

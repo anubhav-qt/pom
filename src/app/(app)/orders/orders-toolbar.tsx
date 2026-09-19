@@ -84,7 +84,7 @@ export function OrdersToolbar({
     // Mobile gets its own fixed bottom nav (MobileOrdersNav) with the same
     // three destinations plus Scanner/AI — this row (and the Scan Barcode
     // button in rightSlot) is redundant with that below `sm`.
-    <div className="hidden flex-wrap items-center justify-between gap-3 sm:flex">
+    <div className="hidden flex-wrap items-center justify-between gap-3 sm:!-mb-[13px] sm:flex">
       {showSwitcher ? (
         <div
           className="inline-flex rounded-[10px] p-[3px]"
