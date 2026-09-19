@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: #0f2536; font-feature-settings: "cv11","ss01"; -webkit-font-smoothing: antialiased; }
+    a { color: #0ea5e9; } a:hover { color: #0284c7; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</helmet>
+
+<!-- the 36rem centred modal has no room on a phone; it becomes a full-screen
+     sheet reached by pushing history (Android/iOS back closes it), not an overlay -->
+<div style="width: 375px; height: 812px; box-sizing: border-box; background: #ffffff; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 14px 12px 12px 8px; border-bottom: 1px solid rgba(13,110,140,0.1);">
+    <button style="width: 38px; height: 38px; flex-shrink: 0; border-radius: 999px; border: none; background: transparent; display: flex; align-items: center; justify-content: center;">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0f2536" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </button>
+    <div style="flex-grow: 1; min-width: 0;">
+      <div class="mono" style="font-size: 14px; font-weight: 600;">407-2210441-1120</div>
+    </div>
+    <span style="flex-shrink:0; display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 500; background: rgba(14,165,233,0.1); color: #0ea5e9;"><span style="width:5px;height:5px;border-radius:999px;background:#0ea5e9;"></span>Packed</span>
+  </div>
+
+  <div style="flex-grow: 1; overflow-y: auto; padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 18px;">
+
+    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+      <span style="display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 5px 12px 5px 7px; font-size: 12px; font-weight: 500; background: rgba(14,165,233,0.12);"><span style="width:6px;height:6px;border-radius:999px;background:#0ea5e9;"></span><span style="color:#0b7fb0;">Amazon</span></span>
+      <span style="display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; background: rgba(217,138,43,0.12); color: #d98a2b;">COD</span>
+    </div>
+
+    <!-- fields: 2-col desktop grid -> single column, one fact per row, thumb-scrollable -->
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 10px; border-bottom: 1px solid rgba(13,110,140,0.1);">
+        <span style="font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: #5c7386;">Buyer</span>
+        <span style="font-size: 13.5px; font-weight: 500;">Rahul M.</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 10px; border-bottom: 1px solid rgba(13,110,140,0.1);">
+        <span style="font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: #5c7386;">Ship to</span>
+        <span style="font-size: 13.5px; font-weight: 500; text-align: right; max-width: 60%;">Pune, Maharashtra</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 10px; border-bottom: 1px solid rgba(13,110,140,0.1);">
+        <span style="font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: #5c7386;">Ordered</span>
+        <span style="font-size: 13.5px; font-weight: 500;">10 Sep, 4:12 PM</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 10px; border-bottom: 1px solid rgba(13,110,140,0.1);">
+        <span style="font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: #5c7386;">Dispatch by</span>
+        <span style="font-size: 13.5px; font-weight: 600; color: #d98a2b;">12 Sep, 2:00 PM</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <span style="font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: #5c7386;">Value</span>
+        <span class="mono" style="font-size: 14px; font-weight: 600;">₹1,249</span>
+      </div>
+    </div>
+
+    <!-- items -->
+    <div>
+      <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #5c7386; margin-bottom: 8px;">Item</div>
+      <div style="border-radius: 12px; border: 1px solid rgba(13,110,140,0.1); background: #eef6fa; padding: 12px; display: flex; gap: 12px;">
+        <div style="position: relative; flex-shrink: 0;">
+          <div style="width: 52px; height: 66px; border-radius: 8px; background: linear-gradient(155deg, #2c5f7d, #1a3c4d);"></div>
+          <span style="position: absolute; right: -5px; bottom: -5px; width: 16px; height: 16px; border-radius: 999px; background: #0f2536; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3 14 10"/><path d="M3 21l7-7"/></svg>
+          </span>
+        </div>
+        <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px;">
+          <div style="font-size: 13px; line-height: 1.4; text-wrap: pretty;">Rayon A-Line Kurti with Palazzo Set (M, Teal)</div>
+          <div style="display: flex; gap: 10px; font-size: 11px; color: #5c7386;">
+            <span class="mono">RY-AL-TL-M</span><span>Qty 1</span><span>₹1,249</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- shipment -->
+    <div>
+      <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #5c7386; margin-bottom: 8px;">Shipment</div>
+      <div style="border-radius: 12px; border: 1px solid rgba(13,110,140,0.1); background: #eef6fa; padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; justify-content: space-between;"><span style="font-size: 12px; color: #5c7386;">Courier</span><span style="font-size: 12.5px; font-weight: 500;">Delhivery</span></div>
+        <div style="display: flex; justify-content: space-between;"><span style="font-size: 12px; color: #5c7386;">AWB</span><span class="mono" style="font-size: 12.5px; font-weight: 500;">DL4471209812</span></div>
+        <div style="display: flex; justify-content: space-between;"><span style="font-size: 12px; color: #5c7386;">Packed</span><span style="font-size: 12.5px; font-weight: 500;">11 Sep, 10:04 AM</span></div>
+      </div>
+    </div>
+
+    <div style="height: 16px;"></div>
+  </div>
+
+  <!-- No action bar: order-detail-modal.tsx is a read-only info view in the
+       real app (fields, items, shipment, return record) — it carries no
+       buttons of its own, print-label included, so none are invented here. -->
+
+</div>
+</x-dc>
+</body>
+</html>

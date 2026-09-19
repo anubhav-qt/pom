@@ -1,18 +1,16 @@
 /**
- * Pulls the seller's full Amazon listings catalogue straight from SP-API and
- * dumps it to a raw .xlsx for manual cleanup before it is shaped into a
- * Paribelle import.
+ * Compares our Paribelle OMS product catalogue against the seller's live
+ * Amazon listings, so we can see which Amazon SKUs are already known to us
+ * and which ones are new (added on Amazon but never imported here).
  *
- * Unlike scripts/amazon-to-paribelle.ts — which expects a hand-downloaded
- * "All Listings Report" TSV and emits the final import ZIP — this one drives
- * the Reports API itself (GET_MERCHANT_LISTINGS_ALL_DATA), then enriches each
- * ASIN through Catalog Items for images, brand and product type. Nothing is
- * filtered or normalised: every column the report carries is written through
- * as-is, plus the enriched columns, so the cleanup pass has everything.
+ * Pulls the full listings report straight from SP-API (same approach as
+ * scripts/amazon-listings-to-xlsx.ts), enriches with Catalog Items images,
+ * then cross-references seller-sku / asin1 against products + channel_listings
+ * for the saved Amazon channel account.
  *
- *   npx tsx scripts/amazon-listings-to-xlsx.ts [output.xlsx]
+ *   npx tsx scripts/amazon-inventory-diff.ts [output.xlsx]
  *
- * Default output: tmp/amazon-listings-raw.xlsx
+ * Default output: tmp/amazon-inventory-diff.xlsx
  */
 import { config } from "dotenv";
 import * as fs from "fs";
@@ -54,7 +52,6 @@ async function mintToken(ctx: Pick<Ctx, "refreshToken" | "clientId" | "clientSec
   return (JSON.parse(body) as { access_token: string }).access_token;
 }
 
-/** LWA tokens last an hour; re-mint at 50 minutes so nothing expires mid-run. */
 async function token(ctx: Ctx): Promise<string> {
   if (Date.now() - ctx.issuedAt > 50 * 60_000) {
     ctx.accessToken = await mintToken(ctx);
@@ -98,11 +95,6 @@ async function api<T>(
 
 /* --------------------------------------------------------------- report -- */
 
-/**
- * Listings reports are a snapshot of the catalogue as it stands, so unlike the
- * orders reports they take no dataStartTime/dataEndTime — sending one is
- * rejected.
- */
 async function requestListingsReport(ctx: Ctx): Promise<string> {
   const res = await api<{ reportId?: string }>(ctx, "/reports/2021-06-30/reports", {
     method: "POST",
@@ -166,53 +158,12 @@ function parseTsv(text: string): Row[] {
   });
 }
 
-/* ------------------------------------------------- title/colour/size parse -- */
-
-const SIZE_RE = /^(XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL|XXL|XXXL|FREE ?SIZE|ONE ?SIZE)$/i;
-
-function canonicalSize(s: string): string {
-  const up = s.trim().toUpperCase().replace(/\s+/g, " ");
-  if (up === "FREE SIZE" || up === "FREESIZE") return "Free Size";
-  if (up === "ONE SIZE" || up === "ONESIZE") return "One Size";
-  return up;
-}
-
-/**
- * Same patterns scripts/amazon-to-paribelle.ts learned from this seller's
- * catalogue. Kept here so the raw sheet already carries a best-effort split —
- * the cleanup pass can correct it rather than start from scratch.
- */
-function parseListing(name: string): { baseTitle: string; colour: string; size: string } {
-  const paren = name.match(/^(.*)\s*\(([^)]*)\)\s*$/);
-  if (paren) {
-    const base = paren[1].trim();
-    const tokens = paren[2].split(",").map((t) => t.trim());
-    if (tokens.length === 2 && SIZE_RE.test(tokens[1])) {
-      return { baseTitle: base, colour: tokens[0], size: canonicalSize(tokens[1]) };
-    }
-    if (tokens.length === 5 && SIZE_RE.test(tokens[2])) {
-      return { baseTitle: base, colour: tokens[4], size: canonicalSize(tokens[2]) };
-    }
-    return { baseTitle: name, colour: "", size: "" };
-  }
-  const truncated = name.match(/^(.*),\s*([A-Za-z0-9 ]+)$/);
-  if (truncated && SIZE_RE.test(truncated[2])) {
-    return { baseTitle: truncated[1].trim(), colour: "", size: canonicalSize(truncated[2]) };
-  }
-  return { baseTitle: name, colour: "", size: "" };
-}
-
 /* -------------------------------------------------------------- catalog -- */
 
 interface CatalogInfo {
   images: string[];
   brand: string;
   productType: string;
-  classification: string;
-  colour: string;
-  size: string;
-  /** The ASIN of this listing's variation-family parent, when it has one. */
-  parentAsin: string;
 }
 
 interface CatalogItemsResponse {
@@ -222,35 +173,11 @@ interface CatalogItemsResponse {
       marketplaceId?: string;
       images?: Array<{ variant?: string; link?: string; width?: number; height?: number }>;
     }>;
-    summaries?: Array<{
-      marketplaceId?: string;
-      brand?: string;
-      colour?: string;
-      color?: string;
-      size?: string;
-      itemClassification?: string;
-    }>;
+    summaries?: Array<{ marketplaceId?: string; brand?: string }>;
     productTypes?: Array<{ marketplaceId?: string; productType?: string }>;
-    // Added to includedData so a design's stable identity can be its parent
-    // ASIN (Amazon keeps this fixed across colour/size children) instead of
-    // a name that the seller may edit at any time.
-    relationships?: Array<{
-      marketplaceId?: string;
-      relationships?: Array<{
-        parentAsins?: string[];
-        childAsins?: string[];
-        type?: string;
-      }>;
-    }>;
   }>;
 }
 
-/**
- * Batched lookup — 20 ASINs per call, which is the endpoint's page cap and
- * dramatically cheaper than the per-ASIN getCatalogItem route the older script
- * used. Best-effort: a failed batch is logged and skipped rather than aborting
- * a run that may span thousands of listings.
- */
 async function fetchCatalog(ctx: Ctx, asins: string[]): Promise<Map<string, CatalogInfo>> {
   const out = new Map<string, CatalogInfo>();
   const unique = [...new Set(asins.filter(Boolean))];
@@ -265,7 +192,7 @@ async function fetchCatalog(ctx: Ctx, asins: string[]): Promise<Map<string, Cata
           identifiers: batch.join(","),
           identifiersType: "ASIN",
           marketplaceIds: ctx.marketplaceId,
-          includedData: "images,summaries,productTypes,relationships",
+          includedData: "images,summaries,productTypes",
           pageSize: "20",
         },
       });
@@ -277,48 +204,28 @@ async function fetchCatalog(ctx: Ctx, asins: string[]): Promise<Map<string, Cata
 
     for (const item of res.items ?? []) {
       if (!item.asin) continue;
-      const group =
-        item.images?.find((g) => g.marketplaceId === ctx.marketplaceId) ?? item.images?.[0];
-
-      // Keep the widest render of each variant, then order MAIN first so the
-      // first URL is always the hero shot.
+      const group = item.images?.find((g) => g.marketplaceId === ctx.marketplaceId) ?? item.images?.[0];
       const byVariant = new Map<string, { link: string; width: number }>();
       for (const img of group?.images ?? []) {
         if (!img.link || !img.variant) continue;
         const seen = byVariant.get(img.variant);
-        if (!seen || (img.width ?? 0) > seen.width) {
-          byVariant.set(img.variant, { link: img.link, width: img.width ?? 0 });
-        }
+        if (!seen || (img.width ?? 0) > seen.width) byVariant.set(img.variant, { link: img.link, width: img.width ?? 0 });
       }
       const ordered = ["MAIN", "PT01", "PT02", "PT03", "PT04", "PT05"];
       const preferred = ordered.map((v) => byVariant.get(v)?.link).filter((l): l is string => !!l);
       const images = preferred.length ? preferred : [...byVariant.values()].map((v) => v.link);
 
-      const summary =
-        item.summaries?.find((s) => s.marketplaceId === ctx.marketplaceId) ?? item.summaries?.[0];
+      const summary = item.summaries?.find((s) => s.marketplaceId === ctx.marketplaceId) ?? item.summaries?.[0];
       const productType =
         (item.productTypes?.find((p) => p.marketplaceId === ctx.marketplaceId) ?? item.productTypes?.[0])
           ?.productType ?? "";
 
-      const relGroup =
-        item.relationships?.find((r) => r.marketplaceId === ctx.marketplaceId) ?? item.relationships?.[0];
-      const variationRel = relGroup?.relationships?.find((r) => r.parentAsins?.length) ?? relGroup?.relationships?.[0];
-      const parentAsin = variationRel?.parentAsins?.[0] ?? "";
-
-      out.set(item.asin, {
-        images,
-        brand: summary?.brand ?? "",
-        productType,
-        classification: summary?.itemClassification ?? "",
-        colour: summary?.colour ?? summary?.color ?? "",
-        size: summary?.size ?? "",
-        parentAsin,
-      });
+      out.set(item.asin, { images, brand: summary?.brand ?? "", productType });
     }
 
     const done = Math.min(i + 20, unique.length);
     console.log(`  ${done}/${unique.length}`);
-    await sleep(600); // endpoint is documented at ~2 req/sec
+    await sleep(600);
   }
   return out;
 }
@@ -326,18 +233,35 @@ async function fetchCatalog(ctx: Ctx, asins: string[]): Promise<Map<string, Cata
 /* ----------------------------------------------------------------- main -- */
 
 async function main() {
-  const outPath = process.argv[2] ?? path.join("tmp", "amazon-listings-raw.xlsx");
+  const outPath = process.argv[2] ?? path.join("tmp", "amazon-inventory-diff.xlsx");
 
-  // Credentials live per-account in the OMS database, not in .env — the same
-  // lookup scripts/amazon-to-paribelle.ts uses.
   const { db } = await import("../src/db");
-  const { channelAccounts } = await import("../src/db/schema");
-  const { eq } = await import("drizzle-orm");
+  const { channelAccounts, channelListings, products } = await import("../src/db/schema");
+  const { eq, and } = await import("drizzle-orm");
+
   const accounts = await db.select().from(channelAccounts).where(eq(channelAccounts.channel, "amazon"));
   const account =
     accounts.find((a) => String((a.credentials as any)?.refreshToken ?? "").startsWith("Atzr|")) ?? accounts[0];
   if (!account) throw new Error("No Amazon channel account found in the OMS database.");
 
+  console.log(`--- Step 1: reading Paribelle DB (what we already have) ---`);
+  const known = await db
+    .select({
+      externalSku: channelListings.externalSku,
+      externalId: channelListings.externalId,
+      productSku: products.sku,
+      productName: products.name,
+      active: channelListings.active,
+    })
+    .from(channelListings)
+    .innerJoin(products, eq(channelListings.productId, products.id))
+    .where(eq(channelListings.channelAccountId, account.id));
+
+  const bySku = new Map(known.map((k) => [k.externalSku.trim().toLowerCase(), k]));
+  const byAsin = new Map(known.filter((k) => k.externalId).map((k) => [k.externalId!.trim().toUpperCase(), k]));
+  console.log(`  ${known.length} Amazon listings already linked to Paribelle products (${new Set(known.map((k) => k.productSku)).size} distinct product SKUs)`);
+
+  console.log(`\n--- Step 2: pulling live Amazon listings via SP-API ---`);
   const creds = account.credentials as any;
   const ctx: Ctx = {
     endpoint: creds?.endpoint ?? process.env.AMAZON_SPAPI_ENDPOINT ?? "https://sellingpartnerapi-eu.amazon.com",
@@ -355,7 +279,7 @@ async function main() {
   ctx.issuedAt = Date.now();
   console.log(`Account "${account.label}" · marketplace ${ctx.marketplaceId}`);
 
-  console.log(`\nRequesting ${LISTINGS_REPORT}...`);
+  console.log(`Requesting ${LISTINGS_REPORT}...`);
   const reportId = await requestListingsReport(ctx);
   console.log(`  reportId ${reportId}`);
   const documentId = await pollReport(ctx, reportId);
@@ -363,59 +287,53 @@ async function main() {
   const tsv = await downloadReport(ctx, documentId);
 
   const rows = parseTsv(tsv);
-  console.log(`\n${rows.length} listing rows`);
+  console.log(`\n${rows.length} listing rows on Amazon`);
   const statuses = new Map<string, number>();
   for (const r of rows) statuses.set(r.status || "(blank)", (statuses.get(r.status || "(blank)") ?? 0) + 1);
   console.log("By status:", [...statuses].map(([s, n]) => `${s}=${n}`).join(", "));
 
   const catalog = await fetchCatalog(ctx, rows.map((r) => r.asin1));
 
-  // Every report column, in the order Amazon emitted it, then the enriched
-  // ones. Nothing dropped — this is the sheet the cleanup pass works from.
+  console.log(`\n--- Step 3: diffing Amazon against Paribelle DB ---`);
   const reportColumns = Object.keys(rows[0] ?? {});
   const sheetRows = rows.map((row) => {
     const info = catalog.get(row.asin1);
-    const parsed = parseListing(row["item-name"] ?? "");
+    const sku = (row["seller-sku"] ?? "").trim().toLowerCase();
+    const asin = (row.asin1 ?? "").trim().toUpperCase();
+    const matchBySku = bySku.get(sku);
+    const matchByAsin = matchBySku ? undefined : byAsin.get(asin);
+    const match = matchBySku ?? matchByAsin;
     return {
       ...row,
+      "_InParibelle": match ? "YES" : "NEW",
+      "_MatchedProductSku": match?.productSku ?? "",
+      "_MatchedProductName": match?.productName ?? "",
       "_Brand": info?.brand ?? "",
       "_ProductType": info?.productType ?? "",
-      "_Classification": info?.classification ?? "",
-      "_CatalogColour": info?.colour ?? "",
-      "_CatalogSize": info?.size ?? "",
-      // Stable design identity: Amazon keeps a variation family's parent ASIN
-      // fixed even as the seller edits titles/prices/images on the children.
-      // Empty when the ASIN has no family (e.g. it IS a childless parent, or
-      // a standalone listing) — callers should then fall back to the ASIN
-      // itself as the family key.
-      "_ParentAsin": info?.parentAsin ?? "",
-      "_ParsedBaseTitle": parsed.baseTitle,
-      "_ParsedColour": parsed.colour,
-      "_ParsedSize": parsed.size,
       "_Images": (info?.images ?? []).join(", "),
       "_ImageCount": info?.images?.length ?? 0,
     };
   });
 
+  const newRows = sheetRows.filter((r) => r._InParibelle === "NEW");
+  console.log(`  ${sheetRows.length - newRows.length} listings already in Paribelle`);
+  console.log(`  ${newRows.length} listings NOT in Paribelle (new / never imported)`);
+
   const columns = [
     ...reportColumns,
-    "_Brand", "_ProductType", "_Classification", "_CatalogColour", "_CatalogSize", "_ParentAsin",
-    "_ParsedBaseTitle", "_ParsedColour", "_ParsedSize", "_Images", "_ImageCount",
+    "_InParibelle", "_MatchedProductSku", "_MatchedProductName",
+    "_Brand", "_ProductType", "_Images", "_ImageCount",
   ];
 
   fs.mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true });
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows, { header: columns }), "Listings");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows, { header: columns }), "All Listings");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(newRows, { header: columns }), "New (not in Paribelle)");
   XLSX.writeFile(wb, outPath);
 
-  const withImages = sheetRows.filter((r) => r._ImageCount > 0).length;
-  const types = new Map<string, number>();
-  for (const r of sheetRows) types.set(r._ProductType || "(unknown)", (types.get(r._ProductType || "(unknown)") ?? 0) + 1);
-
   console.log(`\nWrote ${outPath}`);
-  console.log(`  ${sheetRows.length} rows · ${columns.length} columns`);
-  console.log(`  ${withImages}/${sheetRows.length} have images`);
-  console.log("  Product types:", [...types].sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t}=${n}`).join(", "));
+  console.log(`  Sheet "All Listings": ${sheetRows.length} rows`);
+  console.log(`  Sheet "New (not in Paribelle)": ${newRows.length} rows`);
 }
 
 main().catch((err) => {
