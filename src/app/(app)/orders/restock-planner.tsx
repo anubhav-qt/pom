@@ -574,11 +574,12 @@ function ProductPanel({
                 style={{
                   borderColor: "var(--border)",
                   background:
-                    "linear-gradient(to bottom right, var(--panel) calc(50% - 0.5px), var(--border) calc(50% - 0.5px), var(--border) calc(50% + 0.5px), var(--panel) calc(50% + 0.5px))",
+                    "linear-gradient(to top right, var(--panel) calc(50% - 0.5px), var(--border) calc(50% - 0.5px), var(--border) calc(50% + 0.5px), var(--panel) calc(50% + 0.5px))",
                 }}
               >
-                <span className="absolute right-2.5 top-1">Size</span>
-                <span className="absolute bottom-1 left-2.5">Color</span>
+                {/* Text follows the line: about atan(44/150) = 16deg. */}
+                <span className="absolute right-2 top-1.5 origin-right rotate-[16deg]">Size</span>
+                <span className="absolute bottom-1.5 left-2 origin-left rotate-[16deg]">Color</span>
               </th>
               {product.sizes.map((s) => {
                 const ids = colIds(s);
