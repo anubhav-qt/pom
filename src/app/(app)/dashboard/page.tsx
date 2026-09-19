@@ -17,11 +17,11 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; basis?: string; tab?: string }>;
 }) {
   await requireUser();
-  const { range } = await searchParams;
-  const view = await getDashboardView(range);
+  const { range, basis, tab } = await searchParams;
+  const view = await getDashboardView(range, basis);
 
-  return <DashboardWorkspace initialView={view} />;
+  return <DashboardWorkspace initialView={view} initialTab={tab === "ledger" ? "ledger" : "overview"} />;
 }

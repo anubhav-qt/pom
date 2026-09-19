@@ -12,6 +12,8 @@ import {
   type LabelResult,
 } from "./types";
 
+import { parseReturnsReport, toFinanceLine, type FinanceLine, type RawTransaction } from "./amazon-finance";
+
 const LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token";
 
 /**
@@ -359,17 +361,26 @@ export class AmazonAdapter implements ChannelAdapter {
   /* ------------------------------------------------------------- returns -- */
 
   /**
-   * Returns are deliberately not implemented here for v1.
-   *
-   * SP-API exposes MFN return data only through the asynchronous Reports API
-   * (create report -> poll -> download -> parse TSV), which spans more time than
-   * a single serverless invocation and needs its own persisted job state. Order
-   * status changes still surface cancellations and RTO through `fetchOrders`,
-   * which covers the day-to-day case. Wiring the Reports API is the planned
-   * upgrade — see docs/CHANNELS.md.
+   * Customer returns come from the Returns report, the only place Amazon
+   * exposes them. One report covers up to 60 days, so a longer gap is caught up
+   * across several syncs. Reason, refund, return-label cost and tracking id all
+   * arrive in the same row. RTO and cancellations still surface through order
+   * status; this adds the customer returns that never change an order's status.
    */
   async fetchReturns({ since }: FetchOrdersOptions) {
-    return { returns: [], syncedThrough: since };
+    if (this.isSandbox) return { returns: [], syncedThrough: since };
+
+    const MAX_SPAN = 59 * 86_400_000;
+    const end = new Date(Math.min(Date.now() - 3 * 60_000, since.getTime() + MAX_SPAN));
+    if (end.getTime() <= since.getTime() + 60_000) return { returns: [], syncedThrough: since };
+
+    const reportId = await this.createReport(
+      "GET_FLAT_FILE_RETURNS_DATA_BY_RETURN_DATE",
+      { start: since, end },
+    );
+    const documentId = await this.pollReport(reportId, 4 * 60_000);
+    const tsv = await this.downloadReport(documentId);
+    return { returns: parseReturnsReport(tsv), syncedThrough: end };
   }
 
   /* -------------------------------------------------------------- labels -- */
@@ -574,6 +585,40 @@ export class AmazonAdapter implements ChannelAdapter {
     const reportId = await this.createReport(AmazonAdapter.LISTINGS_REPORT);
     const documentId = await this.pollReport(reportId);
     return parseListingsReport(await this.downloadReport(documentId));
+  }
+
+  /* --------------------------------------------------------- finances -- */
+
+  /**
+   * Every money movement Amazon recorded between two instants, via the
+   * Finances API v2024-06-19 (v0 was retired on 28 Aug 2026). Paged at
+   * 0.5 req/sec; Amazon returns nothing for a span over 180 days and holds back
+   * roughly the last 48 hours, so callers slice long ranges and re-read the
+   * recent tail on every run. Yields one page of parsed lines at a time.
+   */
+  async *fetchTransactions(after: Date, before: Date): AsyncGenerator<FinanceLine[]> {
+    if (this.isSandbox) return;
+    const latest = new Date(Date.now() - 3 * 60_000);
+    const to = before.getTime() > latest.getTime() ? latest : before;
+    if (to.getTime() <= after.getTime()) return;
+
+    let nextToken: string | undefined;
+    do {
+      const res: { payload?: { transactions?: RawTransaction[]; nextToken?: string } } =
+        await this.request("/finances/2024-06-19/transactions", {
+          query: nextToken
+            ? { nextToken }
+            : {
+                postedAfter: after.toISOString(),
+                postedBefore: to.toISOString(),
+                marketplaceId: this.marketplaceId,
+              },
+        });
+      const page = res.payload?.transactions ?? [];
+      if (page.length) yield page.map(toFinanceLine);
+      nextToken = res.payload?.nextToken;
+      if (nextToken) await sleep(2_100);
+    } while (nextToken);
   }
 
   /* ------------------------------------------------------ catalog images -- */

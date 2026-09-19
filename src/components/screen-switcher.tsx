@@ -7,7 +7,7 @@ import { useEffect, useRef } from "react";
 import { PageLoader } from "@/components/ui";
 import { stripBasePath } from "@/lib/base-path";
 import { ordersViewKey, useOrdersCache, useOrdersNav } from "@/lib/stores/orders-cache";
-import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
+import { peekCurrentDashboard } from "@/lib/stores/dashboard-cache";
 import { resolveScreen, screenFromPath, useScreenNav } from "@/lib/stores/screen-nav";
 
 // Only pulled when an override actually activates, so /settings and friends do
@@ -108,7 +108,7 @@ export function ScreenSwitcher({ children }: { children: React.ReactNode }) {
   }
 
   if (override === "dashboard" && resolved === "dashboard") {
-    const view = useDashboardCache.getState().peek(useDashboardNav.getState().range);
+    const view = peekCurrentDashboard();
     if (view) return <DashboardWorkspace initialView={view} />;
   }
 

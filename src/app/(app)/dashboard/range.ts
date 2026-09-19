@@ -15,6 +15,19 @@ export function isRangePreset(v: string | undefined): v is RangePreset {
   return !!v && (RANGE_PRESETS as readonly string[]).includes(v);
 }
 
+/** Which date puts money in a period: the day it moved, or the day the order was placed. */
+export type Basis = "paid" | "ordered";
+export const DEFAULT_BASIS: Basis = "paid";
+
+export function isBasis(v: string | undefined): v is Basis {
+  return v === "paid" || v === "ordered";
+}
+
+/** Cache key for one range on one basis. */
+export function dashKey(range: RangePreset, basis: Basis): string {
+  return `${range}|${basis}`;
+}
+
 export function rangeStart(preset: RangePreset): Date {
   if (preset === "all") return new Date("2000-01-01");
   const days = preset === "7d" ? 7 : preset === "30d" ? 30 : 90;

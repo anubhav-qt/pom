@@ -350,6 +350,20 @@ export const returns = pgTable(
     restocked: boolean("restocked").notNull().default(false),
     conditionNote: text("condition_note"),
 
+    /** What the marketplace refunded the customer for this return. */
+    refundAmount: numeric("refund_amount", { precision: 12, scale: 2 }),
+    /** Return-shipping label cost Amazon billed (or will bill) us for. */
+    labelCost: numeric("label_cost", { precision: 12, scale: 2 }),
+    /** Marketplace resolution verbatim: RefundAtFirstScan, StandardRefund, Replacement… */
+    resolution: text("resolution"),
+    /** When the customer raised the return on the marketplace. */
+    requestedAt: timestamp("requested_at", { withTimezone: true }),
+    /**
+     * Our decision once the return is dealt with: reshelved, damaged,
+     * written_off (never came back) or claim_raised. Null while it is open.
+     */
+    outcome: text("outcome"),
+
     raw: jsonb("raw"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -358,6 +372,76 @@ export const returns = pgTable(
     index("returns_received_idx").on(t.receivedAt),
   ],
 );
+
+/* -------------------------------------------------------------------------- */
+/* Money                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One row per Amazon Finances transaction (API v2024-06-19), split into the
+ * buckets the Finance screen reports on. `total` is Amazon's own figure; the
+ * buckets are carved out of it, and whatever is left over stays in the
+ * remainder, so a row always adds up to what Amazon says it is.
+ *
+ * Deferred money is listed twice by Amazon: once as DEFERRED, later as
+ * DEFERRED_RELEASED (the same row after release) plus a fresh RELEASED row on
+ * the day it is paid. Anything that sums money must skip DEFERRED_RELEASED.
+ */
+export const financeTransactions = pgTable(
+  "finance_transactions",
+  {
+    transactionId: text("transaction_id").primaryKey(),
+    channelAccountId: integer("channel_account_id")
+      .notNull()
+      .references(() => channelAccounts.id, { onDelete: "cascade" }),
+    /** Shipment, Refund, ServiceFee, ProductAdsPayment, Transfer, Adjustment… */
+    type: text("type").notNull(),
+    /** DEFERRED, RELEASED or DEFERRED_RELEASED. */
+    status: text("status").notNull(),
+    description: text("description"),
+    postedAt: timestamp("posted_at", { withTimezone: true }).notNull(),
+    externalOrderId: text("external_order_id"),
+    /** Amazon's payout group; the RELEASED lines of a group add up to its payout. */
+    groupId: text("group_id"),
+    /** On a RELEASED row: the DEFERRED row it replaces. */
+    deferredId: text("deferred_id"),
+
+    total: numeric("total", { precision: 12, scale: 2 }).notNull(),
+    principal: numeric("principal", { precision: 12, scale: 2 }).notNull().default("0"),
+    tax: numeric("tax", { precision: 12, scale: 2 }).notNull().default("0"),
+    promo: numeric("promo", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** TCS + TDS withheld. */
+    tcsTds: numeric("tcs_tds", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** Closing fee, commission and other Amazon fees (not postage). */
+    fees: numeric("fees", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** Easy Ship / merchant postage and its refunds. */
+    postage: numeric("postage", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** What Amazon claws back from us when it refunds a customer. */
+    refundCommission: numeric("refund_commission", { precision: 12, scale: 2 }).notNull().default("0"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("finance_tx_order_idx").on(t.externalOrderId),
+    index("finance_tx_posted_idx").on(t.postedAt),
+    index("finance_tx_group_idx").on(t.groupId),
+    index("finance_tx_deferred_idx").on(t.deferredId),
+  ],
+);
+
+/**
+ * What an order cost us, and a note — the two things Amazon cannot tell us.
+ * Filled in by hand on the Finance ledger; profit = Amazon net − this cost.
+ */
+export const orderFinance = pgTable("order_finance", {
+  orderId: integer("order_id")
+    .primaryKey()
+    .references(() => orders.id, { onDelete: "cascade" }),
+  costPrice: numeric("cost_price", { precision: 12, scale: 2 }),
+  note: text("note"),
+  updatedBy: integer("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /* -------------------------------------------------------------------------- */
 /* Picklists and manifests                                                    */

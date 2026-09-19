@@ -55,6 +55,11 @@ export interface CanonicalReturn {
   awb?: string | null;
   status?: string | null;
   expectedAt?: Date | null;
+  /** When the customer raised it. */
+  requestedAt?: Date | null;
+  refundAmount?: number | null;
+  labelCost?: number | null;
+  resolution?: string | null;
   raw: unknown;
 }
 

@@ -29,6 +29,13 @@
       "when": 1789800942813,
       "tag": "0003_label_print_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789821283269,
+      "tag": "0004_finance_and_returns",
+      "breakpoints": true
     }
   ]
 }

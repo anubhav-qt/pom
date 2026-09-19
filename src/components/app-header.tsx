@@ -13,7 +13,7 @@ import {
   useOrdersCache,
   useOrdersNav,
 } from "@/lib/stores/orders-cache";
-import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
+import { dashboardUrl, peekCurrentDashboard, useDashboardNav } from "@/lib/stores/dashboard-cache";
 import { useHeaderCounts } from "@/lib/stores/header-counts";
 import { resolveScreen, screenFromPath, screenHref, useScreenNav, type Screen } from "@/lib/stores/screen-nav";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
@@ -173,10 +173,14 @@ export function AppHeader({
 /* Band 1 — Dashboard / Orders switch                                         */
 /* -------------------------------------------------------------------------- */
 
-/** `/dashboard` for the default range, `?range=` otherwise, matching page.tsx. */
+/** `/dashboard` with only the non-default range and basis in the query, matching page.tsx. */
 function dashboardHref(): string {
-  const { range } = useDashboardNav.getState();
-  return range === "30d" ? "/dashboard" : `/dashboard?range=${range}`;
+  const { range, basis } = useDashboardNav.getState();
+  return dashboardUrl(range, basis);
+}
+
+function isReturnsPath(pathname: string): boolean {
+  return pathname === "/returns" || pathname.startsWith("/returns/");
 }
 
 function ordersHref(): string {
@@ -197,7 +201,7 @@ function targetIsCached(screen: Screen): boolean {
       useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
     );
   }
-  return useDashboardCache.getState().peek(useDashboardNav.getState().range) !== null;
+  return peekCurrentDashboard() !== null;
 }
 
 /**
@@ -214,9 +218,10 @@ function MobileScreenMenu({
   routeScreen: Screen | null;
 }) {
   const router = useRouter();
+  const onReturns = isReturnsPath(usePathname());
 
   function select(screen: Screen) {
-    if (screen === effectiveScreen) return;
+    if (screen === effectiveScreen && !onReturns) return;
     // App-relative. Raw pushState needs the basePath added by hand, but
     // router.push adds it itself, so it is given this unprefixed form.
     const href = hrefFor(screen);
@@ -249,11 +254,19 @@ function MobileScreenMenu({
         </span>
       }
       options={[
-        { id: "dashboard", label: "Dashboard" },
+        { id: "dashboard", label: "Finance" },
         { id: "orders", label: "Orders" },
+        { id: "returns", label: "Returns" },
       ]}
-      activeId={effectiveScreen ?? "orders"}
-      onSelect={(id) => select(id as Screen)}
+      activeId={onReturns ? "returns" : (effectiveScreen ?? "orders")}
+      onSelect={(id) => {
+        if (id === "returns") {
+          useScreenNav.getState().setOverride(null);
+          router.push("/returns");
+          return;
+        }
+        select(id as Screen);
+      }}
     />
   );
 }
@@ -268,9 +281,14 @@ function AppSwitch({
   /** Mobile reaches the printer from the Orders bottom bar, not from here. */
   hidePrinter?: boolean;
 }) {
-  const items: { screen: Screen; label: string }[] = [
-    { screen: "dashboard", label: "Dashboard" },
+  const pathname = usePathname();
+  const onReturns = isReturnsPath(pathname);
+  // Returns is an ordinary route, not a cached screen swap, so it sits beside
+  // the screens in the switch without joining the `Screen` machinery.
+  const items: { screen: Screen | "returns"; label: string }[] = [
+    { screen: "dashboard", label: "Finance" },
     { screen: "orders", label: "Orders" },
+    { screen: "returns", label: "Returns" },
     ...(hidePrinter ? [] : [{ screen: "pdf-printer" as Screen, label: "PDF printer" }]),
   ];
 
@@ -309,12 +327,19 @@ function AppSwitch({
       style={{ background: "var(--panel-2)", border: "1px solid var(--border)" }}
     >
       {items.map((item) => {
-        const active = effectiveScreen === item.screen;
+        const isReturns = item.screen === "returns";
+        const active = isReturns ? onReturns : effectiveScreen === item.screen;
         return (
           <Link
             key={item.screen}
-            href={screenHref(item.screen)}
-            onClick={(e) => onNav(e, item.screen)}
+            href={isReturns ? "/returns" : screenHref(item.screen as Screen)}
+            onClick={(e) => {
+              if (isReturns) {
+                useScreenNav.getState().setOverride(null);
+                return;
+              }
+              onNav(e, item.screen as Screen);
+            }}
             className={cn(
               "rounded-[7px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
               !active && "muted hover:text-[var(--text)]",

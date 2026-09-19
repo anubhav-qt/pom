@@ -83,13 +83,20 @@ Re-check with `npm run tsx scripts/probe-amazon-notifications.ts`.
 
 ---
 
-## 4. Amazon returns via the Reports API
+## 4. Amazon returns and money — done (Sep 2026)
 
-Not implemented. SP-API exposes MFN return data only through the async Reports
-API (`GET_XML_RETURNS_DATA_BY_RETURN_DATE`): create report → poll → download →
-parse. Needs a persisted `report_jobs` table so a serverless invocation can
-create on one run and resume polling on a later one. Cancellations and RTO
-already arrive through order-status changes, which covers the day-to-day case.
+Customer returns now load from the Returns report
+(`GET_FLAT_FILE_RETURNS_DATA_BY_RETURN_DATE`, up to 60 days per report) into the
+`returns` table on every sync, and the Returns screen (`/returns`) is on.
+Money loads from the Finances API v2024-06-19 into `finance_transactions`
+(Finances v0 was retired 28 Aug 2026). Amazon lists deferred money twice; sums
+must skip `DEFERRED_RELEASED` rows. A settlement group's RELEASED lines add up
+to its payout. `npm run backfill:finance` loads history once. The Finance screen
+(`/dashboard`) has an overview and an editable order ledger with CSV/Excel export.
+
+Not built yet: the account-health metrics (Seller Performance report) and
+Sales & Traffic (sessions, conversion) reports, both readable with the current
+roles.
 
 ---
 
