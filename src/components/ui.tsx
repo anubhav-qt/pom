@@ -162,3 +162,33 @@ export function Stat({
     </div>
   );
 }
+
+/**
+ * The phone stand-in for a row of `Stat` cards: the same numbers in one slim
+ * scrollable strip, so a screen's headline figures cost one line of height
+ * instead of several rows of cards. Use it beside a `hidden sm:grid` of Stats.
+ */
+export function StatStrip({
+  items,
+}: {
+  items: { label: string; value: string | number; tone?: "danger" | "warn" | "ok" }[];
+}) {
+  return (
+    <div className="panel flex gap-5 overflow-x-auto px-4 py-2.5 sm:hidden">
+      {items.map((it) => (
+        <div key={it.label} className="shrink-0">
+          <div className="muted whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider">{it.label}</div>
+          <div
+            className="whitespace-nowrap text-[15px] font-semibold tabular-nums"
+            style={{
+              color:
+                it.tone === "danger" ? "var(--danger)" : it.tone === "warn" ? "var(--warn)" : it.tone === "ok" ? "var(--ok)" : undefined,
+            }}
+          >
+            {it.value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

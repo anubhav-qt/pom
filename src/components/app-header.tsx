@@ -15,7 +15,7 @@ import {
   useOrdersNav,
 } from "@/lib/stores/orders-cache";
 import { dashboardUrl, peekCurrentDashboard, useDashboardNav } from "@/lib/stores/dashboard-cache";
-import { peekCurrentReturns } from "@/lib/stores/returns-cache";
+import { peekCurrentReturns, useReturnsNav } from "@/lib/stores/returns-cache";
 import { useHeaderCounts } from "@/lib/stores/header-counts";
 import { resolveScreen, screenFromPath, screenHref, useScreenNav, type Screen } from "@/lib/stores/screen-nav";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
@@ -92,6 +92,9 @@ export function AppHeader({
   // is showing.
   const effectiveScreen = resolveScreen(pathname, override);
   const onOrders = effectiveScreen === "orders";
+  const onReturns = effectiveScreen === "returns";
+  // Both have the rail band under the header, and the search box in it.
+  const hasRail = onOrders || onReturns;
 
   // Mirrored into a store so the mobile category dropdown (rendered in the
   // page body, below the header) can read the same real counts instead of
@@ -140,7 +143,7 @@ export function AppHeader({
             here, right before Sync/avatar, filling the width the switch
             would otherwise take. Gone again from `md` so the two never both
             show at once. */}
-        {onOrders ? (
+        {hasRail ? (
           <div className="flex-1 md:hidden">
             <HeaderSearch compact />
           </div>
@@ -168,7 +171,7 @@ export function AppHeader({
       {/* ---------------------------------------------------------- band 3 -- */}
       {/* Empty slot the Orders sub-status tabs (`RailTabs`) portal into, so they
           sit inside the header: attached to band 2, full width, same look. */}
-      {onOrders ? <div id={RAIL_SLOT_ID} /> : null}
+      {hasRail ? <div id={RAIL_SLOT_ID} /> : null}
     </header>
   );
 }
@@ -654,10 +657,19 @@ export function useOrderTabs() {
  */
 export function HeaderSearch({ compact }: { compact?: boolean }) {
   const params = useSearchParams();
+  const pathname = usePathname();
+  const override = useScreenNav((s) => s.override);
+  const onReturns = resolveScreen(pathname, override) === "returns";
+  const returnsQuery = useReturnsNav((s) => s.query);
+  const current = onReturns ? returnsQuery : (params.get("q") ?? "");
 
   function onSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const value = String(new FormData(e.currentTarget).get("q") ?? "").trim();
+    if (onReturns) {
+      useReturnsNav.getState().setQuery(value);
+      return;
+    }
     useOrdersNav.getState().go({ ...queryToParams(params.toString()), q: value || undefined });
   }
 
@@ -679,10 +691,10 @@ export function HeaderSearch({ compact }: { compact?: boolean }) {
         <input
           id="header-search"
           size={1}
-          key={params.get("q") ?? ""}
+          key={current}
           name="q"
-          defaultValue={params.get("q") ?? ""}
-          placeholder="Search order ID, buyer, pincode, SKU…"
+          defaultValue={current}
+          placeholder={onReturns ? "Search item, reason, order ID…" : "Search order ID, buyer, pincode, SKU…"}
           className="search-input"
         />
         <span className="search-divider" aria-hidden />

@@ -4,7 +4,7 @@ import { LoadingOverlay } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 
 import { Segmented } from "@/components/segmented";
-import { Empty, Stat } from "@/components/ui";
+import { Empty, Stat, StatStrip } from "@/components/ui";
 import { useOrdersCache } from "@/lib/stores/orders-cache";
 import { dashKey, useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
 import { stripBasePath, withBasePath } from "@/lib/base-path";
@@ -137,7 +137,7 @@ export function DashboardWorkspace({
   }, [range, basis, syncStamp]);
 
   return (
-    <div className="relative space-y-6">
+    <div className="relative space-y-6 pb-16 sm:pb-0">
       <div className="flex flex-wrap items-center gap-3">
         <Segmented
           label="Finance view"
@@ -196,7 +196,24 @@ function Overview({ view }: { view: DashboardView }) {
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <StatStrip
+        items={[
+          { label: "Received", value: compactMoney.format(f.net), tone: "ok" },
+          { label: "Paid to bank", value: compactMoney.format(f.paidOut) },
+          { label: "Held", value: compactMoney.format(f.onHold) },
+          {
+            label: "Refunded",
+            value: compactMoney.format(f.refunds),
+            tone: refundPct >= 25 ? "danger" : refundPct >= 12 ? "warn" : undefined,
+          },
+          {
+            label: "Profit",
+            value: f.ordersWithCost > 0 ? compactMoney.format(f.profit) : "—",
+            tone: f.ordersWithCost > 0 ? (f.profit < 0 ? "danger" : "ok") : undefined,
+          },
+        ]}
+      />
+      <div className="hidden grid-cols-2 gap-3 sm:grid lg:grid-cols-5">
         <Stat label="Received" value={compactMoney.format(f.net)} tone="ok" hint="After all deductions" />
         <Stat label="Paid to bank" value={compactMoney.format(f.paidOut)} />
         <Stat label="Held by Amazon" value={compactMoney.format(f.onHold)} />

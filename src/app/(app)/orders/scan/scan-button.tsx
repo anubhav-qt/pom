@@ -29,7 +29,7 @@ export function ScanBarcodeButton({
         aria-haspopup="dialog"
       >
         <ScanIcon />
-        Scan Barcode
+        Scan
       </button>
 
       {open ? (
