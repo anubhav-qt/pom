@@ -124,11 +124,11 @@ export function OrdersWorkspace({
   if (data.kind === "planner") {
     return (
       <div className={`relative space-y-5 ${busy} sm:-mt-[37px]`}>
-        {loading ? <LoadingOverlay /> : null}
         <MobileOrdersCrumb />
         <OrdersToolbar activeView="planner" activeChannel={data.channel} query={data.query} />
         <RestockPlanner initialPlan={data.plan} />
         <MobileOrdersNav activeView="planner" activeChannel={data.channel} query={data.query} />
+        {loading ? <LoadingOverlay /> : null}
       </div>
     );
   }
@@ -165,7 +165,6 @@ export function OrdersWorkspace({
 
     return (
       <div className={`relative space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
-        {loading ? <LoadingOverlay /> : null}
         <MobileOrdersCrumb
           sub={sub}
           staticSubLabel={data.drillStatus ? STATUS_LABELS[data.drillStatus] : undefined}
@@ -183,6 +182,7 @@ export function OrdersWorkspace({
           <PickList rows={data.rows} category={data.category} />
         )}
         <MobileOrdersNav activeView="collection" activeChannel={data.channel} query={data.query} />
+        {loading ? <LoadingOverlay /> : null}
       </div>
     );
   }
@@ -192,7 +192,6 @@ export function OrdersWorkspace({
 
     return (
       <div className={`relative space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
-        {loading ? <LoadingOverlay /> : null}
         <MobileOrdersCrumb
           sub={{
             activeId: data.resolved ? "completed" : "pending",
@@ -211,13 +210,13 @@ export function OrdersWorkspace({
           onResolvedChange={setResolved}
         />
         <MobileOrdersNav activeView={null} query="" />
+        {loading ? <LoadingOverlay /> : null}
       </div>
     );
   }
 
   return (
     <div className={`relative space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
-        {loading ? <LoadingOverlay /> : null}
       <MobileOrdersCrumb
         sub={
           data.isQueueView && data.counts
@@ -257,6 +256,8 @@ export function OrdersWorkspace({
       <OrderTable rows={data.rows} activeTab={data.activeTab} onChanged={refresh} />
 
       <MobileOrdersNav activeView="list" activeChannel={data.channel} query={data.query} />
+
+      {loading ? <LoadingOverlay /> : null}
     </div>
   );
 }

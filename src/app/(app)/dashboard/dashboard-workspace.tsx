@@ -114,7 +114,6 @@ export function DashboardWorkspace({ initialView }: { initialView: DashboardView
 
   return (
     <div className="relative space-y-6">
-      {loading ? <LoadingOverlay /> : null}
       <div className="flex flex-wrap items-center justify-end gap-3">
         <RangePicker active={range} onSelect={(next) => go(next)} />
       </div>
@@ -164,6 +163,7 @@ export function DashboardWorkspace({ initialView }: { initialView: DashboardView
           <TopSkuBars items={topSkus} format="money" />
         </div>
       </div>
+      {loading ? <LoadingOverlay /> : null}
     </div>
   );
 }
