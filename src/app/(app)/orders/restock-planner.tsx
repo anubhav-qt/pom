@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import { Empty } from "@/components/ui";
+import { Empty, Spinner } from "@/components/ui";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Modal } from "@/components/modal";
 import { colorSwatch } from "@/lib/variant-title";
@@ -175,21 +175,21 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
             <span className="muted text-[11px]">built {relTime(generatedAt)}</span>
           ) : null}
           <button className="btn text-xs" disabled={busy !== null} onClick={() => setConfirmingReset(true)}>
-            {busy === "reset" ? "Rebuilding…" : "Reset from latest sync"}
+            {busy === "reset" ? <Spinner size="1rem" color="currentColor" /> : "Reset from latest sync"}
           </button>
           <button
             className="btn btn-primary text-xs"
             disabled={busy !== null || t.buy === 0}
             onClick={() => exportSheet("jpeg")}
           >
-            {busy === "jpeg" ? "…" : "Buy sheet JPEG"}
+            {busy === "jpeg" ? <Spinner size="1rem" color="currentColor" /> : "Buy sheet JPEG"}
           </button>
           <button
             className="btn btn-primary text-xs"
             disabled={busy !== null || t.buy === 0}
             onClick={() => exportSheet("pdf")}
           >
-            {busy === "pdf" ? "…" : "PDF"}
+            {busy === "pdf" ? <Spinner size="1rem" color="currentColor" /> : "PDF"}
           </button>
         </div>
 
@@ -368,21 +368,21 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
         >
           <div className="flex items-center gap-2">
             <button className="btn flex-1 text-xs" disabled={busy !== null} onClick={() => setConfirmingReset(true)}>
-              {busy === "reset" ? "Rebuilding…" : "Reset"}
+              {busy === "reset" ? <Spinner size="1rem" color="currentColor" /> : "Reset"}
             </button>
             <button
               className="btn btn-primary flex-1 text-xs"
               disabled={busy !== null || t.buy === 0}
               onClick={() => exportSheet("jpeg")}
             >
-              {busy === "jpeg" ? "…" : "JPEG"}
+              {busy === "jpeg" ? <Spinner size="1rem" color="currentColor" /> : "JPEG"}
             </button>
             <button
               className="btn btn-primary flex-1 text-xs"
               disabled={busy !== null || t.buy === 0}
               onClick={() => exportSheet("pdf")}
             >
-              {busy === "pdf" ? "…" : "PDF"}
+              {busy === "pdf" ? <Spinner size="1rem" color="currentColor" /> : "PDF"}
             </button>
           </div>
         </div>

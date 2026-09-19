@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { CHANNEL_META } from "@/channels";
-import { ChannelTag, Empty } from "@/components/ui";
+import { ChannelTag, Empty, Spinner } from "@/components/ui";
 import { ENABLED_CHANNELS, FEATURES } from "@/config/features";
 import type { Channel } from "@/db/schema";
 import { withBasePath } from "@/lib/base-path";
@@ -314,7 +314,7 @@ function SyncControl({ accountId, onSettled }: { accountId: number; onSettled: (
   if (!runId || !progress) {
     return (
       <button className="btn text-xs" disabled={starting} onClick={start}>
-        {starting ? "Starting…" : "Sync now"}
+        {starting ? <Spinner size="1rem" color="currentColor" /> : "Sync now"}
       </button>
     );
   }
@@ -337,7 +337,7 @@ function SyncControl({ accountId, onSettled }: { accountId: number; onSettled: (
               ? `Synced ${progress.itemsWritten}`
               : percent !== null
                 ? `Fetching ${percent}%`
-                : "Fetching order list…"}
+                : <Spinner size="1rem" color="currentColor" />}
         </span>
       </div>
 
@@ -438,7 +438,7 @@ export function MeeshoImport({ accounts }: { accounts: { id: number; label: stri
         </div>
 
         <button className="btn btn-primary" disabled={busy}>
-          {busy ? "Importing…" : "Import"}
+          {busy ? <Spinner size="1rem" color="currentColor" /> : "Import"}
         </button>
 
         {result ? (

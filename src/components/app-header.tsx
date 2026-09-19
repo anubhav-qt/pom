@@ -17,7 +17,7 @@ import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache
 import { useHeaderCounts } from "@/lib/stores/header-counts";
 import { resolveScreen, screenFromPath, screenHref, useScreenNav, type Screen } from "@/lib/stores/screen-nav";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
-import { STATUS_LABELS } from "@/components/ui";
+import { STATUS_LABELS, Spinner } from "@/components/ui";
 import { withBasePath } from "@/lib/base-path";
 import { cn } from "@/lib/utils";
 
@@ -485,7 +485,7 @@ function SyncNowButton({
             : "linear-gradient(135deg, var(--accent), var(--accent-2))",
       }}
     >
-      <RefreshCw className={cn("h-3.5 w-3.5", state === "syncing" && "animate-spin")} />
+      {state === "syncing" ? <Spinner size="0.9rem" color="#fff" /> : <RefreshCw className="h-3.5 w-3.5" />}
       <span className="hidden sm:inline">
         {state === "syncing" ? "Syncing…" : state === "error" ? "Sync failed" : "Sync now"}
       </span>

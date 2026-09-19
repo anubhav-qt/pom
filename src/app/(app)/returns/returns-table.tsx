@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useState, useTransition } from "react";
 
-import { ChannelTag, Empty } from "@/components/ui";
+import { ChannelTag, Empty, Spinner } from "@/components/ui";
 import type { Channel } from "@/db/schema";
 import { dayLabel } from "@/lib/utils";
 
@@ -162,7 +162,7 @@ export function ReturnsTable({ rows, showAll }: { rows: ReturnRow[]; showAll: bo
                             placeholder="Condition note (e.g. box torn, item fine)"
                           />
                           <button className="btn btn-primary" disabled={pending}>
-                            {pending ? "Saving…" : "Confirm"}
+                            {pending ? <Spinner size="1rem" color="currentColor" /> : "Confirm"}
                           </button>
                         </form>
                       </td>

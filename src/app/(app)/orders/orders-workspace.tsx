@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { STATUS_LABELS, Stat } from "@/components/ui";
+import { LoadingOverlay, STATUS_LABELS, Stat } from "@/components/ui";
 import {
   invalidateOrderViews,
   ordersViewKey,
@@ -119,11 +119,12 @@ export function OrdersWorkspace({
       .catch(() => setLoading(false));
   }
 
-  const busy = loading ? "opacity-60 transition-opacity" : "transition-opacity";
+  const busy = "";
 
   if (data.kind === "planner") {
     return (
       <div className={`space-y-5 ${busy} sm:-mt-[37px]`}>
+        {loading ? <LoadingOverlay /> : null}
         <MobileOrdersCrumb />
         <OrdersToolbar activeView="planner" activeChannel={data.channel} query={data.query} />
         <RestockPlanner initialPlan={data.plan} />
@@ -164,6 +165,7 @@ export function OrdersWorkspace({
 
     return (
       <div className={`space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
+        {loading ? <LoadingOverlay /> : null}
         <MobileOrdersCrumb
           sub={sub}
           staticSubLabel={data.drillStatus ? STATUS_LABELS[data.drillStatus] : undefined}
@@ -190,6 +192,7 @@ export function OrdersWorkspace({
 
     return (
       <div className={`space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
+        {loading ? <LoadingOverlay /> : null}
         <MobileOrdersCrumb
           sub={{
             activeId: data.resolved ? "completed" : "pending",
@@ -214,6 +217,7 @@ export function OrdersWorkspace({
 
   return (
     <div className={`space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
+        {loading ? <LoadingOverlay /> : null}
       <MobileOrdersCrumb
         sub={
           data.isQueueView && data.counts
