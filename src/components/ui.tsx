@@ -90,10 +90,16 @@ export function CenteredSpinner({ className }: { className?: string }) {
   );
 }
 
-/** The spinner over the whole screen while a view is fetched; lets clicks through. */
+/**
+ * Covers the screen it sits in (the parent must be `relative`) while a view is
+ * fetched, so the previous screen never shows through behind the spinner.
+ */
 export function LoadingOverlay() {
   return (
-    <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center">
+    <div
+      className="absolute inset-0 z-30 !m-0 flex items-start justify-center pt-28"
+      style={{ background: "#fff" }}
+    >
       <Spinner size="3rem" />
     </div>
   );
