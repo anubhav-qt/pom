@@ -448,7 +448,7 @@ export function ScanModal({
                 onClick={() => checkIn(true)}
                 disabled={busy}
               >
-                Sellable, restock
+                {busy ? <Spinner size="1rem" color="currentColor" /> : "Sellable, restock"}
               </button>
               <button
                 type="button"
@@ -456,7 +456,7 @@ export function ScanModal({
                 onClick={() => checkIn(false)}
                 disabled={busy}
               >
-                Damaged, don&rsquo;t restock
+                {busy ? <Spinner size="1rem" color="currentColor" /> : "Damaged, don't restock"}
               </button>
             </div>
             <input

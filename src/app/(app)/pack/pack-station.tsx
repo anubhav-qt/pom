@@ -126,7 +126,7 @@ export function PackStation({ initial }: { initial: { remaining: number; packedT
             }}
           />
           <button className="btn" onClick={submitCode} disabled={pending}>
-            Look up
+            {pending ? <Spinner size="1rem" color="currentColor" /> : "Look up"}
           </button>
         </div>
       </div>

@@ -129,7 +129,7 @@ export function ChannelAccounts({
                       disabled={pending}
                       onClick={() => run(() => setAccountActive(account.id, !account.active))}
                     >
-                      {account.active ? "Pause" : "Resume"}
+                      {pending ? <Spinner size="1rem" color="currentColor" /> : account.active ? "Pause" : "Resume"}
                     </button>
                     <button
                       className="btn text-xs text-rose-500"
@@ -144,7 +144,7 @@ export function ChannelAccounts({
                         run(() => deleteChannelAccount(account.id));
                       }}
                     >
-                      Remove
+                      {pending ? <Spinner size="1rem" color="currentColor" /> : "Remove"}
                     </button>
                   </>
                 ) : null}
@@ -222,7 +222,7 @@ export function ChannelAccounts({
           ) : null}
 
           <button className="btn btn-primary" disabled={pending}>
-            Save account
+            {pending ? <Spinner size="1rem" color="currentColor" /> : "Save account"}
           </button>
         </form>
       ) : null}

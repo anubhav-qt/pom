@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { SubmitButton } from "@/components/submit-button";
 import { createSession, requirePendingUser } from "@/lib/auth";
 import { verifyMfaToken } from "@/lib/mfa";
 
@@ -47,9 +48,7 @@ export default async function MfaVerifyPage({
 
         {error ? <p className="text-sm text-rose-500">That code was not correct.</p> : null}
 
-        <button type="submit" className="btn btn-primary w-full">
-          Verify
-        </button>
+        <SubmitButton className="w-full">Verify</SubmitButton>
       </form>
     </main>
   );

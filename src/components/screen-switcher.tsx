@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
+import { PageLoader } from "@/components/ui";
 import { stripBasePath } from "@/lib/base-path";
 import { ordersViewKey, useOrdersCache, useOrdersNav } from "@/lib/stores/orders-cache";
 import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
@@ -13,15 +14,15 @@ import { resolveScreen, screenFromPath, useScreenNav } from "@/lib/stores/screen
 // not carry the orders workspace in their first load.
 const OrdersWorkspace = dynamic(
   () => import("@/app/(app)/orders/orders-workspace").then((m) => m.OrdersWorkspace),
-  { ssr: false },
+  { ssr: false, loading: () => <PageLoader /> },
 );
 const PdfPrinter = dynamic(
   () => import("@/app/(app)/pdf-printer/pdf-printer").then((m) => m.PdfPrinter),
-  { ssr: false },
+  { ssr: false, loading: () => <PageLoader /> },
 );
 const DashboardWorkspace = dynamic(
   () => import("@/app/(app)/dashboard/dashboard-workspace").then((m) => m.DashboardWorkspace),
-  { ssr: false },
+  { ssr: false, loading: () => <PageLoader /> },
 );
 
 /**

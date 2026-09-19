@@ -4,7 +4,7 @@ import { ItemTitle } from "@/components/item-title";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
-import { ChannelTag, Empty, StatusBadge } from "@/components/ui";
+import { ChannelTag, Empty, StatusBadge, Spinner } from "@/components/ui";
 import { FEATURES } from "@/config/features";
 import { ImageLightbox } from "@/components/image-lightbox";
 import type { Channel, FulfilmentState, OrderStatus } from "@/db/schema";
@@ -215,6 +215,7 @@ export function OrderTable({
               Dismiss
             </button>
           ) : null}
+          {pending ? <Spinner size="1.4rem" /> : null}
         </div>
       ) : null}
 
