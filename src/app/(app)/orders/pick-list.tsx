@@ -1,5 +1,6 @@
 "use client";
 
+import { ItemTitle } from "@/components/item-title";
 import { useState } from "react";
 
 import { Empty, STATUS_TONE } from "@/components/ui";
@@ -202,9 +203,7 @@ function PickCard({
         </span>
         <div className="flex min-w-0 flex-1 flex-col">
           {/* NAME is the headline. */}
-          <div className="line-clamp-2 text-[13.5px] font-semibold leading-snug">
-            {row.title ?? <span className="muted italic">Unnamed product</span>}
-          </div>
+          <ItemTitle title={row.title} empty="Unnamed product" nameClassName="text-[13.5px] font-semibold leading-snug" />
           <div className="muted mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
             <span className="font-mono">{row.sku}</span>
             {showUnmappedBadge ? (

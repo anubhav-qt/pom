@@ -1,5 +1,6 @@
 "use client";
 
+import { ItemTitle } from "@/components/item-title";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
@@ -160,9 +161,7 @@ export function CancellationsPanel({
                     <div className="space-y-1.5">
                       {r.items.map((it, i) => (
                         <div key={i}>
-                          <div className="line-clamp-2 text-[13px] font-medium leading-snug">
-                            {it.title ?? <span className="muted italic">Unnamed item</span>}
-                          </div>
+                          <ItemTitle title={it.title} />
                           <div className="muted mt-0.5 text-[11px]">
                             <span className="tabular-nums">{it.quantity}×</span>{" "}
                             <span className="font-mono">{it.sku}</span>
@@ -319,9 +318,7 @@ export function CancellationCard({
       <div className="space-y-1">
         {record.items.map((it, i) => (
           <div key={i} className="text-[13px] leading-snug">
-            <span className="font-medium">
-              {it.title ?? <span className="muted italic">Unnamed item</span>}
-            </span>
+            <ItemTitle title={it.title} />
             <span className="muted">
               {" "}
               · {it.quantity}× <span className="font-mono">{it.sku}</span>

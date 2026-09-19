@@ -47,6 +47,7 @@ export async function buildLabelSheets(
 
   if (labels.length === 0) throw new NoLabelsError(reports);
 
+  if (options?.stamp !== false) await measureStampAreas(files, labels);
   await measureLayouts(files, labels, options?.stamp !== false);
 
   const seen = new Map<string, number>();

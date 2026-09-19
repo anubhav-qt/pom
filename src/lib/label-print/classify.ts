@@ -30,7 +30,7 @@ function meeshoOrderId(text: string): string | null {
 const SIZE_RE = /^(?:(?:[2-9]|10)?x{0,1}s|xs|s|m|l|(?:[2-9]|10)?xl|xxl|xxxl|free\s*size|one\s*size|os|\d{1,3}(?:\.\d)?(?:\s*(?:cm|in|inch|years?|yrs?|months?|m))?)$/i;
 
 /** "Alpha, 2XL, Regular, Wine Maroon" -> size 2XL, colour Wine Maroon. */
-function variation(block: string): { size: string; color: string } {
+export function variation(block: string): { size: string; color: string } {
   const parts = block.split(",").map((x) => x.trim()).filter(Boolean);
   if (parts.length === 0) return { size: "-", color: "-" };
   const color = parts.length > 1 ? parts[parts.length - 1] : "-";

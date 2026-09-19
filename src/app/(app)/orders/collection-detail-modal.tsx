@@ -1,5 +1,6 @@
 "use client";
 
+import { ItemTitle } from "@/components/item-title";
 import { useEffect, useState } from "react";
 
 import { ImageLightbox } from "@/components/image-lightbox";
@@ -48,9 +49,7 @@ export function CollectionDetailModal({ row, onClose }: { row: PickRow; onClose:
               <Thumb src={row.imageUrl} alt={row.title ?? row.sku} />
             </button>
             <div className="min-w-0 flex-1">
-              <div className="text-[15px] font-semibold leading-snug" style={{ textWrap: "pretty" } as React.CSSProperties}>
-                {row.title ?? <span className="muted italic">Unnamed product</span>}
-              </div>
+              <ItemTitle title={row.title} empty="Unnamed product" nameClassName="text-[15px] font-semibold leading-snug" />
               <div className="muted mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                 <span className="font-mono">{row.sku}</span>
                 {row.asin ? <span className="font-mono">ASIN {row.asin}</span> : null}

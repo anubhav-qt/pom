@@ -1,5 +1,6 @@
 "use client";
 
+import { ItemTitle } from "@/components/item-title";
 import { useState } from "react";
 
 import { Modal } from "@/components/modal";
@@ -105,9 +106,7 @@ function CollectionSheetModal({ rows, onClose }: { rows: PickRow[]; onClose: () 
                     {i + 1}
                   </td>
                   <td>
-                    <div className="text-[13px] font-medium leading-snug">
-                      {r.title ?? <span className="muted italic">Unnamed product</span>}
-                    </div>
+                    <ItemTitle title={r.title} empty="Unnamed product" />
                     <div className="muted mt-0.5 font-mono text-[11px]">{r.sku}</div>
                   </td>
                   <td className="tabular-nums">{r.binLocation ?? "—"}</td>

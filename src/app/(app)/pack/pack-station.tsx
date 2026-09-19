@@ -1,5 +1,6 @@
 "use client";
 
+import { ItemTitle } from "@/components/item-title";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { ChannelTag } from "@/components/ui";
@@ -167,7 +168,7 @@ export function PackStation({ initial }: { initial: { remaining: number; packedT
                 </span>
                 <span className="flex-1">
                   <span className="font-mono text-sm">{item.sku}</span>
-                  {item.title ? <div className="muted text-xs">{item.title}</div> : null}
+                  {item.title ? <ItemTitle title={item.title} nameClassName="muted text-xs" /> : null}
                 </span>
                 {item.binLocation ? (
                   <span className="rounded bg-blue-500/10 px-2 py-1 text-sm font-semibold text-blue-600">
