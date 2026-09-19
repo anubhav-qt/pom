@@ -91,13 +91,13 @@ export function CenteredSpinner({ className }: { className?: string }) {
 }
 
 /**
- * Covers the screen it sits in (the parent must be `relative`) while a view is
+ * Covers the content area edge to edge (the parent must be `relative`, inside the page padding) while a view is
  * fetched, so the previous screen never shows through behind the spinner.
  */
 export function LoadingOverlay() {
   return (
     <div
-      className="absolute inset-0 z-30 !m-0 flex items-start justify-center pt-28"
+      className="absolute -bottom-8 -left-4 -right-4 top-0 z-20 !m-0 flex min-h-[calc(100dvh-113px)] items-start justify-center pt-28 sm:-left-6 sm:-right-6"
       style={{ background: "#fff" }}
     >
       <Spinner size="3rem" />
