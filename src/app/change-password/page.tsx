@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { SubmitButton } from "@/components/submit-button";
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
@@ -94,9 +95,7 @@ export default async function ChangePasswordPage({
           </p>
         ) : null}
 
-        <button type="submit" className="btn btn-primary w-full">
-          Save
-        </button>
+        <SubmitButton className="w-full">Save</SubmitButton>
       </form>
     </main>
   );

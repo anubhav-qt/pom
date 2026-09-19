@@ -90,16 +90,23 @@ export function CenteredSpinner({ className }: { className?: string }) {
   );
 }
 
+/** A white page below the header with the spinner at the centre of the viewport, for a screen that has not arrived yet. */
+export function PageLoader() {
+  return (
+    <div aria-busy="true" className="fixed inset-0 z-30 flex items-center justify-center bg-white">
+      <Spinner size="3rem" />
+    </div>
+  );
+}
+
 /**
- * Covers the content area edge to edge (the parent must be `relative`, inside the page padding) while a view is
- * fetched, so the previous screen never shows through behind the spinner.
+ * Covers the page (behind the header and breadcrumb) with the spinner at the
+ * centre of the viewport while a view is fetched, so the previous screen never
+ * shows through.
  */
 export function LoadingOverlay() {
   return (
-    <div
-      className="absolute -bottom-8 -left-4 -right-4 top-0 z-20 !m-0 flex min-h-[calc(100dvh-113px)] items-start justify-center pt-28 sm:-left-6 sm:-right-6"
-      style={{ background: "#fff" }}
-    >
+    <div aria-busy="true" className="fixed inset-0 z-20 flex items-center justify-center bg-white">
       <Spinner size="3rem" />
     </div>
   );

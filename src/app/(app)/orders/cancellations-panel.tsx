@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { ImageLightbox } from "@/components/image-lightbox";
-import { ChannelTag, StatusBadge } from "@/components/ui";
+import { ChannelTag, StatusBadge, Spinner } from "@/components/ui";
 import { Empty } from "@/components/ui";
 import type { OrderStatus } from "@/db/schema";
 import { dayLabel, money } from "@/lib/utils";
@@ -346,7 +346,7 @@ export function CancellationCard({
             onClick={onPick}
             disabled={busy}
           >
-            {busy ? "Matching" : "Match"}
+            {busy ? <Spinner size="1rem" color="currentColor" /> : "Match"}
           </button>
         ) : resolved ? (
           <ResolvedCell record={record} onReopen={onReopen!} busy={busy} />
@@ -393,6 +393,7 @@ function PendingCell({
         >
           mark not returning
         </button>
+        {busy ? <Spinner size="0.9rem" /> : null}
       </div>
     );
   }
@@ -403,6 +404,7 @@ function PendingCell({
       <label className="flex cursor-pointer items-center gap-2 text-xs">
         <input type="checkbox" checked={false} disabled={busy} onChange={onReceived} />
         Received &amp; shelved
+        {busy ? <Spinner size="0.9rem" /> : null}
       </label>
       <span className="muted text-[11px]">
         Amazon returned it {dayLabel(new Date(record.detectedAt))}
@@ -471,6 +473,7 @@ function ResolvedCell({
       <button className="text-[11px] underline" style={{ color: "var(--muted)" }} disabled={busy} onClick={onReopen}>
         reopen
       </button>
+      {busy ? <Spinner size="0.9rem" /> : null}
     </div>
   );
 }

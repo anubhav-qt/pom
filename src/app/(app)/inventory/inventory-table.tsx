@@ -257,7 +257,7 @@ export function UnmappedSkus({ rows }: { rows: UnmappedRow[] }) {
                     defaultValue={0}
                   />
                   <button className="btn btn-primary" disabled={pending}>
-                    Save
+                    {pending ? <Spinner size="1rem" color="currentColor" /> : "Save"}
                   </button>
                 </div>
               </form>

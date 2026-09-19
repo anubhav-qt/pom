@@ -200,7 +200,7 @@ export function ChatWidget() {
               className="input text-base sm:text-sm"
             />
             <button type="submit" disabled={busy || !input.trim()} className="btn btn-primary px-3.5">
-              Ask
+              {busy ? <Spinner size="1rem" color="currentColor" /> : "Ask"}
             </button>
           </form>
         </div>

@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { SubmitButton } from "@/components/submit-button";
 import { redirect } from "next/navigation";
 
 import { db } from "@/db";
@@ -85,9 +86,7 @@ export default async function MfaSetupPage({
 
         {error ? <p className="text-sm text-rose-500">That code was not correct.</p> : null}
 
-        <button type="submit" className="btn btn-primary w-full">
-          Confirm and finish signing in
-        </button>
+        <SubmitButton className="w-full">Confirm and finish signing in</SubmitButton>
       </form>
     </main>
   );

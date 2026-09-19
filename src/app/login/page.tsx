@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { SubmitButton } from "@/components/submit-button";
 import { AuthMark } from "@/components/auth-mark";
 import { FEATURES } from "@/config/features";
 import { createPendingSession, createSession, currentUser, verifyLogin } from "@/lib/auth";
@@ -61,9 +62,7 @@ export default async function LoginPage({
           </p>
         ) : null}
 
-        <button type="submit" className="btn btn-primary w-full">
-          Sign in
-        </button>
+        <SubmitButton className="w-full">Sign in</SubmitButton>
       </form>
     </main>
   );
