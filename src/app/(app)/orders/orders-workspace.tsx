@@ -14,7 +14,6 @@ import {
 import { CancellationsPanel } from "./cancellations-panel";
 import { CollectionSheetButton } from "./collection-sheet";
 import { MobileOrdersCrumb } from "./mobile-orders-crumb";
-import { MobileOrdersNav } from "./mobile-orders-nav";
 import { OrderTable } from "./order-table";
 import { OrdersToolbar } from "./orders-toolbar";
 import { AllOrdersTiles, PickList } from "./pick-list";
@@ -127,7 +126,6 @@ export function OrdersWorkspace({
         <MobileOrdersCrumb />
         <OrdersToolbar activeView="planner" activeChannel={data.channel} query={data.query} />
         <RestockPlanner initialPlan={data.plan} />
-        <MobileOrdersNav activeView="planner" activeChannel={data.channel} query={data.query} />
         {loading ? <LoadingOverlay /> : null}
       </div>
     );
@@ -181,7 +179,6 @@ export function OrdersWorkspace({
         ) : (
           <PickList rows={data.rows} category={data.category} />
         )}
-        <MobileOrdersNav activeView="collection" activeChannel={data.channel} query={data.query} />
         {loading ? <LoadingOverlay /> : null}
       </div>
     );
@@ -209,7 +206,6 @@ export function OrdersWorkspace({
           resolved={data.resolved}
           onResolvedChange={setResolved}
         />
-        <MobileOrdersNav activeView={null} query="" />
         {loading ? <LoadingOverlay /> : null}
       </div>
     );
@@ -255,7 +251,6 @@ export function OrdersWorkspace({
 
       <OrderTable rows={data.rows} activeTab={data.activeTab} onChanged={refresh} />
 
-      <MobileOrdersNav activeView="list" activeChannel={data.channel} query={data.query} />
 
       {loading ? <LoadingOverlay /> : null}
     </div>

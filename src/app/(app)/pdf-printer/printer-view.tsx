@@ -122,7 +122,7 @@ export function PrinterView(props: PrinterViewProps) {
   return (
     // Below `lg` this is exactly one screen tall: the viewport minus the header,
     // the page padding and the docked action bar. Nothing scrolls the page.
-    <div className="printer-surface flex h-[calc(100dvh-57px-24px-76px-env(safe-area-inset-bottom))] flex-col overflow-hidden lg:block lg:h-auto lg:overflow-visible lg:pb-0">
+    <div className="printer-surface flex h-[calc(100dvh-57px-24px-76px-56px-env(safe-area-inset-bottom))] flex-col sm:h-[calc(100dvh-57px-24px-76px-env(safe-area-inset-bottom))] overflow-hidden lg:block lg:h-auto lg:overflow-visible lg:pb-0">
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-x-5 lg:flex-none lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-none">
         {/* ------------------------------------------------------ left column -- */}
         <div className="flex min-h-0 min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain lg:block lg:overflow-visible">
@@ -152,11 +152,10 @@ export function PrinterView(props: PrinterViewProps) {
 
       {/* Below `lg` the action panel folds into one docked bar. */}
       <div
-        className="no-print fixed inset-x-0 bottom-0 z-30 border-t px-4 pt-3 lg:hidden"
+        className="no-print fixed inset-x-0 bottom-[calc(56px+env(safe-area-inset-bottom))] z-30 border-t px-4 pb-3 pt-3 sm:bottom-0 sm:pb-[calc(12px+env(safe-area-inset-bottom))] lg:hidden"
         style={{
           background: "var(--panel)",
           boxShadow: "0 -6px 20px rgba(15,37,54,0.08)",
-          paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
         }}
       >
         <div className="mx-auto flex max-w-2xl items-center gap-3">

@@ -56,6 +56,11 @@ interface CheckInTarget {
   recordId: number;
 }
 
+/** A mouse-and-keyboard device, where a bench scanner types into the box. */
+function canAutoFocus(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches;
+}
+
 export function ScanModal({
   station: initialStation = "outbound",
   onClose,
@@ -201,8 +206,11 @@ export function ScanModal({
 
   const scanner = useBarcodeScanner(handleDetected);
 
-  // The bench scanner acts as a keyboard, so the box must keep focus.
+  // The bench scanner acts as a keyboard, so on a desktop the box must keep
+  // focus. On a phone focusing it raises the on-screen keyboard over the
+  // camera, so there it is left alone until someone taps it.
   useEffect(() => {
+    if (!canAutoFocus()) return;
     const focus = () => inputRef.current?.focus();
     focus();
     const id = window.setInterval(focus, 1500);
@@ -235,7 +243,7 @@ export function ScanModal({
     setNote("");
     setUnmapped(null);
     if (inputRef.current) inputRef.current.value = "";
-    inputRef.current?.focus();
+    if (canAutoFocus()) inputRef.current?.focus();
   }
 
   function checkIn(itemBack: boolean) {

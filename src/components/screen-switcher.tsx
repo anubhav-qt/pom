@@ -4,11 +4,12 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
+import { MobileNav } from "@/components/mobile-nav";
 import { PageLoader } from "@/components/ui";
 import { stripBasePath } from "@/lib/base-path";
 import { ordersViewKey, useOrdersCache, useOrdersNav } from "@/lib/stores/orders-cache";
 import { peekCurrentDashboard } from "@/lib/stores/dashboard-cache";
-import { peekCurrentReturns } from "@/lib/stores/returns-cache";
+import { peekCurrentReturns, useReturnsNav } from "@/lib/stores/returns-cache";
 import { resolveScreen, screenFromPath, useScreenNav } from "@/lib/stores/screen-nav";
 
 // Only pulled when an override actually activates, so /settings and friends do
@@ -57,6 +58,15 @@ const DashboardWorkspace = dynamic(
  *  - `popstate` recomputes the override from the path the browser landed on.
  */
 export function ScreenSwitcher({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <ScreenBody>{children}</ScreenBody>
+      <MobileNav />
+    </>
+  );
+}
+
+function ScreenBody({ children }: { children: React.ReactNode }) {
   const routePath = usePathname();
   const override = useScreenNav((s) => s.override);
 
@@ -119,7 +129,7 @@ export function ScreenSwitcher({ children }: { children: React.ReactNode }) {
 
   if (override === "returns" && resolved === "returns") {
     const view = peekCurrentReturns();
-    if (view) return <ReturnsDesk initialView={view} initialTab="returns" />;
+    if (view) return <ReturnsDesk initialView={view} initialTab={useReturnsNav.getState().tab} />;
   }
 
   if (override === "pdf-printer" && resolved === "pdf-printer") return <PdfPrinter />;

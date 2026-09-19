@@ -2,17 +2,16 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 
-import { Segmented } from "@/components/segmented";
-import { Empty, LoadingOverlay, Spinner, Stat } from "@/components/ui";
+import { RailCrumb } from "@/components/rail-crumb";
+import { Empty, LoadingOverlay, Spinner, Stat, StatStrip } from "@/components/ui";
 import { friendlyItem } from "@/lib/friendly-item";
 import { withBasePath } from "@/lib/base-path";
-import { returnsKey, useReturnsCache, useReturnsNav } from "@/lib/stores/returns-cache";
+import { returnsKey, useReturnsCache, useReturnsNav, type ReturnsFilter, type ReturnsTab } from "@/lib/stores/returns-cache";
 import { useOrdersCache } from "@/lib/stores/orders-cache";
 import { dayLabel, money } from "@/lib/utils";
 
 import { LabelBars } from "../dashboard/finance-charts";
 import { CancellationsPanel } from "../orders/cancellations-panel";
-import { ScanModal } from "../orders/scan/scan-modal";
 import { closeReturnWithoutParcel, receiveReturn, reopenReturn } from "./actions";
 import type { ReturnDeskRow, ReturnStage } from "./queries";
 import { getReturnsView, type ReturnsView } from "./view-actions";
@@ -26,8 +25,8 @@ import { getReturnsView, type ReturnsView } from "./view-actions";
  * decision (reshelved, damaged, written off, claim raised) rather than a tick.
  */
 
-type Tab = "returns" | "rto";
-type Filter = "todo" | "overdue" | "done";
+type Tab = ReturnsTab;
+type Filter = ReturnsFilter;
 
 const OUTCOME_LABEL: Record<string, string> = {
   reshelved: "Back in stock",
@@ -62,19 +61,20 @@ const SIZE_REASONS = new Set(["Poor fit", "Too small", "Too large"]);
 
 export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsView; initialTab: Tab }) {
   const resolvedCancel = useReturnsNav((s) => s.resolved);
+  const tab = useReturnsNav((s) => s.tab);
+  const filter = useReturnsNav((s) => s.filter);
+  const query = useReturnsNav((s) => s.query);
   const syncStamp = useOrdersCache((s) => s.syncStamp);
   const [view, setView] = useState<ReturnsView>(initialView);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<Tab>(initialTab);
-  const [filter, setFilter] = useState<Filter>("todo");
-  const [scanning, setScanning] = useState(false);
 
   // Seed synchronously so the server's first payload counts as already fetched.
   const seeded = useRef(false);
   if (!seeded.current) {
     seeded.current = true;
     useReturnsCache.getState().put(returnsKey(initialView.resolved), initialView);
-    useReturnsNav.setState({ resolved: initialView.resolved });
+    // The URL only decides the tab on a fresh load; after that the store holds it.
+    useReturnsNav.setState({ resolved: initialView.resolved, tab: initialTab });
   }
 
   useEffect(() => {
@@ -118,12 +118,17 @@ export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsV
   const { rows, kpis, reasons, cancellations, cancelCounts } = view;
 
   function selectTab(next: Tab) {
-    setTab(next);
+    useReturnsNav.getState().setTab(next);
     const q = new URLSearchParams(window.location.search);
     if (next === "rto") q.set("tab", "rto");
     else q.delete("tab");
     const s = q.toString();
     window.history.replaceState(null, "", withBasePath(s ? `/returns?${s}` : "/returns"));
+  }
+
+  function setResolvedCancel(next: boolean) {
+    useReturnsNav.getState().setResolved(next);
+    window.history.replaceState(null, "", withBasePath(`/returns?tab=rto${next ? "&resolved=1" : ""}`));
   }
 
   const counts: Record<Filter, number> = {
@@ -132,16 +137,66 @@ export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsV
     done: rows.filter((r) => r.stage === "done").length,
   };
 
-  const shown = rows.filter((r) =>
-    filter === "todo" ? r.stage === "transit" || r.stage === "arrived" || r.stage === "overdue" : r.stage === filter,
+  const q = query.trim().toLowerCase();
+  const matches = (...fields: (string | null | undefined)[]) => !q || fields.some((v) => v?.toLowerCase().includes(q));
+
+  const shown = rows.filter(
+    (r) =>
+      (filter === "todo" ? r.stage === "transit" || r.stage === "arrived" || r.stage === "overdue" : r.stage === filter) &&
+      matches(r.item, r.reason, r.externalOrderId, r.awb),
+  );
+  const shownCancellations = cancellations.filter((c) =>
+    matches(c.externalOrderId, ...c.items.map((i) => i.title), ...c.items.map((i) => i.sku)),
   );
 
   const totalReasons = reasons.reduce((a, r) => a + r.count, 0);
   const sizeCount = reasons.filter((r) => SIZE_REASONS.has(r.reason)).reduce((a, r) => a + r.count, 0);
 
   return (
-    <div className="relative space-y-5">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className="relative space-y-5 pb-16 sm:pb-0">
+      <RailCrumb
+        primary={{
+          activeId: tab,
+          activeLabel: tab === "returns" ? "Customer returns" : "RTO & cancelled",
+          options: [
+            { id: "returns", label: "Customer returns", count: counts.todo },
+            { id: "rto", label: "RTO & cancelled", count: cancelCounts.pending },
+          ],
+          onSelect: (id) => selectTab(id as Tab),
+        }}
+        sub={
+          tab === "returns"
+            ? {
+                activeId: filter,
+                activeLabel: { todo: "To do", overdue: "Not received", done: "Done" }[filter],
+                options: [
+                  { id: "todo", label: "To do", count: counts.todo },
+                  { id: "overdue", label: "Not received", count: counts.overdue },
+                  { id: "done", label: "Done", count: counts.done },
+                ],
+                onSelect: (id) => useReturnsNav.getState().setFilter(id as Filter),
+              }
+            : {
+                activeId: resolvedCancel ? "completed" : "pending",
+                activeLabel: resolvedCancel ? "Completed" : "Pending",
+                options: [
+                  { id: "pending", label: "Pending", count: cancelCounts.pending },
+                  { id: "completed", label: "Completed", count: cancelCounts.completed },
+                ],
+                onSelect: (id) => setResolvedCancel(id === "completed"),
+              }
+        }
+      />
+
+      <StatStrip
+        items={[
+          { label: "To check in", value: kpis.toDo, tone: kpis.arrived > 0 ? "warn" : undefined },
+          { label: "May be owed", value: kpis.overdue > 0 ? money(kpis.overdueRefund) : "—", tone: kpis.overdue > 0 ? "danger" : undefined },
+          { label: "Refunded, 30 days", value: money(kpis.refunded30) },
+          { label: "Amazon paid back", value: money(kpis.reimbursed30), tone: "ok" },
+        ]}
+      />
+      <div className="hidden grid-cols-2 gap-3 sm:grid lg:grid-cols-4">
         <Stat label="To check in" value={kpis.toDo} tone={kpis.arrived > 0 ? "warn" : undefined} />
         <Stat
           label="May be owed"
@@ -155,34 +210,8 @@ export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsV
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <Segmented
-              label="Returns view"
-              items={[
-                { key: "returns" as Tab, label: "Customer returns", count: counts.todo },
-                { key: "rto" as Tab, label: "RTO & cancelled", count: cancelCounts.pending },
-              ]}
-              value={tab}
-              onChange={selectTab}
-            />
-            <button className="btn btn-primary ml-auto text-xs" onClick={() => setScanning(true)}>
-              Scan a return
-            </button>
-          </div>
-
           {tab === "returns" ? (
             <>
-              <Segmented
-                label="Show"
-                items={[
-                  { key: "todo" as Filter, label: "To do", count: counts.todo },
-                  { key: "overdue" as Filter, label: "Not received", count: counts.overdue },
-                  { key: "done" as Filter, label: "Done", count: counts.done },
-                ]}
-                value={filter}
-                onChange={setFilter}
-              />
-
               {shown.length === 0 ? (
                 <div className="panel">
                   <Empty title={filter === "todo" ? "All caught up" : "Nothing here"} />
@@ -197,13 +226,10 @@ export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsV
             </>
           ) : (
             <CancellationsPanel
-              records={cancellations}
+              records={shownCancellations}
               counts={cancelCounts}
               resolved={resolvedCancel}
-              onResolvedChange={(next) => {
-                useReturnsNav.getState().setResolved(next);
-                window.history.replaceState(null, "", withBasePath(`/returns?tab=rto${next ? "&resolved=1" : ""}`));
-              }}
+              onResolvedChange={setResolvedCancel}
               onChanged={refresh}
             />
           )}
@@ -229,17 +255,6 @@ export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsV
           </div>
         </aside>
       </div>
-
-      {scanning ? (
-        <ScanModal
-          station="inbound"
-          onClose={() => setScanning(false)}
-          onDone={() => {
-            setScanning(false);
-            refresh();
-          }}
-        />
-      ) : null}
 
       {loading ? <LoadingOverlay /> : null}
     </div>
