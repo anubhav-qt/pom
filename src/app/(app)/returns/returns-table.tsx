@@ -12,7 +12,7 @@ import { LabelBars } from "../dashboard/finance-charts";
 import { CancellationsPanel } from "../orders/cancellations-panel";
 import type { CancellationRecord } from "../orders/queries";
 import { ScanModal } from "../orders/scan/scan-modal";
-import { closeOldReturns, closeReturnWithoutParcel, receiveReturn, reopenReturn } from "./actions";
+import { closeReturnWithoutParcel, receiveReturn, reopenReturn } from "./actions";
 import type { ReasonCount, ReturnDeskRow, ReturnsKpis, ReturnStage } from "./queries";
 
 /**
@@ -25,21 +25,20 @@ import type { ReasonCount, ReturnDeskRow, ReturnsKpis, ReturnStage } from "./que
  */
 
 type Tab = "returns" | "rto";
-type Filter = "todo" | "overdue" | "old" | "done";
+type Filter = "todo" | "overdue" | "done";
 
 const OUTCOME_LABEL: Record<string, string> = {
   reshelved: "Back in stock",
   damaged: "Damaged",
   written_off: "Written off",
   claim_raised: "Claim raised",
-  closed: "Closed",
+  closed: "Returned per Amazon",
 };
 
 const STAGE: Record<ReturnStage, { label: string; color: string; bg: string }> = {
   transit: { label: "On its way", color: "var(--accent)", bg: "var(--accent-soft)" },
   arrived: { label: "Arrived", color: "var(--warn)", bg: "var(--warn-soft)" },
   overdue: { label: "Not received", color: "var(--danger)", bg: "var(--danger-soft)" },
-  old: { label: "Older", color: "var(--muted)", bg: "rgba(148,152,171,0.14)" },
   done: { label: "Done", color: "var(--ok)", bg: "var(--ok-soft)" },
 };
 
@@ -80,7 +79,6 @@ export function ReturnsDesk({
   const [tab, setTab] = useState<Tab>(initialTab);
   const [filter, setFilter] = useState<Filter>("todo");
   const [scanning, setScanning] = useState(false);
-  const [bulkPending, startBulk] = useTransition();
 
   function selectTab(next: Tab) {
     setTab(next);
@@ -94,7 +92,6 @@ export function ReturnsDesk({
   const counts: Record<Filter, number> = {
     todo: rows.filter((r) => r.stage === "transit" || r.stage === "arrived" || r.stage === "overdue").length,
     overdue: rows.filter((r) => r.stage === "overdue").length,
-    old: rows.filter((r) => r.stage === "old").length,
     done: rows.filter((r) => r.stage === "done").length,
   };
 
@@ -157,7 +154,6 @@ export function ReturnsDesk({
                   [
                     ["todo", "To do"],
                     ["overdue", "Not received"],
-                    ["old", "Older"],
                     ["done", "Done"],
                   ] as [Filter, string][]
                 ).map(([key, label]) => (
@@ -174,21 +170,6 @@ export function ReturnsDesk({
                     {label} <span className="tabular-nums">{counts[key]}</span>
                   </button>
                 ))}
-                {filter === "old" && counts.old > 0 ? (
-                  <button
-                    className="btn ml-auto text-xs"
-                    disabled={bulkPending}
-                    onClick={() => {
-                      if (!window.confirm(`Close all ${counts.old} older returns? Stock is not changed.`)) return;
-                      startBulk(async () => {
-                        await closeOldReturns();
-                        router.refresh();
-                      });
-                    }}
-                  >
-                    {bulkPending ? <Spinner size="1rem" /> : "Close all"}
-                  </button>
-                ) : null}
               </div>
 
               {shown.length === 0 ? (
@@ -289,8 +270,15 @@ function ReturnCard({ row, onChanged }: { row: ReturnDeskRow; onChanged: () => v
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
         <span>{row.reason}</span>
         {row.refundAmount ? <span className="font-medium tabular-nums">{money(row.refundAmount)} refunded</span> : null}
-        {row.labelPaidBy === "Seller" && row.labelCost ? (
-          <span className="muted tabular-nums text-xs">{money(row.labelCost)} label</span>
+        {row.orderNet != null && row.refundAmount ? (
+          <span
+            className="tabular-nums text-xs font-medium"
+            style={{ color: row.orderNet < 0 ? "var(--danger)" : "var(--ok)" }}
+            title="What Amazon paid minus everything it took for this order"
+          >
+            Net {row.orderNet < 0 ? "−" : ""}
+            {money(Math.abs(row.orderNet))}
+          </span>
         ) : null}
         {row.stage === "overdue" ? (
           <span className="text-xs" style={{ color: "var(--danger)" }}>

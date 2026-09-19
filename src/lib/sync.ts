@@ -493,6 +493,7 @@ export async function recomputeReserved() {
 
 /** How far back to look for returns on an account that has never synced. */
 const INITIAL_LOOKBACK_DAYS = 14;
+const RETURNS_REREAD_DAYS = 45;
 
 /**
  * The *minimum* look-back for the fast lane. Every run re-scans at least this
@@ -565,11 +566,18 @@ export async function syncAccount(
 
   try {
     const ordersWindow = ordersSince(account);
+    // Returns are re-read over a trailing window every time: a return's status,
+    // arrival and refund change after the day it was raised, and the report is
+    // keyed by that first date. Never start later than RETURNS_REREAD_DAYS ago.
     const since =
       kind === "orders"
         ? ordersWindow.since
-        : (account.returnsSyncedThrough ??
-          new Date(Date.now() - INITIAL_LOOKBACK_DAYS * 86_400_000));
+        : new Date(
+            Math.min(
+              (account.returnsSyncedThrough ?? new Date(Date.now() - INITIAL_LOOKBACK_DAYS * 86_400_000)).getTime(),
+              Date.now() - RETURNS_REREAD_DAYS * 86_400_000,
+            ),
+          );
 
     let seen = 0;
     let written = 0;
@@ -715,7 +723,11 @@ export async function startManualOrderSync(accountId: number) {
     await syncAccount(account, "orders", 100, { runId: run.id }).catch(() => {});
     // Returns and money piggyback on the same trigger, silently. Each is
     // best-effort: a failure here must never mark the orders sync as failed.
-    await syncAccount(account, "returns").catch(() => {});
+    // A report covers at most 59 days, so a long gap takes a few passes.
+    for (let i = 0; i < 6; i++) {
+      const res = await syncAccount(account, "returns").catch(() => null);
+      if (!res || res.skipped || res.syncedThrough.getTime() > Date.now() - 3_600_000) break;
+    }
     await syncFinance(account).catch(() => {});
   });
 

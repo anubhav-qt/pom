@@ -143,22 +143,17 @@ export function LedgerView({ basis }: { basis: Basis }) {
     setExporting(kind);
     try {
       const header = [
-        "Order ID", "Order date", "Item", "Status", "Sale (customer paid)", "Amazon paid",
-        "Fees", "Postage", "Refunded", "Return label", "Amazon net", "Held by Amazon", "Cost", "Profit", "Note",
+        "Order ID", "Order date", "Item", "Status", "Fees", "Postage", "Refunded", "Amazon net", "Cost", "Profit", "Note",
       ];
       const body = shown.map((r) => [
         r.externalOrderId,
         r.orderedAt.slice(0, 10),
         r.item,
         STATUS_STYLE[r.status].label,
-        r.sale,
-        r.paid,
         r.fees,
         r.postage,
         r.refunded,
-        r.returnLabel ? -r.returnLabel : 0,
         r.net,
-        r.held,
         r.cost ?? "",
         r.profit ?? "",
         r.note,
@@ -191,7 +186,7 @@ export function LedgerView({ basis }: { basis: Basis }) {
     }
   }
 
-  const colSpan = details ? 13 : 7;
+  const colSpan = details ? 10 : 7;
   const searchPlaceholder = "Search item or order";
 
   return (
@@ -286,12 +281,9 @@ export function LedgerView({ basis }: { basis: Basis }) {
                   <th>Status</th>
                   {details ? (
                     <>
-                      <th className="text-right">Sale</th>
-                      <th className="text-right">Amazon paid</th>
                       <th className="text-right">Fees</th>
                       <th className="text-right">Postage</th>
                       <th className="text-right">Refunded</th>
-                      <th className="text-right">Return label</th>
                     </>
                   ) : null}
                   <th className="text-right">Amazon net</th>
@@ -315,14 +307,9 @@ export function LedgerView({ basis }: { basis: Basis }) {
                     </td>
                     {details ? (
                       <>
-                        <td className="text-right text-xs tabular-nums">{rupees(r.sale)}</td>
-                        <td className="text-right text-xs tabular-nums">{rupees(r.paid)}</td>
                         <td className="text-right text-xs tabular-nums" style={{ color: amountColor(r.fees) }}>{rupees(r.fees)}</td>
                         <td className="text-right text-xs tabular-nums" style={{ color: amountColor(r.postage) }}>{rupees(r.postage)}</td>
                         <td className="text-right text-xs tabular-nums" style={{ color: amountColor(r.refunded) }}>{rupees(r.refunded)}</td>
-                        <td className="text-right text-xs tabular-nums" style={{ color: amountColor(-r.returnLabel) }}>
-                          {r.returnLabel ? rupees(-r.returnLabel) : "—"}
-                        </td>
                       </>
                     ) : null}
                     <td className="text-right text-sm font-medium tabular-nums" style={{ color: amountColor(r.net) }}>
@@ -392,12 +379,9 @@ export function LedgerView({ basis }: { basis: Basis }) {
                 </div>
                 {details ? (
                   <div className="grid grid-cols-2 gap-x-3 gap-y-1 border-t pt-2 text-[11px]" style={{ borderColor: "var(--border)" }}>
-                    <span className="muted">Sale</span><span className="text-right tabular-nums">{rupees(r.sale)}</span>
-                    <span className="muted">Amazon paid</span><span className="text-right tabular-nums">{rupees(r.paid)}</span>
                     <span className="muted">Fees</span><span className="text-right tabular-nums">{rupees(r.fees)}</span>
                     <span className="muted">Postage</span><span className="text-right tabular-nums">{rupees(r.postage)}</span>
                     <span className="muted">Refunded</span><span className="text-right tabular-nums">{rupees(r.refunded)}</span>
-                    <span className="muted">Return label</span><span className="text-right tabular-nums">{r.returnLabel ? rupees(-r.returnLabel) : "—"}</span>
                   </div>
                 ) : null}
                 <NoteInput row={r} onChange={patchRow} />

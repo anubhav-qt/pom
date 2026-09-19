@@ -608,7 +608,6 @@ export const ORDER_TABS: { key: TabKey; label: string; params: OrdersViewParams 
   { key: "toShip", label: "To Ship", params: {} },
   { key: "shipped", label: "Shipped", params: { status: "shipped" } },
   { key: "delivered", label: "Delivered", params: { status: "delivered" } },
-  { key: "cancellations", label: "Cancelled & RTO", params: { view: "cancellations" } },
   { key: "all", label: "All orders", params: { status: "all" } },
 ];
 

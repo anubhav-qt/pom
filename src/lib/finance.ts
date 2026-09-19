@@ -110,21 +110,48 @@ export async function pullRange(
   return written;
 }
 
+/** How long one sync may spend walking back through history before it stops and resumes next time. */
+const HISTORY_BUDGET_MS = 45_000;
+const HISTORY_STEP_DAYS = 30;
+
 export async function syncFinance(account: ChannelAccount) {
   if (account.channel !== "amazon") return { written: 0 };
 
-  const [last] = await db
-    .select({ at: sql<Date | null>`MAX(${financeTransactions.postedAt})` })
+  const [span] = await db
+    .select({
+      first: sql<Date | null>`MIN(${financeTransactions.postedAt})`,
+      last: sql<Date | null>`MAX(${financeTransactions.postedAt})`,
+    })
     .from(financeTransactions)
     .where(eq(financeTransactions.channelAccountId, account.id));
 
   const now = new Date();
-  const lastAt = last?.at ? new Date(last.at) : null;
+  const firstAt = span?.first ? new Date(span.first) : null;
+  const lastAt = span?.last ? new Date(span.last) : null;
+
+  // 1. The recent tail: always re-read, so late and released lines are caught.
   const from = lastAt
     ? new Date(lastAt.getTime() - OVERLAP_DAYS * DAY)
     : new Date(now.getTime() - FIRST_RUN_DAYS * DAY);
+  let written = await pullRange(account, from, now);
 
-  const written = await pullRange(account, from, now);
+  // 2. History: if money is missing for the earliest orders we hold, walk back
+  //    a month at a time until it is covered. Bounded, and resumes next sync,
+  //    so nobody ever has to run a script to get the full picture.
+  const [oldest] = await db.execute(sql`
+    SELECT MIN(ordered_at) AS at FROM orders WHERE channel_account_id = ${account.id}
+  `).then((r) => r.rows);
+  const target = oldest?.at ? new Date(new Date(oldest.at as string).getTime() - 10 * DAY) : null;
+
+  if (target) {
+    let cursor = new Date((firstAt ?? from).getTime() + DAY);
+    const startedAt = Date.now();
+    while (cursor.getTime() > target.getTime() + 3 * DAY && Date.now() - startedAt < HISTORY_BUDGET_MS) {
+      const windowStart = new Date(Math.max(target.getTime(), cursor.getTime() - HISTORY_STEP_DAYS * DAY));
+      written += await pullRange(account, windowStart, cursor);
+      cursor = windowStart;
+    }
+  }
   return { written };
 }
 
