@@ -94,9 +94,17 @@ must skip `DEFERRED_RELEASED` rows. A settlement group's RELEASED lines add up
 to its payout. `npm run backfill:finance` loads history once. The Finance screen
 (`/dashboard`) has an overview and an editable order ledger with CSV/Excel export.
 
-Not built yet: the account-health metrics (Seller Performance report) and
-Sales & Traffic (sessions, conversion) reports, both readable with the current
-roles.
+**TODO (wanted, not started):**
+
+- **Account health** on the Finance screen: late-shipment, cancellation and
+  on-time-delivery rates, defect rates and account status, from the
+  `GET_V2_SELLER_PERFORMANCE_REPORT` report (readable with today's roles).
+- **Sales & Traffic**: sessions, page views and conversion per product, from
+  `GET_SALES_AND_TRAFFIC_REPORT` (also readable today).
+- Return-label cost: the Returns report says the seller pays ₹92–₹138 per label,
+  but no matching charge appears anywhere in the Finances ledger (checked on 347
+  returns older than 45 days). Re-check periodically; if Amazon starts billing it,
+  add it to the order net.
 
 ---
 

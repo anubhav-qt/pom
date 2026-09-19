@@ -190,10 +190,6 @@ export interface LedgerRow {
   item: string;
   itemCount: number;
   status: LedgerStatus;
-  /** What the customer was charged. */
-  sale: number;
-  /** Amazon's payment for the order before refunds. */
-  paid: number;
   fees: number;
   postage: number;
   refunded: number;
@@ -201,7 +197,6 @@ export interface LedgerRow {
   net: number;
   /** Part of `net` Amazon is still holding. */
   held: number;
-  returnLabel: number;
   cost: number | null;
   /** The saved cost, or null when `cost` is only a suggestion from the product. */
   costSaved: boolean;
@@ -236,7 +231,6 @@ export async function getLedgerRows(from: Date, to: Date, basis: Basis): Promise
         (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
         COALESCE(a.net, 0) AS net, COALESCE(a.paid, 0) AS paid, COALESCE(a.refunded, 0) AS refunded,
         COALESCE(a.fees, 0) AS fees, COALESCE(a.postage, 0) AS postage, COALESCE(a.held, 0) AS held,
-        COALESCE((SELECT SUM(r.label_cost) FROM returns r WHERE r.order_id = o.id), 0) AS return_label,
         c.cost, (f.cost_price IS NOT NULL) AS cost_saved, COALESCE(f.note, '') AS note
       FROM picked p
       JOIN orders o ON o.id = p.id
@@ -272,14 +266,11 @@ export async function getLedgerRows(from: Date, to: Date, basis: Basis): Promise
       item: String(r.item ?? ""),
       itemCount: n(r.item_count),
       status,
-      sale: n(r.total_amount),
-      paid: n(r.paid),
       fees: n(r.fees),
       postage: n(r.postage),
       refunded,
       net,
       held,
-      returnLabel: n(r.return_label),
       cost,
       costSaved: Boolean(r.cost_saved),
       note: String(r.note ?? ""),

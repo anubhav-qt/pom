@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+
 import { requireUser } from "@/lib/auth";
 
 import { OrdersWorkspace } from "./orders-workspace";
@@ -20,6 +22,10 @@ export default async function OrdersPage({
 }) {
   await requireUser();
   const params = await searchParams;
+  // Cancelled and RTO parcels live on the Returns screen now; old links land there.
+  if (params.view === "cancellations" || params.status === "cancellations") {
+    redirect("/returns?tab=rto");
+  }
   const view = await getOrdersView(params);
 
   return <OrdersWorkspace initialParams={params} initialData={view} />;

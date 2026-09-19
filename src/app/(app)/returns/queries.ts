@@ -7,10 +7,7 @@ import { db } from "@/db";
 /** A customer return that has sat this long without the parcel arriving is worth chasing Amazon about. */
 export const OVERDUE_DAYS = 14;
 
-/** Open returns older than this are a backlog, not a to-do. */
-export const OLD_DAYS = 30;
-
-export type ReturnStage = "transit" | "arrived" | "overdue" | "old" | "done";
+export type ReturnStage = "transit" | "arrived" | "overdue" | "done";
 
 export interface ReturnDeskRow {
   id: number;
@@ -20,6 +17,8 @@ export interface ReturnDeskRow {
   reason: string;
   requestedAt: string | null;
   refundAmount: number;
+  /** Everything Amazon paid minus everything it took for this order, from the money ledger. */
+  orderNet: number | null;
   labelCost: number;
   /** Who Amazon bills the return label to. */
   labelPaidBy: string | null;
@@ -38,7 +37,6 @@ export interface ReturnDeskRow {
 
 export interface ReturnsKpis {
   toDo: number;
-  old: number;
   arrived: number;
   overdue: number;
   overdueRefund: number;
@@ -74,6 +72,10 @@ export async function getReturnsDesk(): Promise<{
              r.raw->>'Return delivery date' AS delivered_raw,
              r.raw->>'Label to be paid by' AS label_paid_by,
              r.raw->>'Return carrier' AS carrier,
+             (SELECT -SUM(t.total) FROM finance_transactions t
+               WHERE t.external_order_id = o.external_order_id AND t.type = 'Refund' AND t.status <> 'DEFERRED_RELEASED') AS ledger_refund,
+             (SELECT SUM(t.total) FROM finance_transactions t
+               WHERE t.external_order_id = o.external_order_id AND t.type <> 'Transfer' AND t.status <> 'DEFERRED_RELEASED') AS order_net,
              COALESCE(NULLIF(r.raw->>'Item Name', ''), (
                SELECT COALESCE(NULLIF(oi.title, ''), oi.external_sku) FROM order_items oi WHERE oi.order_id = r.order_id ORDER BY oi.id LIMIT 1
              ), '') AS item
@@ -91,15 +93,16 @@ export async function getReturnsDesk(): Promise<{
     const arrivedAt = parseReportDate(r.delivered_raw);
     const ageDays = requestedAt ? Math.floor((now - requestedAt.getTime()) / 86_400_000) : 0;
     const done = r.received_at !== null || r.outcome !== null;
+    // Amazon says whether the parcel reached us, so that decides it at any age.
+    // A parcel that never arrived stays visible as "not received" until
+    // somebody closes it.
     const stage: ReturnStage = done
       ? "done"
-      : ageDays > OLD_DAYS
-        ? "old"
-        : arrivedAt
-          ? "arrived"
-          : ageDays >= OVERDUE_DAYS
-            ? "overdue"
-            : "transit";
+      : arrivedAt
+        ? "arrived"
+        : ageDays >= OVERDUE_DAYS
+          ? "overdue"
+          : "transit";
     return {
       id: n(r.id),
       orderId: r.order_id == null ? null : n(r.order_id),
@@ -107,7 +110,9 @@ export async function getReturnsDesk(): Promise<{
       item: String(r.item ?? ""),
       reason: String(r.reason ?? "Unknown"),
       requestedAt: requestedAt?.toISOString() ?? null,
-      refundAmount: n(r.refund_amount),
+      // The report leaves the refund blank on some rows the ledger has paid.
+      refundAmount: n(r.refund_amount) || n(r.ledger_refund),
+      orderNet: r.order_net == null ? null : n(r.order_net),
       labelCost: n(r.label_cost),
       labelPaidBy: (r.label_paid_by as string | null) || null,
       resolution: (r.resolution as string | null) ?? null,
@@ -125,7 +130,8 @@ export async function getReturnsDesk(): Promise<{
 
   const since30 = now - 30 * 86_400_000;
   const in30 = rows.filter((r) => r.requestedAt && new Date(r.requestedAt).getTime() >= since30);
-  const overdue = rows.filter((r) => r.stage === "overdue");
+  // Owed only means something once Amazon has refunded the customer.
+  const overdue = rows.filter((r) => r.stage === "overdue" && r.refundAmount > 0);
 
   const [reimb] = (
     await db.execute(sql`
@@ -147,8 +153,7 @@ export async function getReturnsDesk(): Promise<{
   return {
     rows,
     kpis: {
-      toDo: rows.filter((r) => r.stage !== "done" && r.stage !== "old").length,
-      old: rows.filter((r) => r.stage === "old").length,
+      toDo: rows.filter((r) => r.stage !== "done").length,
       arrived: rows.filter((r) => r.stage === "arrived").length,
       overdue: overdue.length,
       overdueRefund: overdue.reduce((a, r) => a + r.refundAmount, 0),

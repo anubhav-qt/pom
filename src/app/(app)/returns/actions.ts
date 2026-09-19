@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, isNull, lt } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/db";
@@ -89,24 +89,6 @@ export async function closeReturnWithoutParcel(input: {
 
   revalidatePath("/returns");
   return { ok: true as const };
-}
-
-/**
- * Close every open return the customer raised more than 30 days ago, without
- * touching stock. For the backlog from before returns were tracked here, so the
- * to-do list starts at what is actually recent.
- */
-export async function closeOldReturns() {
-  await requireUser();
-  const cutoff = new Date(Date.now() - 30 * 86_400_000);
-  const res = await db
-    .update(returns)
-    .set({ outcome: "closed", conditionNote: "Closed in bulk, older than 30 days" })
-    .where(and(isNull(returns.receivedAt), isNull(returns.outcome), lt(returns.requestedAt, cutoff)))
-    .returning({ id: returns.id });
-
-  revalidatePath("/returns");
-  return { ok: true as const, closed: res.length };
 }
 
 /** Undo a write-off or a claim. A check-in is not undone here: it moved stock. */
