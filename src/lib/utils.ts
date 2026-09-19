@@ -39,3 +39,23 @@ export function timeLeft(deadline: Date | null | undefined) {
   if (hours < 24) return { late: false, text: `${hours}h left` };
   return { late: false, text: `${Math.floor(hours / 24)}d left` };
 }
+
+/**
+ * Ordering for SKU search results: by the last three characters, then the 4th
+ * from the end, then the 5th, and so on back to the front. Warehouse SKUs are
+ * told apart by their tails, so this keeps look-alikes together and in a
+ * predictable order. Case-insensitive; a shorter SKU sorts before a longer one
+ * it is a tail of.
+ */
+export function compareByTail(a: string, b: string): number {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  const tail = x.slice(-3).localeCompare(y.slice(-3), "en", { numeric: false });
+  if (tail !== 0) return tail;
+  for (let i = 4; i <= Math.max(x.length, y.length); i++) {
+    const cx = x.charAt(x.length - i);
+    const cy = y.charAt(y.length - i);
+    if (cx !== cy) return cx === "" ? -1 : cy === "" ? 1 : cx.localeCompare(cy, "en");
+  }
+  return 0;
+}

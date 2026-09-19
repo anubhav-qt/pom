@@ -20,6 +20,7 @@ import { requireUser } from "@/lib/auth";
 import { OPEN_STATUSES } from "@/lib/fulfilment";
 
 import type { OrderRow } from "./order-table";
+import { compareByTail } from "@/lib/utils";
 import { getRestockPlan } from "./planner-actions";
 import type { RestockPlan } from "./planner-actions";
 import {
@@ -340,6 +341,27 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
       })),
     };
   });
+
+  // Order the results by the tail of whatever the search matched (see
+  // compareByTail): the order id if it matches, else the matching SKU. Ties
+  // keep the queue's own order; Array.sort is stable.
+  if (q) {
+    const needle = q.toLowerCase();
+    const key = (row: OrderRow) => {
+      if (row.externalOrderId.toLowerCase().includes(needle)) return row.externalOrderId;
+      const hits = row.items.filter((i) => i.sku.toLowerCase().includes(needle));
+      return (hits.length ? hits : row.items).map((i) => i.sku).sort(compareByTail)[0] ?? null;
+    };
+    const keyed = new Map(data.map((r) => [r.id, key(r)]));
+    data.sort((a, b) => {
+      const ka = keyed.get(a.id);
+      const kb = keyed.get(b.id);
+      if (ka === kb) return 0;
+      if (ka == null) return 1;
+      if (kb == null) return -1;
+      return compareByTail(ka, kb);
+    });
+  }
 
   const [counts] = isQueueView
     ? await db

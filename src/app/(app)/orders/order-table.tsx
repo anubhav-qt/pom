@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { ChannelTag, Empty, StatusBadge } from "@/components/ui";
 import { FEATURES } from "@/config/features";
@@ -115,10 +115,21 @@ export function OrderTable({
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
-  function run(fn: () => Promise<{ ok: boolean; error?: string; count?: number }>) {
+  // The rows can be replaced under us (background refresh, another device's
+  // scan); drop selections that are no longer on screen so a bulk action never
+  // acts on orders the user cannot see.
+  useEffect(() => {
+    setSelected((prev) => {
+      const visible = new Set(rows.map((r) => r.id));
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rows]);
+
+  function run(fn: () => Promise<{ ok: boolean; error?: string; count?: number; note?: string }>) {
     startTransition(async () => {
       const res = await fn();
-      setMessage(res.ok ? null : (res.error ?? "Something went wrong."));
+      setMessage(res.ok ? (res.note ?? null) : (res.error ?? "Something went wrong."));
       if (res.ok) setSelected(new Set());
       router.refresh();
       onChanged?.();

@@ -84,6 +84,15 @@ export function OrdersWorkspace({
           setData(fresh);
           setLoading(false);
         }
+        // A stale entry is served instantly while a refetch runs in the
+        // background; pick that refetch up too, otherwise the screen keeps
+        // showing the old queue (e.g. orders already shipped elsewhere).
+        const inFlight = useOrdersCache.getState().entries[key]?.inFlight;
+        inFlight
+          ?.then((latest) => {
+            if (!cancelled) setData(latest);
+          })
+          .catch(() => {});
       })
       .catch(() => {
         if (!cancelled) setLoading(false);

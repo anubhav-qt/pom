@@ -660,6 +660,10 @@ function mapAmazonStatus(o: AmazonOrder): OrderStatus {
   // The parcel is packed and awaiting outbound pickup/scan, not yet handed to courier.
   if (ez === "PendingPickUp") return "packed";
   if (o.OrderStatus === "Shipped") return "shipped";
+  // Fulfilled by Amazon (FBA, incl. Multi-Channel Fulfillment orders placed
+  // from other stores): Amazon picks, packs and ships these, so there is
+  // nothing for us to dispatch and they must never enter the To Ship queue.
+  if (o.FulfillmentChannel === "AFN") return "shipped";
   // "Unshipped", "PartiallyShipped", "Pending", "PendingAvailability".
   return "new";
 }
@@ -925,6 +929,8 @@ interface AmazonOrder {
   LatestShipDate?: string;
   PaymentMethod?: string;
   ShipServiceLevel?: string;
+  /** MFN = we ship it; AFN = Amazon ships it (FBA / Multi-Channel Fulfillment). */
+  FulfillmentChannel?: "MFN" | "AFN";
   /** Easy Ship only: Delivered | ReturnedToSeller | LabelCanceled | … */
   EasyShipShipmentStatus?: string;
   OrderTotal?: { Amount: string; CurrencyCode: string };
