@@ -4,23 +4,31 @@ import { create } from "zustand";
 
 import { ordersViewKey, useOrdersCache, useOrdersNav } from "./orders-cache";
 import { peekCurrentDashboard } from "./dashboard-cache";
+import { peekCurrentReturns } from "./returns-cache";
 
 /**
  * The screens the top toggle switches between. Everything else in the app
  * ("/settings", "/pack", ...) is a normal route and never an override.
  */
-export type Screen = "dashboard" | "orders" | "pdf-printer";
+export type Screen = "dashboard" | "orders" | "returns" | "pdf-printer";
 
 /** Which screen a real Next route corresponds to, or null for anything else. */
 export function screenFromPath(pathname: string): Screen | null {
   if (pathname === "/orders" || pathname.startsWith("/orders/")) return "orders";
   if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) return "dashboard";
+  if (pathname === "/returns" || pathname.startsWith("/returns/")) return "returns";
   if (pathname === "/pdf-printer" || pathname.startsWith("/pdf-printer/")) return "pdf-printer";
   return null;
 }
 
 export function screenHref(screen: Screen): string {
-  return screen === "orders" ? "/orders" : screen === "pdf-printer" ? "/pdf-printer" : "/dashboard";
+  return screen === "orders"
+    ? "/orders"
+    : screen === "pdf-printer"
+      ? "/pdf-printer"
+      : screen === "returns"
+        ? "/returns"
+        : "/dashboard";
 }
 
 /**
@@ -68,7 +76,9 @@ export function resolveScreen(pathname: string, override: Screen | null): Screen
       ? true
       : override === "orders"
         ? useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
-        : peekCurrentDashboard() !== null;
+        : override === "returns"
+          ? peekCurrentReturns() !== null
+          : peekCurrentDashboard() !== null;
 
   return cached ? override : route;
 }

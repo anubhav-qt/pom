@@ -4,7 +4,7 @@ import { CHANNEL_META } from "@/channels";
 import { ENABLED_CHANNELS } from "@/config/features";
 import type { Channel } from "@/db/schema";
 import { useOrdersNav } from "@/lib/stores/orders-cache";
-import { cn } from "@/lib/utils";
+import { Segmented } from "@/components/segmented";
 
 type View = "list" | "collection" | "planner";
 
@@ -86,33 +86,12 @@ export function OrdersToolbar({
     // button in rightSlot) is redundant with that below `sm`.
     <div className="hidden flex-wrap items-center justify-between gap-3 sm:!-mb-[13px] sm:flex">
       {showSwitcher ? (
-        <div
-          className="inline-flex rounded-[10px] p-[3px]"
-          style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-xs)" }}
-        >
-          {tabs.map((t) => {
-            const active = t.view === activeView;
-            return (
-              <button
-                key={t.view}
-                type="button"
-                onClick={() => select(t.view)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-medium transition-colors",
-                  !active && "muted",
-                )}
-                style={
-                  active
-                    ? { background: "var(--accent-soft)", color: "#0b7fb0" }
-                    : undefined
-                }
-              >
-                {t.icon}
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
+        <Segmented
+          label="Orders view"
+          items={tabs.map((t) => ({ key: t.view, label: t.label, icon: t.icon }))}
+          value={activeView}
+          onChange={select}
+        />
       ) : (
         <span />
       )}

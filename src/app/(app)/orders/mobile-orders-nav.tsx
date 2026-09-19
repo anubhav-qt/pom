@@ -1,12 +1,17 @@
 "use client";
 
-import { ClipboardList, LayoutGrid, List as ListIcon, Printer, Sparkles } from "lucide-react";
+import { ClipboardList, LayoutGrid, List as ListIcon, Printer, ScanLine, Sparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+import { DropdownMenu } from "@/components/dropdown-menu";
+import type { Channel } from "@/db/schema";
 import { withBasePath } from "@/lib/base-path";
+import { useAssistantUi } from "@/lib/stores/assistant-ui";
+import { useOrdersCache, useOrdersNav } from "@/lib/stores/orders-cache";
 import { useScreenNav } from "@/lib/stores/screen-nav";
 
-import type { Channel } from "@/db/schema";
-import { useAssistantUi } from "@/lib/stores/assistant-ui";
-import { useOrdersNav } from "@/lib/stores/orders-cache";
+import { ScanModal } from "./scan/scan-modal";
 
 type View = "list" | "collection" | "planner";
 
@@ -20,10 +25,11 @@ export const MOBILE_NAV_HEIGHT = "calc(56px + env(safe-area-inset-bottom))";
 
 /**
  * The mobile-only replacement for the List/Collection/Planner toolbar plus
- * the PDF printer shortcut: one fixed, full-width, icon-only bar docked to
- * the bottom of the screen, present on every Orders section so switching
- * views, opening the PDF printer, or asking the assistant never needs a trip back to the
- * top.
+ * the scanner and PDF printer shortcuts: one fixed, full-width, icon-only bar
+ * docked to the bottom of the screen, present on every Orders section so
+ * switching views, scanning, opening the PDF printer, or asking the assistant
+ * never needs a trip back to the top. List and Collection share the first slot
+ * as a drop-up; the scanner sits in the middle.
  *
  * Desktop keeps the existing top toolbar and reaches the PDF printer from the header —
  * this component renders nothing at `sm` and up.
@@ -40,6 +46,8 @@ export function MobileOrdersNav({
 }) {
   const go = useOrdersNav((s) => s.go);
   const setAssistantOpen = useAssistantUi((s) => s.setOpen);
+  const router = useRouter();
+  const [scanning, setScanning] = useState(false);
 
   // Switching to any other destination should leave the assistant panel
   // behind, not stranded open over whatever screen you navigated to.
@@ -48,21 +56,25 @@ export function MobileOrdersNav({
     go({ view: view === "list" ? undefined : view, channel: activeChannel, q: query || undefined });
   }
 
+  const listOrCollection = activeView === "list" || activeView === "collection";
+
   const items: { key: string; label: string; Icon: typeof ListIcon; active: boolean; onClick: () => void }[] = [
-    { key: "list", label: "List", Icon: ListIcon, active: activeView === "list", onClick: () => selectView("list") },
-    {
-      key: "collection",
-      label: "Collection",
-      Icon: LayoutGrid,
-      active: activeView === "collection",
-      onClick: () => selectView("collection"),
-    },
     {
       key: "planner",
       label: "Planner",
       Icon: ClipboardList,
       active: activeView === "planner",
       onClick: () => selectView("planner"),
+    },
+    {
+      key: "scanner",
+      label: "Scan barcode",
+      Icon: ScanLine,
+      active: false,
+      onClick: () => {
+        setAssistantOpen(false);
+        setScanning(true);
+      },
     },
     {
       key: "pdf-printer",
@@ -90,18 +102,71 @@ export function MobileOrdersNav({
         paddingBottom: "env(safe-area-inset-bottom)",
       }}
     >
-      {items.map(({ key, label, Icon, active, onClick }) => (
-        <button
-          key={key}
-          type="button"
-          onClick={onClick}
-          aria-label={label}
-          className="flex h-14 flex-1 items-center justify-center"
-          style={{ color: active ? "var(--accent)" : "var(--muted)" }}
-        >
-          <Icon className="h-[22px] w-[22px]" strokeWidth={2} />
-        </button>
-      ))}
+      <DropdownMenu
+        side="up"
+        className="relative flex-1"
+        trigger={
+          <span
+            className="flex h-14 items-center justify-center"
+            style={{ color: listOrCollection ? "var(--accent)" : "var(--muted)" }}
+          >
+            {activeView === "collection" ? (
+              <LayoutGrid className="h-[22px] w-[22px]" strokeWidth={2} />
+            ) : (
+              <ListIcon className="h-[22px] w-[22px]" strokeWidth={2} />
+            )}
+          </span>
+        }
+        options={[
+          { id: "list", label: "List" },
+          { id: "collection", label: "Collection" },
+        ]}
+        activeId={activeView === "collection" ? "collection" : "list"}
+        onSelect={(id) => selectView(id as View)}
+      />
+
+      {items.map(({ key, label, Icon, active, onClick }) =>
+        key === "scanner" ? (
+          <button
+            key={key}
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            className="flex h-14 flex-1 items-center justify-center"
+          >
+            <span
+              className="flex h-11 w-11 -translate-y-2.5 items-center justify-center rounded-full text-white"
+              style={{
+                background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
+                boxShadow: "0 4px 14px rgba(15,37,54,0.25)",
+              }}
+            >
+              <Icon className="h-[22px] w-[22px]" strokeWidth={2} />
+            </span>
+          </button>
+        ) : (
+          <button
+            key={key}
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            className="flex h-14 flex-1 items-center justify-center"
+            style={{ color: active ? "var(--accent)" : "var(--muted)" }}
+          >
+            <Icon className="h-[22px] w-[22px]" strokeWidth={2} />
+          </button>
+        ),
+      )}
+
+      {scanning ? (
+        <ScanModal
+          onClose={() => setScanning(false)}
+          onDone={() => {
+            useOrdersCache.getState().bumpSync();
+            router.refresh();
+          }}
+        />
+      ) : null}
     </nav>
   );
 }

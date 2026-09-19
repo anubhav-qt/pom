@@ -3,6 +3,8 @@ import "server-only";
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db";
+import { friendlyItem } from "@/lib/friendly-item";
+import { parseVariantTitle } from "@/lib/variant-title";
 
 /**
  * Reads over `finance_transactions`.
@@ -78,18 +80,45 @@ function linesCte(from: Date, to: Date, basis: Basis) {
     )`;
 }
 
+/**
+ * What an order cost. A cost frozen on the order (`order_finance.cost_price`)
+ * always wins, so changing a product's price never rewrites an order that was
+ * already costed. Otherwise it is each item's quantity times its product's cost
+ * price; one item without a cost makes the whole order's cost unknown, so a
+ * half-costed order never reads as a profit it did not make.
+ */
 const COST_LOOKUP = sql`
   cost_lookup AS (
-    SELECT o.id AS order_id, COALESCE(f.cost_price, s.cost) AS cost
-    FROM orders o
-    LEFT JOIN order_finance f ON f.order_id = o.id
-    LEFT JOIN (
-      SELECT oi.order_id, SUM(oi.quantity * p.cost_price) AS cost
-      FROM order_items oi JOIN products p ON p.id = oi.product_id
-      WHERE p.cost_price IS NOT NULL
-      GROUP BY oi.order_id
-    ) s ON s.order_id = o.id
+    SELECT oi.order_id,
+      COALESCE(MAX(f.cost_price),
+        CASE WHEN COUNT(*) FILTER (WHERE p.cost_price IS NULL) = 0
+             THEN SUM(oi.quantity * p.cost_price) END) AS cost
+    FROM order_items oi
+    LEFT JOIN products p ON p.id = oi.product_id
+    LEFT JOIN order_finance f ON f.order_id = oi.order_id
+    WHERE oi.cancelled = false
+    GROUP BY oi.order_id
   )`;
+
+/**
+ * Freeze the cost of every order that can be costed right now and has none
+ * frozen yet. Run just before a product's price changes (so orders costed at
+ * the old price keep it) and again just after (so orders that only now have a
+ * price are costed at it).
+ */
+export async function freezeOrderCosts() {
+  await db.execute(sql`
+    INSERT INTO order_finance (order_id, cost_price, updated_at)
+    SELECT oi.order_id, SUM(oi.quantity * p.cost_price), now()
+    FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
+    WHERE oi.cancelled = false
+    GROUP BY oi.order_id
+    HAVING COUNT(*) FILTER (WHERE p.cost_price IS NULL) = 0
+    ON CONFLICT (order_id) DO UPDATE
+      SET cost_price = excluded.cost_price, updated_at = now()
+      WHERE order_finance.cost_price IS NULL
+  `);
+}
 
 export async function getFinanceOverview(from: Date, to: Date, basis: Basis): Promise<FinanceOverview> {
   const [stat] = (
@@ -197,9 +226,8 @@ export interface LedgerRow {
   net: number;
   /** Part of `net` Amazon is still holding. */
   held: number;
+  /** From the product cost prices; null until every item in the order has one. */
   cost: number | null;
-  /** The saved cost, or null when `cost` is only a suggestion from the product. */
-  costSaved: boolean;
   note: string;
   profit: number | null;
 }
@@ -231,7 +259,7 @@ export async function getLedgerRows(from: Date, to: Date, basis: Basis): Promise
         (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
         COALESCE(a.net, 0) AS net, COALESCE(a.paid, 0) AS paid, COALESCE(a.refunded, 0) AS refunded,
         COALESCE(a.fees, 0) AS fees, COALESCE(a.postage, 0) AS postage, COALESCE(a.held, 0) AS held,
-        c.cost, (f.cost_price IS NOT NULL) AS cost_saved, COALESCE(f.note, '') AS note
+        c.cost, COALESCE(f.note, '') AS note
       FROM picked p
       JOIN orders o ON o.id = p.id
       LEFT JOIN agg a ON a.order_id = o.id
@@ -272,11 +300,137 @@ export async function getLedgerRows(from: Date, to: Date, basis: Basis): Promise
       net,
       held,
       cost,
-      costSaved: Boolean(r.cost_saved),
       note: String(r.note ?? ""),
       // No profit until Amazon has paid or taken something; a cost against a
       // zero would read as a loss on an order that simply has not settled yet.
       profit: cost == null || net === 0 ? null : net - cost,
     };
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Product ledger                                                             */
+/* -------------------------------------------------------------------------- */
+
+export interface ProductLedgerRow {
+  /** Stable id of the product family (all sizes and colours). */
+  key: string;
+  name: string;
+  imageUrl: string | null;
+  /** Every seller SKU in the family. */
+  skus: string[];
+  /** Units on orders Amazon has settled in the range. */
+  units: number;
+  net: number;
+  /** What the costed part of those orders cost us, each at the price it was costed at. */
+  costTotal: number;
+  /** Cost of one unit, the same for every size and colour. */
+  cost: number | null;
+  profit: number | null;
+}
+
+/** The family a product belongs to: same title once size and colour are taken off. */
+export function productFamilyKey(name: string): string {
+  return parseVariantTitle(name).baseKey || name.toLowerCase();
+}
+
+/**
+ * One row per product (every size and colour together). Amazon's net for an
+ * order is shared between its items by their price, and only orders Amazon has
+ * actually paid or taken money on count, so profit is never a cost set against
+ * a sale that has not settled.
+ */
+export async function getProductLedger(from: Date, to: Date, basis: Basis): Promise<ProductLedgerRow[]> {
+  const sold = (
+    await db.execute(sql`
+      WITH ${linesCte(from, to, basis)},
+      agg AS (
+        SELECT order_id, SUM(total) FILTER (WHERE type <> 'Transfer') AS net
+        FROM in_range WHERE order_id IS NOT NULL GROUP BY order_id
+      ),
+      items AS (
+        SELECT oi.order_id, oi.product_id, oi.quantity, p.cost_price, f.cost_price AS frozen,
+          COALESCE(oi.unit_price, 0) * oi.quantity AS line_value,
+          SUM(COALESCE(oi.unit_price, 0) * oi.quantity) OVER (PARTITION BY oi.order_id) AS order_value,
+          COUNT(*) OVER (PARTITION BY oi.order_id) AS n_items
+        FROM order_items oi
+        LEFT JOIN products p ON p.id = oi.product_id
+        LEFT JOIN order_finance f ON f.order_id = oi.order_id
+        WHERE oi.cancelled = false
+      ),
+      shared AS (
+        SELECT i.*, a.net,
+          CASE WHEN i.order_value > 0 THEN i.line_value / i.order_value ELSE 1.0 / i.n_items END AS share
+        FROM items i JOIN agg a ON a.order_id = i.order_id
+        WHERE a.net <> 0 AND i.product_id IS NOT NULL
+      )
+      SELECT product_id,
+        SUM(quantity) AS units,
+        SUM(net * share) AS net,
+        SUM(COALESCE(frozen * share, quantity * cost_price)) FILTER (WHERE frozen IS NOT NULL OR cost_price IS NOT NULL) AS cost_total,
+        SUM(net * share) FILTER (WHERE frozen IS NOT NULL OR cost_price IS NOT NULL) AS net_costed
+      FROM shared
+      GROUP BY product_id
+    `)
+  ).rows;
+
+  const soldBy = new Map(
+    sold.map((r) => [
+      n(r.product_id),
+      { units: n(r.units), net: n(r.net), costTotal: n(r.cost_total), netCosted: n(r.net_costed) },
+    ]),
+  );
+
+  const products = (
+    await db.execute(sql`SELECT id, sku, name, image_url, cost_price FROM products WHERE active = true ORDER BY id`)
+  ).rows;
+
+  const families = new Map<string, ProductLedgerRow & { costs: (number | null)[]; imageSold: boolean; netCosted: number }>();
+  for (const p of products) {
+    const name = String(p.name ?? p.sku);
+    const key = productFamilyKey(name);
+    let fam = families.get(key);
+    if (!fam) {
+      fam = {
+        key,
+        name: friendlyItem(name).name,
+        imageUrl: null,
+        skus: [],
+        units: 0,
+        net: 0,
+        costTotal: 0,
+        netCosted: 0,
+        cost: null,
+        profit: null,
+        costs: [],
+        imageSold: false,
+      };
+      families.set(key, fam);
+    }
+    const s = soldBy.get(n(p.id));
+    fam.skus.push(String(p.sku));
+    fam.costs.push(p.cost_price == null ? null : n(p.cost_price));
+    if (s) {
+      fam.units += s.units;
+      fam.net += s.net;
+      fam.costTotal += s.costTotal;
+      fam.netCosted += s.netCosted;
+    }
+    // The picture of whichever variant actually sold, else any picture at all.
+    if (p.image_url && (!fam.imageUrl || (s && !fam.imageSold))) {
+      fam.imageUrl = String(p.image_url);
+      fam.imageSold = Boolean(s);
+    }
+  }
+
+  return [...families.values()]
+    .map(({ costs, imageSold: _i, netCosted, ...fam }) => {
+      const set = costs.filter((c): c is number => c !== null);
+      // Setting a cost writes it to every size and colour, so these agree; if
+      // older data disagrees, show the highest so profit is never overstated.
+      const cost = set.length ? Math.max(...set) : null;
+      // Profit is over the orders that have a cost, each at the price it was costed at.
+      return { ...fam, cost, profit: fam.costTotal === 0 && netCosted === 0 ? null : netCosted - fam.costTotal };
+    })
+    .sort((a, b) => (b.net !== a.net ? b.net - a.net : a.name.localeCompare(b.name)));
 }

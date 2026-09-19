@@ -11,15 +11,15 @@ import type { OrderStatus } from "@/db/schema";
 import { dayLabel, money } from "@/lib/utils";
 
 import { checkInCancellation, reopenCancellation } from "./actions";
-import { BarcodeIcon, OrderThumb } from "./order-table";
+import { OrderThumb } from "./order-table";
 import type { CancellationRecord } from "./queries";
-import { ScanModal } from "./scan/scan-modal";
 
 export function CancellationsPanel({
   records,
   counts,
   resolved,
   onResolvedChange,
+  onChanged,
   rightSlot,
 }: {
   records: CancellationRecord[];
@@ -30,6 +30,8 @@ export function CancellationsPanel({
    * can serve the other tab from cache. Falls back to a link when absent.
    */
   onResolvedChange?: (resolved: boolean) => void;
+  /** Called after a record is checked in or reopened, so a cached screen can re-read. */
+  onChanged?: () => void;
   /** Rendered at the right end of the sub-tab row, e.g. the scan button. */
   rightSlot?: React.ReactNode;
 }) {
@@ -37,15 +39,6 @@ export function CancellationsPanel({
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<number | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
-  // Row scan icon on a "ready" (physically back) record: scan the return's
-  // own label to confirm it, then ask sellable/damaged — same modal the
-  // goods-in bench uses, just pre-told which record it's for.
-  const [checkTarget, setCheckTarget] = useState<{
-    orderId: number;
-    externalOrderId: string;
-    kind: "cancellation";
-    recordId: number;
-  } | null>(null);
 
   function act(eventId: number, fn: () => Promise<{ ok: boolean; error?: string }>) {
     setBusyId(eventId);
@@ -53,6 +46,7 @@ export function CancellationsPanel({
       await fn();
       setBusyId(null);
       router.refresh();
+      onChanged?.();
     });
   }
 
@@ -92,17 +86,6 @@ export function CancellationsPanel({
                 onNotReturning={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: false }))}
                 onReopen={() => act(r.eventId, () => reopenCancellation(r.eventId))}
                 onOpenImage={(src, alt) => setLightbox({ src, alt })}
-                onScan={
-                  !resolved && r.stage === "ready"
-                    ? () =>
-                        setCheckTarget({
-                          orderId: r.orderId,
-                          externalOrderId: r.externalOrderId,
-                          kind: "cancellation",
-                          recordId: r.eventId,
-                        })
-                    : undefined
-                }
               />
             ))}
           </div>
@@ -205,17 +188,6 @@ export function CancellationsPanel({
                         busy={busyId === r.eventId && pending}
                         onReceived={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: true }))}
                         onNotReturning={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: false }))}
-                        onScan={
-                          r.stage === "ready"
-                            ? () =>
-                                setCheckTarget({
-                                  orderId: r.orderId,
-                                  externalOrderId: r.externalOrderId,
-                                  kind: "cancellation",
-                                  recordId: r.eventId,
-                                })
-                            : undefined
-                        }
                       />
                     )}
                   </td>
@@ -230,15 +202,6 @@ export function CancellationsPanel({
 
       {lightbox ? (
         <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
-      ) : null}
-
-      {checkTarget ? (
-        <ScanModal
-          station="inbound"
-          checkInFor={checkTarget}
-          onClose={() => setCheckTarget(null)}
-          onDone={() => router.refresh()}
-        />
       ) : null}
     </div>
   );
@@ -256,7 +219,6 @@ export function CancellationCard({
   onNotReturning,
   onReopen,
   onOpenImage,
-  onScan,
   onPick,
 }: {
   record: CancellationRecord;
@@ -266,8 +228,6 @@ export function CancellationCard({
   onNotReturning?: () => void;
   onReopen?: () => void;
   onOpenImage: (src: string, alt: string) => void;
-  /** Row scan icon (only meaningful for a "ready" pending record). */
-  onScan?: () => void;
   /**
    * Picker mode: this card is a row in the goods-in "no match" picker, not
    * the Cancellations tab itself. Tapping it selects the record instead of
@@ -356,7 +316,6 @@ export function CancellationCard({
             busy={busy}
             onReceived={onReceived!}
             onNotReturning={onNotReturning!}
-            onScan={onScan}
           />
         )}
       </div>
@@ -370,14 +329,11 @@ function PendingCell({
   busy,
   onReceived,
   onNotReturning,
-  onScan,
 }: {
   record: CancellationRecord;
   busy: boolean;
   onReceived: () => void;
   onNotReturning: () => void;
-  /** Scan the return's own label instead of ticking it by hand. */
-  onScan?: () => void;
 }) {
   // "awaiting" = shipped then cancelled, but Amazon hasn't reported the parcel
   // coming back yet. Nothing to tick — the item may still be in transit or lost.
@@ -409,31 +365,14 @@ function PendingCell({
       <span className="muted text-[11px]">
         Amazon returned it {dayLabel(new Date(record.detectedAt))}
       </span>
-      <div className="flex items-center gap-2">
-        <button
-          className="text-[11px] underline"
-          style={{ color: "var(--muted)" }}
-          disabled={busy}
-          onClick={onNotReturning}
-        >
-          not returning
-        </button>
-        {onScan ? (
-          <button
-            type="button"
-            className="btn px-2 py-1"
-            onClick={(e) => {
-              e.stopPropagation();
-              onScan();
-            }}
-            disabled={busy}
-            aria-label={`Scan return for ${record.externalOrderId}`}
-            title="Scan return"
-          >
-            <BarcodeIcon />
-          </button>
-        ) : null}
-      </div>
+      <button
+        className="text-[11px] underline"
+        style={{ color: "var(--muted)" }}
+        disabled={busy}
+        onClick={onNotReturning}
+      >
+        not returning
+      </button>
     </div>
   );
 }

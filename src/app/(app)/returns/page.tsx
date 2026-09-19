@@ -3,9 +3,8 @@ import { redirect } from "next/navigation";
 import { FEATURES } from "@/config/features";
 import { requireUser } from "@/lib/auth";
 
-import { getCancellationCounts, getCancellationRecords } from "../orders/queries";
 import { ReturnsDesk } from "./returns-table";
-import { getReturnsDesk } from "./queries";
+import { getReturnsView } from "./view-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -23,23 +22,7 @@ export default async function ReturnsPage({
   if (!FEATURES.returns) redirect("/orders");
 
   const { tab, resolved } = await searchParams;
-  const resolvedCancel = resolved === "1";
+  const view = await getReturnsView(resolved === "1");
 
-  const [desk, cancellations, cancelCounts] = await Promise.all([
-    getReturnsDesk(),
-    getCancellationRecords({ resolved: resolvedCancel, sinceDays: 30 }),
-    getCancellationCounts(30),
-  ]);
-
-  return (
-    <ReturnsDesk
-      rows={desk.rows}
-      kpis={desk.kpis}
-      reasons={desk.reasons}
-      cancellations={cancellations}
-      cancelCounts={cancelCounts}
-      initialTab={tab === "rto" ? "rto" : "returns"}
-      resolvedCancel={resolvedCancel}
-    />
-  );
+  return <ReturnsDesk initialView={view} initialTab={tab === "rto" ? "rto" : "returns"} />;
 }

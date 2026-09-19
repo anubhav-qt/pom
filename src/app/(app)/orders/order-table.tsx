@@ -13,7 +13,6 @@ import { cn, dayLabel, money, timeLeft } from "@/lib/utils";
 
 import { createManifest, dismissShipped24h, markPacked, revertToNew } from "./actions";
 import { OrderDetailModal } from "./order-detail-modal";
-import { ScanModal } from "./scan/scan-modal";
 
 export interface OrderRow {
   id: number;
@@ -58,12 +57,6 @@ export function OrderTable({
   const [cropLabels, setCropLabels] = useState(true);
   const [openOrderId, setOpenOrderId] = useState<number | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
-  // Packed-tab only: scanning an AWB from the row icon maps it straight to
-  // that order, instead of going through the outbound-bench flow.
-  const [mapTarget, setMapTarget] = useState<{ orderId: number; externalOrderId: string } | null>(
-    null,
-  );
-
   // A packed order normally leaves this tab when its label gets scanned at
   // the outbound bench (that scan is what actually calls `createManifest`).
   // Forget to scan one and it sits here forever — nothing else ever flips
@@ -250,11 +243,6 @@ export function OrderTable({
                 onToggleSelect={() => toggle(row.id)}
                 onOpen={() => setOpenOrderId(row.id)}
                 onOpenImage={(src, alt) => setLightbox({ src, alt })}
-                onScanAwb={
-                  canBulkShip
-                    ? () => setMapTarget({ orderId: row.id, externalOrderId: row.externalOrderId })
-                    : undefined
-                }
               />
             ))}
           </div>
@@ -414,20 +402,6 @@ export function OrderTable({
                     <td>
                       <div className="flex items-center gap-1.5">
                         <StatusBadge status={row.status} />
-                        {canBulkShip ? (
-                          <button
-                            type="button"
-                            className="btn px-2 py-1"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setMapTarget({ orderId: row.id, externalOrderId: row.externalOrderId });
-                            }}
-                            aria-label={`Scan AWB for ${row.externalOrderId}`}
-                            title="Scan AWB"
-                          >
-                            <BarcodeIcon />
-                          </button>
-                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -446,41 +420,7 @@ export function OrderTable({
       {lightbox ? (
         <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
       ) : null}
-
-      {mapTarget ? (
-        <ScanModal
-          station="outbound"
-          mapTo={mapTarget}
-          onClose={() => setMapTarget(null)}
-          onDone={() => {
-            router.refresh();
-            onChanged?.();
-          }}
-        />
-      ) : null}
     </div>
-  );
-}
-
-/** Same barcode glyph as the scanner's manual-entry field, reused on the
- * per-row "scan AWB" affordance so both read as the same action. */
-export function BarcodeIcon() {
-  return (
-    <svg
-      className="h-4 w-4"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      aria-hidden
-    >
-      <path d="M3 5v14" />
-      <path d="M8 5v14" />
-      <path d="M12 5v14" />
-      <path d="M17 5v14" />
-      <path d="M21 5v14" />
-    </svg>
   );
 }
 
@@ -516,7 +456,6 @@ export function OrderCard({
   selectable,
   selected,
   onToggleSelect,
-  onScanAwb,
 }: {
   row: OrderRow;
   onOpen: () => void;
@@ -525,8 +464,6 @@ export function OrderCard({
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
-  /** Packed tab only: floats a scan-AWB icon over the card, mapping directly to this order. */
-  onScanAwb?: () => void;
 }) {
   const { deadline, hasUnmapped } = orderMeta(row);
   const thumbSrc = row.items.find((i) => i.imageUrl)?.imageUrl ?? null;
@@ -543,20 +480,6 @@ export function OrderCard({
           aria-label={`Select ${row.externalOrderId}`}
           className="absolute left-3 top-3 z-10 h-4 w-4"
         />
-      ) : null}
-      {onScanAwb ? (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onScanAwb();
-          }}
-          aria-label={`Scan AWB for ${row.externalOrderId}`}
-          title="Scan AWB"
-          className="btn absolute right-3 top-3 z-10 px-2 py-1"
-        >
-          <BarcodeIcon />
-        </button>
       ) : null}
       <button
         type="button"
