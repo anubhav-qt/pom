@@ -123,7 +123,7 @@ export function OrdersWorkspace({
 
   if (data.kind === "planner") {
     return (
-      <div className={`space-y-5 ${busy} sm:-mt-[37px]`}>
+      <div className={`relative space-y-5 ${busy} sm:-mt-[37px]`}>
         {loading ? <LoadingOverlay /> : null}
         <MobileOrdersCrumb />
         <OrdersToolbar activeView="planner" activeChannel={data.channel} query={data.query} />
@@ -164,7 +164,7 @@ export function OrdersWorkspace({
           : undefined;
 
     return (
-      <div className={`space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
+      <div className={`relative space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
         {loading ? <LoadingOverlay /> : null}
         <MobileOrdersCrumb
           sub={sub}
@@ -191,7 +191,7 @@ export function OrdersWorkspace({
     const setResolved = (resolved: boolean) => go({ ...params, resolved: resolved ? "1" : undefined });
 
     return (
-      <div className={`space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
+      <div className={`relative space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
         {loading ? <LoadingOverlay /> : null}
         <MobileOrdersCrumb
           sub={{
@@ -216,7 +216,7 @@ export function OrdersWorkspace({
   }
 
   return (
-    <div className={`space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
+    <div className={`relative space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
         {loading ? <LoadingOverlay /> : null}
       <MobileOrdersCrumb
         sub={

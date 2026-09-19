@@ -7,7 +7,11 @@ import { CenteredSpinner } from "@/components/ui";
  */
 export default function Loading() {
   return (
-    <div aria-busy="true" style={{ animation: "rise-in 0.25s var(--ease-premium)" }}>
+    // Negative margins cancel the page padding, so the white runs edge to edge.
+    <div
+      aria-busy="true"
+      className="-mx-4 -mb-8 -mt-6 min-h-[calc(100dvh-57px)] bg-white sm:-mx-6"
+    >
       <CenteredSpinner className="py-24" />
     </div>
   );
