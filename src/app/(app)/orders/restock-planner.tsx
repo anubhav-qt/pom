@@ -570,16 +570,24 @@ function ProductPanel({
           <thead>
             <tr>
               <th
-                className="relative h-11 border text-[11.5px] font-extrabold"
+                className="relative overflow-hidden border text-[11.5px] font-extrabold"
                 style={{
+                  height: 56,
                   borderColor: "var(--border)",
                   background:
                     "linear-gradient(to top right, var(--panel) calc(50% - 0.5px), var(--border) calc(50% - 0.5px), var(--border) calc(50% + 0.5px), var(--panel) calc(50% + 0.5px))",
                 }}
               >
-                {/* Text follows the line: about atan(44/150) = 16deg. */}
-                <span className="absolute right-2 top-1.5 origin-right rotate-[16deg]">Size</span>
-                <span className="absolute bottom-1.5 left-2 origin-left rotate-[16deg]">Color</span>
+                {/* The cell is 150 x 56, so its diagonal is ~160 long at ~20.5deg. A
+                    zero-height strip laid along it keeps each word just off the line:
+                    "Size" above it toward the right, "Color" below it toward the left. */}
+                <span
+                  className="pointer-events-none absolute left-1/2 top-1/2 block h-0 w-[160px]"
+                  style={{ transform: "translate(-50%, -50%) rotate(20.5deg)" }}
+                >
+                  <span className="absolute bottom-[3px] right-3 leading-none">Size</span>
+                  <span className="absolute left-3 top-[3px] leading-none">Color</span>
+                </span>
               </th>
               {product.sizes.map((s) => {
                 const ids = colIds(s);
