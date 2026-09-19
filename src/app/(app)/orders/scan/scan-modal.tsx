@@ -289,7 +289,7 @@ export function ScanModal({
   const busy = pending || committing;
 
   return (
-    <Modal title="Scan barcode" onClose={close} width="36rem">
+    <Modal title="Scan barcode" onClose={close} width="36rem" aboveNav>
       <div className="flex flex-col gap-4">
         <Segmented
           label="What are you scanning"

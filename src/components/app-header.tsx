@@ -93,8 +93,10 @@ export function AppHeader({
   const effectiveScreen = resolveScreen(pathname, override);
   const onOrders = effectiveScreen === "orders";
   const onReturns = effectiveScreen === "returns";
-  // Both have the rail band under the header, and the search box in it.
-  const hasRail = onOrders || onReturns;
+  // Orders and Returns have the rail band under the header with a search box in
+  // it; Finance has the band too, but no search.
+  const hasSearch = onOrders || onReturns;
+  const hasRail = hasSearch || effectiveScreen === "dashboard";
 
   // Mirrored into a store so the mobile category dropdown (rendered in the
   // page body, below the header) can read the same real counts instead of
@@ -143,7 +145,7 @@ export function AppHeader({
             here, right before Sync/avatar, filling the width the switch
             would otherwise take. Gone again from `md` so the two never both
             show at once. */}
-        {hasRail ? (
+        {hasSearch ? (
           <div className="flex-1 md:hidden">
             <HeaderSearch compact />
           </div>

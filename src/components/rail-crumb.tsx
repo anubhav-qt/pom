@@ -26,15 +26,22 @@ export interface CrumbSegment {
 export function RailCrumb({
   primary,
   sub,
+  third,
   staticSubLabel,
+  search = true,
 }: {
   primary: CrumbSegment;
   sub?: CrumbSegment;
+  /** A further dropdown after the sub-list (Finance's "Payment date / Order date"). */
+  third?: CrumbSegment;
+  /** Show the search box at the right end of the desktop band. Off where the screen has no header search. */
+  search?: boolean;
   /** A non-interactive second segment, e.g. the "All orders › Cancelled" drill-down leaf. */
   staticSubLabel?: string;
 }) {
   const primaryCount = primary.options.find((o) => o.id === primary.activeId)?.count;
   const subCount = sub?.options.find((o) => o.id === sub.activeId)?.count;
+  const thirdCount = third?.options.find((o) => o.id === third.activeId)?.count;
 
   // The desktop band's slot is looked up after mount so server and client markup agree.
   const [slot, setSlot] = useState<HTMLElement | null>(null);
@@ -77,6 +84,25 @@ export function RailCrumb({
         </>
       ) : null}
 
+      {third ? (
+        <>
+          <Separator />
+          <DropdownMenu
+            trigger={
+              <span className="flex items-center gap-1.5">
+                <span className="truncate text-[13px]" style={{ fontWeight: 500, color: "var(--muted)" }}>
+                  {third.activeLabel}
+                </span>
+                <CountBadge count={thirdCount} />
+              </span>
+            }
+            options={third.options}
+            activeId={third.activeId}
+            onSelect={third.onSelect}
+          />
+        </>
+      ) : null}
+
       {staticSubLabel ? (
         <>
           <Separator />
@@ -102,9 +128,11 @@ export function RailCrumb({
               <div className="mx-auto hidden max-w-7xl items-center gap-1.5 px-4 py-2.5 sm:flex sm:px-6">
                 {crumb}
                 <div className="flex-1" />
-                <div className="hidden md:block">
-                  <HeaderSearch />
-                </div>
+                {search ? (
+                  <div className="hidden md:block">
+                    <HeaderSearch />
+                  </div>
+                ) : null}
               </div>
             </div>,
             slot,

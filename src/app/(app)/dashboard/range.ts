@@ -9,6 +9,13 @@
  * component to import, no matter what else lives next to it.
  */
 export const RANGE_PRESETS = ["7d", "30d", "90d", "all"] as const;
+
+export const RANGE_LABEL = {
+  "7d": "7 days",
+  "30d": "30 days",
+  "90d": "90 days",
+  all: "All time",
+} as const;
 export type RangePreset = (typeof RANGE_PRESETS)[number];
 
 export function isRangePreset(v: string | undefined): v is RangePreset {

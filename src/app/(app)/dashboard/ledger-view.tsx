@@ -303,29 +303,19 @@ export function LedgerView({ basis }: { basis: Basis }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
+      {view === "orders" ? (
         <Segmented
-          label="Ledger by"
-          items={[
-            { key: "products" as const, label: "Products" },
-            { key: "orders" as const, label: "Orders" },
-          ]}
-          value={view}
-          onChange={(v) => setNav({ view: v })}
+          label="Order status"
+          className="self-start"
+          items={FILTERS.map((f) => ({
+            key: f.key,
+            label: f.label,
+            count: f.key === "all" ? orders.length : orders.filter((r) => r.status === f.key).length,
+          }))}
+          value={filter}
+          onChange={setFilter}
         />
-        {view === "orders" ? (
-          <Segmented
-            label="Order status"
-            items={FILTERS.map((f) => ({
-              key: f.key,
-              label: f.label,
-              count: f.key === "all" ? orders.length : orders.filter((r) => r.status === f.key).length,
-            }))}
-            value={filter}
-            onChange={setFilter}
-          />
-        ) : null}
-      </div>
+      ) : null}
 
       {error ? <p className="rounded-md bg-rose-500/10 px-3 py-2 text-sm text-rose-600">{error}</p> : null}
 
