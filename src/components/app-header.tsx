@@ -642,32 +642,35 @@ export function HeaderSearch({ compact }: { compact?: boolean }) {
 
   return (
     <form onSubmit={onSearch}>
-      <div className="relative">
-        <svg
-          viewBox="0 0 24 24"
-          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
-          fill="none"
-          stroke="var(--muted-2)"
-          strokeWidth="2"
-          strokeLinecap="round"
-        >
-          <circle cx="11" cy="11" r="7" />
-          <path d="m20 20-3.5-3.5" />
-        </svg>
+      <div
+        className={cn(
+          "search-box",
+          // Fills its flex-1 wrapper for the compact mobile version.
+          compact ? "w-full" : "w-56",
+        )}
+      >
+        <label htmlFor="header-search" className="search-label">
+          <svg viewBox="0 0 24 24" className="search-icon" fill="none" strokeWidth="2.5" strokeLinecap="round">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+        </label>
         <input
+          id="header-search"
+          size={1}
           key={params.get("q") ?? ""}
           name="q"
           defaultValue={params.get("q") ?? ""}
           placeholder="Search order ID, buyer, pincode, SKU…"
-          className={cn(
-            "rounded-lg py-1.5 pl-8 pr-3 text-[12.5px] outline-none transition-colors",
-            // Fills its flex-1 wrapper for the compact mobile version, rather
-            // than growing on focus like the desktop one — band 1 has no
-            // spare width for an input to expand into.
-            compact ? "w-full" : "w-56 focus:w-72",
-          )}
-          style={{ background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--text)" }}
+          className="search-input"
         />
+        <span className="search-divider" aria-hidden />
+        {/* Voice search is not wired up yet. */}
+        <button type="button" className="search-mic" aria-label="Voice search">
+          <svg viewBox="0 0 24 24" aria-hidden>
+            <path d="M12 15a4 4 0 0 0 4-4V6a4 4 0 0 0-8 0v5a4 4 0 0 0 4 4Zm6-4a1 1 0 1 1 2 0 8 8 0 0 1-7 7.94V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2.06A8 8 0 0 1 4 11a1 1 0 1 1 2 0 6 6 0 0 0 12 0Z" />
+          </svg>
+        </button>
       </div>
     </form>
   );

@@ -579,14 +579,14 @@ function ProductPanel({
                 }}
               >
                 {/* The cell is 150 x 56, so its diagonal is ~160 long at ~20.5deg. A
-                    zero-height strip laid along it keeps each word just off the line:
-                    "Size" above it toward the right, "Color" below it toward the left. */}
+                    zero-height strip laid along it, centred, keeps each word just
+                    off the line: "Size" above it and "Color" below it. */}
                 <span
                   className="pointer-events-none absolute left-1/2 top-1/2 block h-0 w-[160px]"
                   style={{ transform: "translate(-50%, -50%) rotate(20.5deg)" }}
                 >
-                  <span className="absolute bottom-[3px] right-3 leading-none">Size</span>
-                  <span className="absolute left-3 top-[3px] leading-none">Color</span>
+                  <span className="absolute bottom-[3px] left-1/2 -translate-x-1/2 leading-none">Size</span>
+                  <span className="absolute left-1/2 top-[3px] -translate-x-1/2 leading-none">Color</span>
                 </span>
               </th>
               {product.sizes.map((s) => {
@@ -927,21 +927,7 @@ function Stepper({
 }
 
 function Box({ on }: { on: boolean }) {
-  return (
-    <span
-      className="relative inline-block h-3.5 w-3.5 rounded border-[1.5px]"
-      style={{
-        borderColor: on ? "var(--accent)" : "var(--border-strong)",
-        background: on ? "var(--accent)" : "var(--panel)",
-      }}
-    >
-      {on ? (
-        <svg viewBox="0 0 24 24" className="absolute inset-0 h-full w-full p-[2px]" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round">
-          <path d="M20 6 9 17l-5-5" />
-        </svg>
-      ) : null}
-    </span>
-  );
+  return <span className="ui-checkbox" data-checked={on} style={{ ["--checkbox-diameter" as string]: "16px" }} />;
 }
 
 function Swatch({ sw }: { sw: ReturnType<typeof colorSwatch> }) {

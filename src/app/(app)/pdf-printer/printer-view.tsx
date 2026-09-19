@@ -6,7 +6,6 @@ import {
   ExternalLink,
   FileText,
   Layers,
-  Loader2,
   Printer,
   Tags,
   Upload,
@@ -14,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 /* -------------------------------------------------------------------------- */
@@ -483,7 +483,7 @@ function PrimaryButton({
   }
   return (
     <button type="button" className={cn("btn btn-primary", className)} disabled={!canBuild} onClick={onBuild}>
-      {phase === "processing" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Layers className="h-4 w-4" />}
+      {phase === "processing" ? <Spinner size="1.1rem" color="#fff" /> : <Layers className="h-4 w-4" />}
       {phase === "processing" ? "Building…" : "Build label sheet"}
     </button>
   );

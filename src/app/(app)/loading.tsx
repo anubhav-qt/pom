@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { Spinner } from "@/components/ui";
 
 /**
  * Shown the instant a nav item is clicked, while the next screen's data loads
@@ -9,7 +9,7 @@ export default function Loading() {
   return (
     <div className="space-y-4" aria-busy="true" style={{ animation: "rise-in 0.25s var(--ease-premium)" }}>
       <div className="flex items-center justify-center gap-2.5 py-10" style={{ color: "var(--muted)" }}>
-        <Loader2 className="h-5 w-5 animate-spin" style={{ color: "var(--accent)" }} />
+        <Spinner size="2rem" />
         <span className="text-sm font-medium">Loading…</span>
       </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
