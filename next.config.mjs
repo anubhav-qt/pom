@@ -45,6 +45,17 @@ const nextConfig = {
    * label splitting works inside a route handler.
    */
   serverExternalPackages: ["pdf-lib", "xlsx", "pdfjs-dist"],
+
+  /**
+   * pdfjs loads its worker with a dynamic import it builds at runtime, which
+   * Vercel's file tracing cannot see, so the file is missing from the deployed
+   * function ("Cannot find module .../pdf.worker.mjs") and every PDF fails to
+   * read. Ship it with the routes that read PDFs.
+   */
+  outputFileTracingIncludes: {
+    "/api/label-print": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
+    "/api/label-print/[id]": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
+  },
 };
 
 export default nextConfig;

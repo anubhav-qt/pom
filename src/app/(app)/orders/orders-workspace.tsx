@@ -123,7 +123,7 @@ export function OrdersWorkspace({
 
   if (data.kind === "planner") {
     return (
-      <div className={`space-y-5 ${busy}`}>
+      <div className={`space-y-5 ${busy} sm:-mt-[37px]`}>
         <MobileOrdersCrumb />
         <OrdersToolbar activeView="planner" activeChannel={data.channel} query={data.query} />
         <RestockPlanner initialPlan={data.plan} />
@@ -163,7 +163,7 @@ export function OrdersWorkspace({
           : undefined;
 
     return (
-      <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
+      <div className={`space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
         <MobileOrdersCrumb
           sub={sub}
           staticSubLabel={data.drillStatus ? STATUS_LABELS[data.drillStatus] : undefined}
@@ -189,7 +189,7 @@ export function OrdersWorkspace({
     const setResolved = (resolved: boolean) => go({ ...params, resolved: resolved ? "1" : undefined });
 
     return (
-      <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
+      <div className={`space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
         <MobileOrdersCrumb
           sub={{
             activeId: data.resolved ? "completed" : "pending",
@@ -213,7 +213,7 @@ export function OrdersWorkspace({
   }
 
   return (
-    <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
+    <div className={`space-y-5 pb-20 ${busy} sm:-mt-[37px] sm:pb-0`}>
       <MobileOrdersCrumb
         sub={
           data.isQueueView && data.counts
