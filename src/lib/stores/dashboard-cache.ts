@@ -1,10 +1,10 @@
 "use client";
 
+import { withBasePath } from "@/lib/base-path";
 import { create } from "zustand";
 
 import type { DashboardView } from "@/app/(app)/dashboard/view-actions";
 import type { RangePreset } from "@/app/(app)/dashboard/range";
-import { withBasePath } from "@/lib/base-path";
 
 /**
  * Client-side cache for the dashboard, keyed by range preset.

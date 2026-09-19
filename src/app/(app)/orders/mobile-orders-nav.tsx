@@ -1,14 +1,11 @@
 "use client";
 
-import { ClipboardList, LayoutGrid, List as ListIcon, ScanBarcode, Sparkles } from "lucide-react";
-import { useState } from "react";
+import { ClipboardList, LayoutGrid, List as ListIcon, Printer, Sparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import type { Channel } from "@/db/schema";
 import { useAssistantUi } from "@/lib/stores/assistant-ui";
 import { useOrdersNav } from "@/lib/stores/orders-cache";
-import type { ScanStation } from "@/lib/scan";
-
-import { ScanModal } from "./scan/scan-modal";
 
 type View = "list" | "collection" | "planner";
 
@@ -22,31 +19,27 @@ export const MOBILE_NAV_HEIGHT = "calc(56px + env(safe-area-inset-bottom))";
 
 /**
  * The mobile-only replacement for the List/Collection/Planner toolbar plus
- * the Scan Barcode button: one fixed, full-width, icon-only bar docked to
+ * the PDF printer shortcut: one fixed, full-width, icon-only bar docked to
  * the bottom of the screen, present on every Orders section so switching
- * views, scanning, or asking the assistant never needs a trip back to the
+ * views, opening the PDF printer, or asking the assistant never needs a trip back to the
  * top.
  *
- * Desktop keeps the existing top toolbar and per-view Scan Barcode button —
+ * Desktop keeps the existing top toolbar and reaches the PDF printer from the header —
  * this component renders nothing at `sm` and up.
  */
 export function MobileOrdersNav({
   activeView,
   activeChannel,
   query,
-  scanStation,
-  onScanDone,
 }: {
   /** null on a screen that isn't one of the three (e.g. Cancelled & RTO) — none of the three tabs light up. */
   activeView: View | null;
   activeChannel?: Channel;
   query: string;
-  scanStation: ScanStation;
-  onScanDone?: () => void;
 }) {
   const go = useOrdersNav((s) => s.go);
   const setAssistantOpen = useAssistantUi((s) => s.setOpen);
-  const [scanOpen, setScanOpen] = useState(false);
+  const router = useRouter();
 
   // Switching to any other destination should leave the assistant panel
   // behind, not stranded open over whatever screen you navigated to.
@@ -72,50 +65,40 @@ export function MobileOrdersNav({
       onClick: () => selectView("planner"),
     },
     {
-      key: "scanner",
-      label: "Scanner",
-      Icon: ScanBarcode,
+      key: "pdf-printer",
+      label: "PDF printer",
+      Icon: Printer,
       active: false,
       onClick: () => {
         setAssistantOpen(false);
-        setScanOpen(true);
+        router.push("/pdf-printer");
       },
     },
     { key: "ai", label: "AI", Icon: Sparkles, active: false, onClick: () => setAssistantOpen(true) },
   ];
 
   return (
-    <>
-      <nav
-        className="no-print fixed inset-x-0 bottom-0 z-40 flex sm:hidden"
-        style={{
-          background: "var(--panel)",
-          borderTop: "1px solid var(--border)",
-          boxShadow: "0 -6px 20px rgba(15,37,54,0.08)",
-          paddingBottom: "env(safe-area-inset-bottom)",
-        }}
-      >
-        {items.map(({ key, label, Icon, active, onClick }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={onClick}
-            aria-label={label}
-            className="flex h-14 flex-1 items-center justify-center"
-            style={{ color: active ? "var(--accent)" : "var(--muted)" }}
-          >
-            <Icon className="h-[22px] w-[22px]" strokeWidth={2} />
-          </button>
-        ))}
-      </nav>
-
-      {scanOpen ? (
-        <ScanModal
-          station={scanStation}
-          onClose={() => setScanOpen(false)}
-          onDone={onScanDone}
-        />
-      ) : null}
-    </>
+    <nav
+      className="no-print fixed inset-x-0 bottom-0 z-40 flex sm:hidden"
+      style={{
+        background: "var(--panel)",
+        borderTop: "1px solid var(--border)",
+        boxShadow: "0 -6px 20px rgba(15,37,54,0.08)",
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }}
+    >
+      {items.map(({ key, label, Icon, active, onClick }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={onClick}
+          aria-label={label}
+          className="flex h-14 flex-1 items-center justify-center"
+          style={{ color: active ? "var(--accent)" : "var(--muted)" }}
+        >
+          <Icon className="h-[22px] w-[22px]" strokeWidth={2} />
+        </button>
+      ))}
+    </nav>
   );
 }

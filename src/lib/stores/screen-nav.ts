@@ -6,20 +6,21 @@ import { ordersViewKey, useOrdersCache, useOrdersNav } from "./orders-cache";
 import { useDashboardCache, useDashboardNav } from "./dashboard-cache";
 
 /**
- * The two screens the top toggle switches between. Everything else in the app
+ * The screens the top toggle switches between. Everything else in the app
  * ("/settings", "/pack", ...) is a normal route and never an override.
  */
-export type Screen = "dashboard" | "orders";
+export type Screen = "dashboard" | "orders" | "pdf-printer";
 
 /** Which screen a real Next route corresponds to, or null for anything else. */
 export function screenFromPath(pathname: string): Screen | null {
   if (pathname === "/orders" || pathname.startsWith("/orders/")) return "orders";
   if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) return "dashboard";
+  if (pathname === "/pdf-printer" || pathname.startsWith("/pdf-printer/")) return "pdf-printer";
   return null;
 }
 
 export function screenHref(screen: Screen): string {
-  return screen === "orders" ? "/orders" : "/dashboard";
+  return screen === "orders" ? "/orders" : screen === "pdf-printer" ? "/pdf-printer" : "/dashboard";
 }
 
 /**
@@ -61,10 +62,13 @@ export function resolveScreen(pathname: string, override: Screen | null): Screen
   const route = screenFromPath(pathname);
   if (override === null || override === route) return route;
 
+  // The printer has no server data to wait for, so it can always be swapped in.
   const cached =
-    override === "orders"
-      ? useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
-      : useDashboardCache.getState().peek(useDashboardNav.getState().range) !== null;
+    override === "pdf-printer"
+      ? true
+      : override === "orders"
+        ? useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
+        : useDashboardCache.getState().peek(useDashboardNav.getState().range) !== null;
 
   return cached ? override : route;
 }

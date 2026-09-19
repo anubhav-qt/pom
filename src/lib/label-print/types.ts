@@ -40,6 +40,11 @@ export interface LabelRef {
   orderId: string | null;
   /** Empty when the invoice could not be read; the label is then printed unstamped. */
   products: ProductLine[];
+  /**
+   * Where the stamp fits on this particular page (fractions of the page from
+   * its top-left), when it could be measured. Otherwise the platform default.
+   */
+  stampArea?: { x: number; y: number; w: number; h: number };
 }
 
 export interface FileReport {

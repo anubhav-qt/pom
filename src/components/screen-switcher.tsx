@@ -15,6 +15,10 @@ const OrdersWorkspace = dynamic(
   () => import("@/app/(app)/orders/orders-workspace").then((m) => m.OrdersWorkspace),
   { ssr: false },
 );
+const PdfPrinter = dynamic(
+  () => import("@/app/(app)/pdf-printer/pdf-printer").then((m) => m.PdfPrinter),
+  { ssr: false },
+);
 const DashboardWorkspace = dynamic(
   () => import("@/app/(app)/dashboard/dashboard-workspace").then((m) => m.DashboardWorkspace),
   { ssr: false },
@@ -106,6 +110,8 @@ export function ScreenSwitcher({ children }: { children: React.ReactNode }) {
     const view = useDashboardCache.getState().peek(useDashboardNav.getState().range);
     if (view) return <DashboardWorkspace initialView={view} />;
   }
+
+  if (override === "pdf-printer" && resolved === "pdf-printer") return <PdfPrinter />;
 
   return <>{children}</>;
 }

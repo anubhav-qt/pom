@@ -21,6 +21,9 @@ import { STATUS_LABELS } from "@/components/ui";
 import { withBasePath } from "@/lib/base-path";
 import { cn } from "@/lib/utils";
 
+/** Where `RailTabs` mounts itself: band 3 of the header. */
+export const RAIL_SLOT_ID = "header-rail-slot";
+
 export interface HeaderCounts {
   toShip: number;
   shipped: number;
@@ -102,20 +105,17 @@ export function AppHeader({
     >
       {/* ---------------------------------------------------------- band 1 -- */}
       <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 sm:gap-5 sm:px-6">
-        {/* Desktop: brand mark + wordmark, and the Dashboard/Orders switch
-            sits beside it. Below `sm` there's no room for both a switch and a
+        {/* Desktop: the PariBelle wordmark (same face and colours as the
+            storefront navbar), and the Dashboard/Orders switch sits beside it. Below `sm` there's no room for both a switch and a
             usable search box, so the switch collapses into the brand mark
             itself — same corner square, hamburger glyph instead of "P",
             opening the same dropdown the Orders breadcrumb uses. */}
-        <Link href="/orders" className="hidden shrink-0 items-center gap-2.5 sm:flex">
-          <span
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold text-white"
-            style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
-            aria-hidden
-          >
-            P
-          </span>
-          <span className="text-sm font-semibold tracking-tight">Paribelle</span>
+        <Link
+          href="/orders"
+          className="hidden shrink-0 text-[26px] leading-none tracking-wide transition-colors hover:text-[#c0607a] sm:block"
+          style={{ fontFamily: "var(--font-logo)", color: "#3a2a30" }}
+        >
+          PariBelle
         </Link>
         <div className="sm:hidden">
           <MobileScreenMenu effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
@@ -155,6 +155,11 @@ export function AppHeader({
 
       {/* ---------------------------------------------------------- band 2 -- */}
       {onOrders ? <OrdersTabs counts={counts} /> : null}
+
+      {/* ---------------------------------------------------------- band 3 -- */}
+      {/* Empty slot the Orders sub-status tabs (`RailTabs`) portal into, so they
+          sit inside the header: attached to band 2, full width, same look. */}
+      {onOrders ? <div id={RAIL_SLOT_ID} /> : null}
     </header>
   );
 }
@@ -173,7 +178,15 @@ function ordersHref(): string {
   return `/orders${paramsToQuery(useOrdersNav.getState().params)}`;
 }
 
+function hrefFor(screen: Screen): string {
+  if (screen === "orders") return ordersHref();
+  if (screen === "pdf-printer") return "/pdf-printer";
+  return dashboardHref();
+}
+
 function targetIsCached(screen: Screen): boolean {
+  // Nothing to fetch for the printer: its state is client-side.
+  if (screen === "pdf-printer") return true;
   if (screen === "orders") {
     return (
       useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
@@ -199,18 +212,21 @@ function MobileScreenMenu({
 
   function select(screen: Screen) {
     if (screen === effectiveScreen) return;
-    const href = withBasePath(screen === "orders" ? ordersHref() : dashboardHref());
+    // App-relative. Raw pushState needs the basePath added by hand, but
+    // router.push adds it itself, so it is given this unprefixed form.
+    const href = hrefFor(screen);
 
     if (screen === routeScreen) {
       useScreenNav.getState().setOverride(null);
-      window.history.pushState(null, "", href);
+      window.history.pushState(null, "", withBasePath(href));
       return;
     }
     if (targetIsCached(screen)) {
-      window.history.pushState(null, "", href);
+      window.history.pushState(null, "", withBasePath(href));
       useScreenNav.getState().setOverride(screen);
       return;
     }
+    useScreenNav.getState().setOverride(null);
     router.push(href);
   }
 
@@ -230,6 +246,7 @@ function MobileScreenMenu({
       options={[
         { id: "dashboard", label: "Dashboard" },
         { id: "orders", label: "Orders" },
+        { id: "pdf-printer", label: "PDF printer" },
       ]}
       activeId={effectiveScreen ?? "orders"}
       onSelect={(id) => select(id as Screen)}
@@ -247,19 +264,22 @@ function AppSwitch({
   const items: { screen: Screen; label: string }[] = [
     { screen: "dashboard", label: "Dashboard" },
     { screen: "orders", label: "Orders" },
+    { screen: "pdf-printer", label: "PDF printer" },
   ];
 
   function onNav(e: React.MouseEvent, screen: Screen) {
     if (screen === effectiveScreen) return;
 
-    const href = withBasePath(screen === "orders" ? ordersHref() : dashboardHref());
+    // App-relative. Raw pushState needs the basePath added by hand, but
+    // router.push adds it itself, so it is given this unprefixed form.
+    const href = hrefFor(screen);
 
     // Back to the screen the server actually rendered: just drop the override
     // and put the URL back. No navigation, nothing to fetch.
     if (screen === routeScreen) {
       e.preventDefault();
       useScreenNav.getState().setOverride(null);
-      window.history.pushState(null, "", href);
+      window.history.pushState(null, "", withBasePath(href));
       return;
     }
 
@@ -267,9 +287,13 @@ function AppSwitch({
     // the click falls through to the <Link> and Next navigates for real.
     if (targetIsCached(screen)) {
       e.preventDefault();
-      window.history.pushState(null, "", href);
+      window.history.pushState(null, "", withBasePath(href));
       useScreenNav.getState().setOverride(screen);
+      return;
     }
+    // Uncached: Next navigates for real. Any earlier in-place swap has to go
+    // now, or it keeps painting over the page being navigated to.
+    useScreenNav.getState().setOverride(null);
   }
 
   return (

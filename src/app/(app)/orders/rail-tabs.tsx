@@ -1,15 +1,20 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+
+import { RAIL_SLOT_ID } from "@/components/app-header";
+import { cn } from "@/lib/utils";
+
 /**
- * A sub-tab strip styled and positioned to read as a direct continuation of
- * the app header's own category rail (`OrdersTabs` in app-header.tsx) —
- * same underline-on-active style, same edge-to-edge width, no pill/box
- * chrome. Used for the Unshipped/Packed/Shipped(24h) queue tabs and the
- * Cancelled & RTO Pending/Completed tabs, both of which sit as the first
- * thing in the page body, immediately under the sticky header.
+ * The sub-status tabs (Unshipped/Packed/Shipped(24h), Pending/Completed): a
+ * third band of the app header. It renders into the header's own slot rather
+ * than the page body, so it is attached to the category tabs above it with no
+ * gap, spans the full width like they do, and uses exactly their look (same
+ * container, underline-on-active style, badges).
  *
  * Desktop-only: mobile gets the compact category+sub-status dropdown
- * (`MobileOrdersCrumb`) instead of this and the header's own tab band.
+ * (`MobileOrdersCrumb`) instead.
  */
 export function RailTabs<T extends string>({
   tabs,
@@ -20,21 +25,18 @@ export function RailTabs<T extends string>({
   active: T;
   onSelect: (id: T) => void;
 }) {
-  return (
+  // The slot lives in the header, which renders in the same pass; look it up
+  // after mount so server and client markup agree.
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setSlot(document.getElementById(RAIL_SLOT_ID));
+  }, []);
+  if (!slot) return null;
+
+  return createPortal(
     <div
-      // -mt-6 cancels `<main>`'s own pt-6 (layout.tsx) so this sits flush
-      // against the sticky header above it instead of leaving a gap. Sticky
-      // itself, pinned right at the header's own rendered height (measured:
-      // 104px, stable across breakpoints since band 2 doesn't reflow), so it
-      // stays docked under the header instead of scrolling away with the
-      // list — the same way the header's own tabs behave.
-      className="sticky z-30 -mx-4 -mt-6 hidden items-center gap-6 overflow-x-auto px-4 sm:-mx-6 sm:flex sm:px-6"
-      style={{
-        top: 104,
-        borderTop: "1px solid var(--border)",
-        background: "var(--panel)",
-        scrollbarWidth: "none",
-      }}
+      className="mx-auto hidden max-w-7xl items-center gap-6 overflow-x-auto px-4 sm:flex sm:px-6"
+      style={{ borderTop: "1px solid var(--border)", scrollbarWidth: "none" }}
     >
       {tabs.map((tab) => {
         const isActive = tab.id === active;
@@ -43,14 +45,17 @@ export function RailTabs<T extends string>({
             key={tab.id}
             type="button"
             onClick={() => onSelect(tab.id)}
-            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 py-3 text-[13.5px] font-medium transition-colors"
+            className={cn(
+              "inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 py-3 text-[13.5px] font-medium transition-colors",
+              !isActive && "muted hover:text-[var(--text)]",
+            )}
             style={{
               borderColor: isActive ? "var(--accent)" : "transparent",
-              color: isActive ? "var(--text)" : "var(--muted)",
+              color: isActive ? "var(--text)" : undefined,
               fontWeight: isActive ? 600 : 500,
             }}
           >
-            <span>{tab.label}</span>
+            {tab.label}
             <span
               className="rounded-full px-1.5 py-px text-[10.5px] font-semibold tabular-nums"
               style={{
@@ -63,6 +68,7 @@ export function RailTabs<T extends string>({
           </button>
         );
       })}
-    </div>
+    </div>,
+    slot,
   );
 }

@@ -83,30 +83,37 @@ function pngUnfiltered(raw: Buffer, stride: number, h: number): Buffer {
 
 const num = (s: PDFStream, key: string) => Number(String(s.dict.get(PDFName.of(key))));
 
+/** Un-predicted pixel rows of a 1-bit Flate image, or null for anything else. */
+function decodeBilevel(stream: PDFRawStream) {
+  const filter = String(stream.dict.get(PDFName.of("Filter")));
+  if (filter !== "/FlateDecode" || num(stream, "BitsPerComponent") !== 1) return null;
+  const w = num(stream, "Width");
+  const h = num(stream, "Height");
+  if (!w || !h) return null;
+
+  const stride = Math.ceil(w / 8);
+  const parms = stream.dict.lookupMaybe(PDFName.of("DecodeParms"), PDFDict);
+  const predictor = parms ? Number(String(parms.get(PDFName.of("Predictor")) ?? 1)) : 1;
+  if (predictor !== 1 && predictor < 10) return null; // TIFF predictor: not handled
+
+  try {
+    const inflated = inflateSync(Buffer.from(stream.contents));
+    const raw = predictor >= 10 ? pngUnfilter(inflated, stride, h) : inflated;
+    if (raw.length < stride * h) return null;
+    return { raw, w, h, stride, predictor };
+  } catch {
+    return null;
+  }
+}
+
 /** Returns true if a frame was found and removed. */
 export function stripLabelFrame(doc: PDFDocument, page: PDFPage): boolean {
   let changed = false;
 
   for (const { ref, stream } of findImages(page.node.Resources())) {
-    const filter = String(stream.dict.get(PDFName.of("Filter")));
-    if (filter !== "/FlateDecode" || num(stream, "BitsPerComponent") !== 1) continue;
-    const w = num(stream, "Width");
-    const h = num(stream, "Height");
-    if (!w || !h) continue;
-
-    const stride = Math.ceil(w / 8);
-    const parms = stream.dict.lookupMaybe(PDFName.of("DecodeParms"), PDFDict);
-    const predictor = parms ? Number(String(parms.get(PDFName.of("Predictor")) ?? 1)) : 1;
-    if (predictor !== 1 && predictor < 10) continue; // TIFF predictor: not handled
-
-    let raw: Buffer;
-    try {
-      const inflated = inflateSync(Buffer.from(stream.contents));
-      raw = predictor >= 10 ? pngUnfilter(inflated, stride, h) : inflated;
-    } catch {
-      continue;
-    }
-    if (raw.length < stride * h) continue;
+    const decoded = decodeBilevel(stream);
+    if (!decoded) continue;
+    const { raw, w, h, stride, predictor } = decoded;
 
     const bit = (x: number, y: number) => (raw[y * stride + (x >> 3)] >> (7 - (x & 7))) & 1;
 

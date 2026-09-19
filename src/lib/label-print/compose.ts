@@ -158,7 +158,17 @@ export async function composeFourUp(
       const y = sheet.height - margin - (row + 1) * cellH + (cellH - h) / 2;
       page.drawPage(emb, { x, y, width: w, height: h });
 
-      const box = STAMP_BOX[ref.platform];
+      const fallback = STAMP_BOX[ref.platform];
+      // A measured band is padded a little so the text never touches the table
+      // above it or the routing box below it.
+      const box = ref.stampArea
+        ? {
+            ...ref.stampArea,
+            y: ref.stampArea.y + ref.stampArea.h * 0.06,
+            h: ref.stampArea.h * 0.88,
+            font: fallback?.font ?? 17,
+          }
+        : fallback;
       if (stamp && box && ref.products.length > 0) {
         drawStamp(page, font, ref.products, ref.orderId, box, { x, y, w, h, scale });
       }

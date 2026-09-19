@@ -24,6 +24,18 @@ function meeshoOrderId(text: string): string | null {
   return m ? m[1] : null;
 }
 
+const SIZE_RE = /^(?:(?:[2-9]|10)?x{0,1}s|xs|s|m|l|(?:[2-9]|10)?xl|xxl|xxxl|free\s*size|one\s*size|os|\d{1,3}(?:\.\d)?(?:\s*(?:cm|in|inch|years?|yrs?|months?|m))?)$/i;
+
+/** "Alpha, 2XL, Regular, Wine Maroon" -> size 2XL, colour Wine Maroon. */
+function variation(block: string): { size: string; color: string } {
+  const parts = block.split(",").map((x) => x.trim()).filter(Boolean);
+  if (parts.length === 0) return { size: "-", color: "-" };
+  const color = parts.length > 1 ? parts[parts.length - 1] : "-";
+  const rest = parts.slice(0, -1);
+  const size = rest.find((x) => SIZE_RE.test(x)) ?? rest[1] ?? rest[0] ?? "-";
+  return { size, color };
+}
+
 /**
  * Amazon invoice rows read "<n> <title> (IN, <size system>, <size>, <fit>,
  * <color>) | <ASIN> ( <sku> ) HSN:...". Everything before the first "(IN," is
@@ -31,7 +43,9 @@ function meeshoOrderId(text: string): string | null {
  */
 function amazonProducts(text: string): ProductLine[] {
   const out: ProductLine[] = [];
-  const re = /\(\s*IN\s*,\s*[^,()]+,\s*([^,()]+?)\s*,\s*[^,()]+,\s*([^()]+?)\s*\)\s*\|/gi;
+  // The block after "(IN," may hold 2-6 comma-separated attributes and the
+  // colour may itself contain brackets, e.g. "Navy Blue (Dark)".
+  const re = /\(\s*IN\s*,((?:[^()]|\([^()]*\))+?)\)\s*\|/gi;
   const head = /Total\s+Amount\s+/i.exec(text);
   let from = head ? head.index + head[0].length : 0;
 
@@ -40,7 +54,8 @@ function amazonProducts(text: string): ProductLine[] {
     const lastPrice = [...title.matchAll(/₹\s*[\d,]+(?:\.\d+)?/g)].pop();
     if (lastPrice) title = title.slice(lastPrice.index! + lastPrice[0].length);
     title = title.replace(/^\s*\d+\s+/, "").replace(/\s+/g, " ").trim();
-    if (title) out.push({ name: title, size: m[1].trim(), color: m[2].trim() });
+    const { size, color } = variation(m[1]);
+    if (title) out.push({ name: title, size, color });
     from = m.index + m[0].length;
   }
 

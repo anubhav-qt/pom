@@ -109,8 +109,7 @@ export function DashboardWorkspace({ initialView }: { initialView: DashboardView
 
   return (
     <div className={`space-y-6 ${loading ? "opacity-60 transition-opacity" : "transition-opacity"}`}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold tracking-tight">Dashboard</h1>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <RangePicker active={range} onSelect={(next) => go(next)} />
       </div>
 

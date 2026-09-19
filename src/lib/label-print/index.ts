@@ -1,6 +1,6 @@
 import { classifyPages } from "./classify";
 import { composeFourUp, type ComposeOptions } from "./compose";
-import { extractPageTexts } from "./extract";
+import { extractImageBoxes, extractPageTexts } from "./extract";
 import type { FileReport, LabelRef, PrintRunResult, SourceFile } from "./types";
 
 export * from "./types";
@@ -47,6 +47,8 @@ export async function buildLabelSheets(
 
   if (labels.length === 0) throw new NoLabelsError(reports);
 
+  if (options?.stamp !== false) await measureStampAreas(files, labels);
+
   const seen = new Map<string, number>();
   for (const l of labels) if (l.orderId) seen.set(l.orderId, (seen.get(l.orderId) ?? 0) + 1);
   const duplicates = [...seen].filter(([, n]) => n > 1).map(([id]) => id);
@@ -54,4 +56,34 @@ export async function buildLabelSheets(
   const { pdf, sheets, framesRemoved } = await composeFourUp(files, labels, options);
   const unstamped = labels.filter((l) => l.products.length === 0).length;
   return { pdf, labels, sheets, files: reports, duplicates, framesRemoved, unstamped };
+}
+
+/**
+ * Amazon lays its label out a little differently from carrier to carrier and
+ * places the picture differently on the page, so the stamp goes wherever this
+ * label's own blank band is. Anything that cannot be measured keeps the
+ * platform's default position.
+ */
+async function measureStampAreas(files: SourceFile[], labels: LabelRef[]) {
+  const byFile = new Map<number, LabelRef[]>();
+  for (const l of labels) {
+    if (l.platform === "amazon" && l.products.length > 0) byFile.set(l.fileIndex, [...(byFile.get(l.fileIndex) ?? []), l]);
+  }
+
+  for (const [fileIndex, refs] of byFile) {
+    try {
+      const data = files[fileIndex].data;
+      const boxes = await extractImageBoxes(data, refs.map((r) => r.pageIndex));
+      for (const ref of refs) {
+        const box = boxes.get(ref.pageIndex);
+        const gap = box?.gap;
+        if (!box || !gap) continue;
+        const top = box.top + gap.top * box.height;
+        const bottom = box.top + gap.bottom * box.height;
+        ref.stampArea = { x: box.left + box.width * 0.03, y: top, w: box.width * 0.93, h: bottom - top };
+      }
+    } catch {
+      // Keep the defaults for this file.
+    }
+  }
 }

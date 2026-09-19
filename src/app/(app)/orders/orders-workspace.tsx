@@ -20,7 +20,6 @@ import { OrdersToolbar } from "./orders-toolbar";
 import { AllOrdersTiles, PickList } from "./pick-list";
 import { RailTabs } from "./rail-tabs";
 import { RestockPlanner } from "./restock-planner";
-import { ScanBarcodeButton } from "./scan/scan-button";
 import { getOrdersView, type OrdersView, type OrdersViewParams } from "./view-actions";
 
 /**
@@ -127,7 +126,7 @@ export function OrdersWorkspace({
         <MobileOrdersCrumb />
         <OrdersToolbar activeView="planner" activeChannel={data.channel} query={data.query} />
         <RestockPlanner initialPlan={data.plan} />
-        <MobileOrdersNav activeView="planner" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
+        <MobileOrdersNav activeView="planner" activeChannel={data.channel} query={data.query} />
       </div>
     );
   }
@@ -173,19 +172,14 @@ export function OrdersWorkspace({
           activeChannel={data.channel}
           query={data.query}
           showSwitcher={data.category === "toShip"}
-          rightSlot={
-            <div className="flex items-center gap-2">
-              <CollectionSheetButton rows={data.rows} />
-              <ScanBarcodeButton station="outbound" onDone={refresh} />
-            </div>
-          }
+          rightSlot={<CollectionSheetButton rows={data.rows} />}
         />
         {isAllRoot ? (
           <AllOrdersTiles tiles={data.tiles ?? []} />
         ) : (
           <PickList rows={data.rows} category={data.category} />
         )}
-        <MobileOrdersNav activeView="collection" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
+        <MobileOrdersNav activeView="collection" activeChannel={data.channel} query={data.query} />
       </div>
     );
   }
@@ -194,7 +188,7 @@ export function OrdersWorkspace({
     const setResolved = (resolved: boolean) => go({ ...params, resolved: resolved ? "1" : undefined });
 
     return (
-      <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
+      <div className={`space-y-5 pb-20 ${busy} sm:-mt-6 sm:pb-0`}>
         <MobileOrdersCrumb
           sub={{
             activeId: data.resolved ? "completed" : "pending",
@@ -211,15 +205,14 @@ export function OrdersWorkspace({
           counts={data.counts}
           resolved={data.resolved}
           onResolvedChange={setResolved}
-          rightSlot={<ScanBarcodeButton station="inbound" onDone={refresh} />}
         />
-        <MobileOrdersNav activeView={null} query="" scanStation="inbound" onScanDone={refresh} />
+        <MobileOrdersNav activeView={null} query="" />
       </div>
     );
   }
 
   return (
-    <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
+    <div className={`space-y-5 pb-20 ${busy} sm:-mt-6 sm:pb-0`}>
       <MobileOrdersCrumb
         sub={
           data.isQueueView && data.counts
@@ -269,12 +262,11 @@ export function OrdersWorkspace({
         activeChannel={data.channel}
         query={data.query}
         showSwitcher={data.isQueueView}
-        rightSlot={data.isQueueView ? <ScanBarcodeButton station="outbound" onDone={refresh} /> : undefined}
       />
 
       <OrderTable rows={data.rows} activeTab={data.activeTab} onChanged={refresh} />
 
-      <MobileOrdersNav activeView="list" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
+      <MobileOrdersNav activeView="list" activeChannel={data.channel} query={data.query} />
     </div>
   );
 }
