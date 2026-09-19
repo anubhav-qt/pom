@@ -252,7 +252,7 @@ export function LedgerView({ basis }: { basis: Basis }) {
   const rowCount = view === "products" ? shownProducts.length : shownOrders.length;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5 sm:space-y-[7px]">
       {/* --------------------------------------------------------- controls */}
       <div className="panel flex flex-wrap items-end gap-3 p-4">
         <label className="text-xs">

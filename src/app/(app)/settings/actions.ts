@@ -54,9 +54,9 @@ export async function deleteChannelAccount(id: number) {
  */
 export async function syncNow(accountId: number) {
   await requireUser();
-  const result = await startManualOrderSync(accountId);
-  if (result.ok) revalidatePath("/settings");
-  return result;
+  // No revalidate here: the caller refreshes once when the run finishes, and
+  // revalidating on start would reload the page a second time, too early.
+  return startManualOrderSync(accountId);
 }
 
 /**

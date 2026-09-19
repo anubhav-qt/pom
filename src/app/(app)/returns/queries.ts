@@ -14,6 +14,7 @@ export interface ReturnDeskRow {
   externalOrderId: string | null;
   orderId: number | null;
   item: string;
+  imageUrl: string | null;
   reason: string;
   requestedAt: string | null;
   refundAmount: number;
@@ -78,7 +79,12 @@ export async function getReturnsDesk(): Promise<{
                WHERE t.external_order_id = o.external_order_id AND t.type <> 'Transfer' AND t.status <> 'DEFERRED_RELEASED') AS order_net,
              COALESCE(NULLIF(r.raw->>'Item Name', ''), (
                SELECT COALESCE(NULLIF(oi.title, ''), oi.external_sku) FROM order_items oi WHERE oi.order_id = r.order_id ORDER BY oi.id LIMIT 1
-             ), '') AS item
+             ), '') AS item,
+             (SELECT COALESCE(p.image_url, ci.image_url) FROM order_items oi
+               LEFT JOIN products p ON p.id = oi.product_id
+               LEFT JOIN catalog_images ci ON ci.asin = oi.external_asin AND ci.channel_account_id = o.channel_account_id
+               WHERE oi.order_id = r.order_id AND COALESCE(p.image_url, ci.image_url) IS NOT NULL
+               ORDER BY oi.id LIMIT 1) AS image_url
       FROM returns r
       LEFT JOIN orders o ON o.id = r.order_id
       WHERE r.channel = 'amazon' AND r.kind = 'return'
@@ -108,6 +114,7 @@ export async function getReturnsDesk(): Promise<{
       orderId: r.order_id == null ? null : n(r.order_id),
       externalOrderId: (r.external_order_id as string | null) ?? null,
       item: String(r.item ?? ""),
+      imageUrl: (r.image_url as string | null) ?? null,
       reason: String(r.reason ?? "Unknown"),
       requestedAt: requestedAt?.toISOString() ?? null,
       // The report leaves the refund blank on some rows the ledger has paid.

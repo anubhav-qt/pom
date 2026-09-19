@@ -696,7 +696,7 @@ export function HeaderSearch({ compact }: { compact?: boolean }) {
           key={current}
           name="q"
           defaultValue={current}
-          placeholder={onReturns ? "Search item, reason, order ID…" : "Search order ID, buyer, pincode, SKU…"}
+          placeholder="Search..."
           className="search-input"
         />
         <span className="search-divider" aria-hidden />

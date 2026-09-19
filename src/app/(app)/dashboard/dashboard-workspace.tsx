@@ -138,7 +138,7 @@ export function DashboardWorkspace({
   }, [range, basis, syncStamp]);
 
   return (
-    <div className="relative space-y-6 pb-16 sm:pb-0">
+    <div className="relative space-y-5 pb-16 sm:-mt-6 sm:space-y-[7px] sm:pb-0">
       <RailCrumb
         search={false}
         primary={{
@@ -184,7 +184,7 @@ export function DashboardWorkspace({
 }
 
 function Overview({ view }: { view: DashboardView }) {
-  const { series, stats, buckets, topSkus, finance } = view;
+  const { stats, buckets, topSkus, finance } = view;
   const f = finance.stats;
 
   if (finance.lineCount === 0) {
@@ -203,7 +203,7 @@ function Overview({ view }: { view: DashboardView }) {
   const cancellationRate = stats.totalOrders > 0 ? Math.round((stats.cancelledCount / stats.totalOrders) * 100) : 0;
   const avgSale = f.shippedOrders > 0 ? f.sales / f.shippedOrders : 0;
 
-  const daily = finance.daily.map((d) => ({ day: d.day, orders: 0, revenue: Math.max(0, d.net) }));
+  const daily = finance.daily.map((d) => ({ day: d.day, orders: d.orders, revenue: Math.max(0, d.net) }));
 
   const payoutBars = finance.payouts.map((p) => ({
     key: p.at,
@@ -230,7 +230,7 @@ function Overview({ view }: { view: DashboardView }) {
           },
         ]}
       />
-      <div className="hidden grid-cols-2 gap-3 sm:grid lg:grid-cols-5">
+      <div className="hidden grid-cols-2 gap-3 sm:grid sm:gap-[7px] lg:grid-cols-5">
         <Stat label="Received" value={compactMoney.format(f.net)} tone="ok" hint="After all deductions" />
         <Stat label="Paid to bank" value={compactMoney.format(f.paidOut)} />
         <Stat label="Held by Amazon" value={compactMoney.format(f.onHold)} />
@@ -248,7 +248,7 @@ function Overview({ view }: { view: DashboardView }) {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+      <div className="grid gap-5 sm:gap-[7px] lg:grid-cols-2 [&>*]:min-w-0">
         <div className="panel p-5">
           <h2 className="text-sm font-semibold">Where your sales money went</h2>
           <div className="mb-4" />
@@ -271,7 +271,7 @@ function Overview({ view }: { view: DashboardView }) {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+      <div className="grid gap-5 sm:gap-[7px] lg:grid-cols-2 [&>*]:min-w-0">
         <div className="panel p-5">
           <h2 className="text-sm font-semibold">Payouts</h2>
           <div className="mb-4" />
@@ -285,7 +285,7 @@ function Overview({ view }: { view: DashboardView }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-[7px] lg:grid-cols-4">
         <Stat label="Orders shipped" value={f.shippedOrders} />
         <Stat label="Avg order" value={money(avgSale.toFixed(0))} />
         <Stat
@@ -300,16 +300,16 @@ function Overview({ view }: { view: DashboardView }) {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+      <div className="grid gap-5 sm:gap-[7px] lg:grid-cols-2 [&>*]:min-w-0">
         <div className="panel p-5">
           <h2 className="text-sm font-semibold">Best-selling SKUs</h2>
           <div className="mb-4" />
           <TopSkuBars items={topSkus} format="money" />
         </div>
         <div className="panel p-5">
-          <h2 className="text-sm font-semibold">Orders per day</h2>
+          <h2 className="text-sm font-semibold">Orders shipped per day</h2>
           <div className="mb-3" />
-          <TrendChart data={series} metric="orders" color="var(--accent-2)" format="number" />
+          <TrendChart data={daily} metric="orders" color="var(--accent-2)" format="number" />
         </div>
       </div>
     </>

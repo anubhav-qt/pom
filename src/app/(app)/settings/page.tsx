@@ -39,7 +39,7 @@ export default async function SettingsPage() {
     .limit(25);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5 sm:-mt-[17px] sm:space-y-[7px]">
       <ChannelAccounts
         isOwner={user.role === "owner"}
         accounts={accounts.map((a) => ({

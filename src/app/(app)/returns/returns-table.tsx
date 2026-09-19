@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { RailCrumb } from "@/components/rail-crumb";
 import { Empty, LoadingOverlay, Spinner, Stat, StatStrip } from "@/components/ui";
 import { friendlyItem } from "@/lib/friendly-item";
+import { OrderThumb } from "../orders/order-table";
 import { withBasePath } from "@/lib/base-path";
 import { returnsKey, useReturnsCache, useReturnsNav, type ReturnsFilter, type ReturnsTab } from "@/lib/stores/returns-cache";
 import { useOrdersCache } from "@/lib/stores/orders-cache";
@@ -153,7 +154,7 @@ export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsV
   const sizeCount = reasons.filter((r) => SIZE_REASONS.has(r.reason)).reduce((a, r) => a + r.count, 0);
 
   return (
-    <div className="relative space-y-5 pb-16 sm:pb-0">
+    <div className="relative space-y-5 pb-16 sm:-mt-6 sm:space-y-[7px] sm:pb-0">
       <RailCrumb
         primary={{
           activeId: tab,
@@ -196,7 +197,7 @@ export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsV
           { label: "Amazon paid back", value: money(kpis.reimbursed30), tone: "ok" },
         ]}
       />
-      <div className="hidden grid-cols-2 gap-3 sm:grid lg:grid-cols-4">
+      <div className="hidden grid-cols-2 gap-3 sm:grid sm:gap-[7px] lg:grid-cols-4">
         <Stat label="To check in" value={kpis.toDo} tone={kpis.arrived > 0 ? "warn" : undefined} />
         <Stat
           label="May be owed"
@@ -208,8 +209,8 @@ export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsV
         <Stat label="Amazon paid back" value={money(kpis.reimbursed30)} tone="ok" hint="30 days" />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-w-0 space-y-4">
+      <div className="grid gap-5 sm:gap-[7px] lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-5 sm:space-y-[7px]">
           {tab === "returns" ? (
             <>
               {shown.length === 0 ? (
@@ -287,13 +288,16 @@ function ReturnCard({ row, onChanged }: { row: ReturnDeskRow; onChanged: () => v
   return (
     <div className="panel space-y-3 p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium" title={it.name}>
-            {it.name}
-          </div>
-          <div className="muted text-xs">
-            {[it.size, it.color].filter(Boolean).join(" · ")}
-            {row.requestedAt ? `${it.size || it.color ? " · " : ""}${dayLabel(new Date(row.requestedAt))}` : ""}
+        <div className="flex min-w-0 items-center gap-3">
+          <OrderThumb src={row.imageUrl} alt={it.name} size="h-11 w-11 shrink-0" />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium" title={it.name}>
+              {it.name}
+            </div>
+            <div className="muted text-xs">
+              {[it.size, it.color].filter(Boolean).join(" · ")}
+              {row.requestedAt ? `${it.size || it.color ? " · " : ""}${dayLabel(new Date(row.requestedAt))}` : ""}
+            </div>
           </div>
         </div>
         <StagePill row={row} />
