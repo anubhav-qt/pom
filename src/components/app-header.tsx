@@ -117,8 +117,14 @@ export function AppHeader({
         >
           PariBelle
         </Link>
+        {/* On the PDF printer there is no search to make room for, so mobile
+            gets the same toggle as desktop instead of the hamburger. */}
         <div className="sm:hidden">
-          <MobileScreenMenu effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
+          {effectiveScreen === "pdf-printer" ? (
+            <AppSwitch effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} hidePrinter />
+          ) : (
+            <MobileScreenMenu effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
+          )}
         </div>
 
         <div className="hidden sm:block">
@@ -154,7 +160,6 @@ export function AppHeader({
       </div>
 
       {/* ---------------------------------------------------------- band 2 -- */}
-      {onOrders ? <OrdersTabs counts={counts} /> : null}
 
       {/* ---------------------------------------------------------- band 3 -- */}
       {/* Empty slot the Orders sub-status tabs (`RailTabs`) portal into, so they
@@ -246,7 +251,6 @@ function MobileScreenMenu({
       options={[
         { id: "dashboard", label: "Dashboard" },
         { id: "orders", label: "Orders" },
-        { id: "pdf-printer", label: "PDF printer" },
       ]}
       activeId={effectiveScreen ?? "orders"}
       onSelect={(id) => select(id as Screen)}
@@ -257,14 +261,17 @@ function MobileScreenMenu({
 function AppSwitch({
   effectiveScreen,
   routeScreen,
+  hidePrinter = false,
 }: {
   effectiveScreen: Screen | null;
   routeScreen: Screen | null;
+  /** Mobile reaches the printer from the Orders bottom bar, not from here. */
+  hidePrinter?: boolean;
 }) {
   const items: { screen: Screen; label: string }[] = [
     { screen: "dashboard", label: "Dashboard" },
     { screen: "orders", label: "Orders" },
-    { screen: "pdf-printer", label: "PDF printer" },
+    ...(hidePrinter ? [] : [{ screen: "pdf-printer" as Screen, label: "PDF printer" }]),
   ];
 
   function onNav(e: React.MouseEvent, screen: Screen) {
@@ -618,73 +625,13 @@ export function useOrderTabs() {
   return { activeKey, select, tabs: ORDER_TABS };
 }
 
-function OrdersTabs({ counts }: { counts: HeaderCounts }) {
-  const params = useSearchParams();
-  const { activeKey, select, tabs } = useOrderTabs();
-
-  const badgeFor: Partial<Record<TabKey, number>> = {
-    toShip: counts.toShip,
-    shipped: counts.shipped,
-    cancellations: counts.cancelledRto,
-  };
-
-  return (
-    <div
-      // Desktop-only: mobile gets `MobileOrdersCrumb`'s compact dropdown
-      // instead, rendered in the page body just under this header.
-      className="mx-auto hidden max-w-7xl items-center gap-6 overflow-x-auto px-4 sm:flex sm:px-6"
-      style={{ borderTop: "1px solid var(--border)", scrollbarWidth: "none" }}
-    >
-      {tabs.map((tab) => {
-        const active = tab.key === activeKey;
-        const badge = badgeFor[tab.key];
-        return (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => select(tab.params)}
-            className={cn(
-              "inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 py-3 text-[13.5px] font-medium transition-colors",
-              !active && "muted hover:text-[var(--text)]",
-            )}
-            style={{
-              borderColor: active ? "var(--accent)" : "transparent",
-              color: active ? "var(--text)" : undefined,
-              fontWeight: active ? 600 : 500,
-            }}
-          >
-            {tab.label}
-            {badge ? (
-              <span
-                className="rounded-full px-1.5 py-px text-[10.5px] font-semibold tabular-nums"
-                style={{
-                  background: active ? "var(--accent-soft)" : "var(--panel-2)",
-                  color: active ? "#0b7fb0" : "var(--muted)",
-                }}
-              >
-                {badge}
-              </span>
-            ) : null}
-          </button>
-        );
-      })}
-
-      <div className="flex-1" />
-
-      <div className="hidden py-2 md:block">
-        <HeaderSearch />
-      </div>
-    </div>
-  );
-}
-
 /**
  * The order search box — band 2's own version (desktop, `md` up) and band 1's
  * compact mobile stand-in (`compact`) both render this, so search keeps
  * behaving identically (same `q` param, same "keep whatever tab you're on")
  * everywhere it appears.
  */
-function HeaderSearch({ compact }: { compact?: boolean }) {
+export function HeaderSearch({ compact }: { compact?: boolean }) {
   const params = useSearchParams();
 
   function onSearch(e: React.FormEvent<HTMLFormElement>) {

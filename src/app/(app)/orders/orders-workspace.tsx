@@ -18,7 +18,6 @@ import { MobileOrdersNav } from "./mobile-orders-nav";
 import { OrderTable } from "./order-table";
 import { OrdersToolbar } from "./orders-toolbar";
 import { AllOrdersTiles, PickList } from "./pick-list";
-import { RailTabs } from "./rail-tabs";
 import { RestockPlanner } from "./restock-planner";
 import { getOrdersView, type OrdersView, type OrdersViewParams } from "./view-actions";
 
@@ -67,6 +66,8 @@ export function OrdersWorkspace({
   }, [adopt]);
 
   const key = ordersViewKey(params);
+  // A finished sync empties the cache; re-read so new orders show without a reload.
+  const syncStamp = useOrdersCache((s) => s.syncStamp);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,7 +103,7 @@ export function OrdersWorkspace({
     };
     // `key` is the whole identity of a view; `params` only ever changes with it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, syncStamp]);
 
   /** Re-read the current tab from the server after we changed something. */
   function refresh() {
@@ -188,7 +189,7 @@ export function OrdersWorkspace({
     const setResolved = (resolved: boolean) => go({ ...params, resolved: resolved ? "1" : undefined });
 
     return (
-      <div className={`space-y-5 pb-20 ${busy} sm:-mt-6 sm:pb-0`}>
+      <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
         <MobileOrdersCrumb
           sub={{
             activeId: data.resolved ? "completed" : "pending",
@@ -212,7 +213,7 @@ export function OrdersWorkspace({
   }
 
   return (
-    <div className={`space-y-5 pb-20 ${busy} sm:-mt-6 sm:pb-0`}>
+    <div className={`space-y-5 pb-20 ${busy} sm:pb-0`}>
       <MobileOrdersCrumb
         sub={
           data.isQueueView && data.counts
@@ -231,21 +232,6 @@ export function OrdersWorkspace({
             : undefined
         }
       />
-
-      {/* Styled and positioned to read as a direct continuation of the
-          header's own category rail — first thing in the page, no gap.
-          Desktop only; mobile gets the crumb above instead. */}
-      {data.isQueueView && data.counts ? (
-        <RailTabs
-          tabs={[
-            { id: "unshipped" as const, label: "Unshipped", count: data.counts.unshipped },
-            { id: "packed" as const, label: "Packed", count: data.counts.packed },
-            { id: "shipped24h" as const, label: "Shipped (24h)", count: data.counts.shipped24h },
-          ]}
-          active={data.activeTab}
-          onSelect={(tab) => go({ ...params, tab: tab === "unshipped" ? undefined : tab })}
-        />
-      ) : null}
 
       {data.isQueueView && data.counts && data.activeTab === "unshipped" && data.counts.late > 0 ? (
         <div

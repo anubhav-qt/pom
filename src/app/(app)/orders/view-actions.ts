@@ -328,10 +328,9 @@ export async function getOrdersView(params: OrdersViewParams): Promise<OrdersVie
       totalAmount: o.totalAmount,
       isCod: o.isCod,
       fulfilmentState: o.fulfilmentState ?? "to_pack",
-      isPending:
-        rawStatus === "Pending" ||
-        rawStatus === "PendingAvailability" ||
-        (o.status === "new" && !o.buyerName),
+      // Only what Amazon itself reports as pending. Amazon hides the buyer on
+      // every unshipped order, so a missing name says nothing about it.
+      isPending: rawStatus === "Pending" || rawStatus === "PendingAvailability",
       items: (itemsByOrder.get(o.id) ?? []).map((it) => ({
         sku: it.externalSku,
         title: it.title,

@@ -45,6 +45,8 @@ export interface LabelRef {
    * its top-left), when it could be measured. Otherwise the platform default.
    */
   stampArea?: { x: number; y: number; w: number; h: number };
+  /** Part of the page to keep (fractions from its top-left); the rest is dropped. */
+  crop?: { x: number; y: number; w: number; h: number };
 }
 
 export interface FileReport {

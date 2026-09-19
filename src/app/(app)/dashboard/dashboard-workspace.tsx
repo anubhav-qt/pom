@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Stat } from "@/components/ui";
+import { useOrdersCache } from "@/lib/stores/orders-cache";
 import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
 import { stripBasePath } from "@/lib/base-path";
 import { money } from "@/lib/utils";
@@ -74,6 +75,9 @@ export function DashboardWorkspace({ initialView }: { initialView: DashboardView
     return () => window.removeEventListener("popstate", onPop);
   }, [adopt]);
 
+  // A finished sync empties the cache; re-read so fresh numbers show without a reload.
+  const syncStamp = useOrdersCache((s) => s.syncStamp);
+
   useEffect(() => {
     let cancelled = false;
     const cache = useDashboardCache.getState();
@@ -97,7 +101,7 @@ export function DashboardWorkspace({ initialView }: { initialView: DashboardView
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [range, syncStamp]);
 
   const { series, stats, buckets, topSkus } = view;
 

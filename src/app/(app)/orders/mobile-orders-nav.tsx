@@ -1,7 +1,8 @@
 "use client";
 
 import { ClipboardList, LayoutGrid, List as ListIcon, Printer, Sparkles } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { withBasePath } from "@/lib/base-path";
+import { useScreenNav } from "@/lib/stores/screen-nav";
 
 import type { Channel } from "@/db/schema";
 import { useAssistantUi } from "@/lib/stores/assistant-ui";
@@ -39,7 +40,6 @@ export function MobileOrdersNav({
 }) {
   const go = useOrdersNav((s) => s.go);
   const setAssistantOpen = useAssistantUi((s) => s.setOpen);
-  const router = useRouter();
 
   // Switching to any other destination should leave the assistant panel
   // behind, not stranded open over whatever screen you navigated to.
@@ -71,7 +71,10 @@ export function MobileOrdersNav({
       active: false,
       onClick: () => {
         setAssistantOpen(false);
-        router.push("/pdf-printer");
+        // Swap in place, like the header toggle does. A real navigation would
+        // leave the Orders override set, which keeps painting over the printer.
+        window.history.pushState(null, "", withBasePath("/pdf-printer"));
+        useScreenNav.getState().setOverride("pdf-printer");
       },
     },
     { key: "ai", label: "AI", Icon: Sparkles, active: false, onClick: () => setAssistantOpen(true) },

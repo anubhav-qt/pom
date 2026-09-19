@@ -1,13 +1,16 @@
 import type { PageInfo, ProductLine } from "./types";
 
 /*
- * TODO(flipkart): no sample PDF yet, so Flipkart pages are not recognised and
- * come back as "unrecognised" in the run report. When one arrives, add a
- * detector below (see isMeeshoPage) and a product parser, then stamp it in
- * compose.ts's STAMP_BOX. Tracked in docs/LABEL_PRINT.md.
+ * Flipkart: label on top, invoice below, on one page. Only the label is kept
+ * and it is never stamped, so no product parser is needed.
  */
 
 const INVOICE_MARKERS = ["tax invoice", "bill of supply", "cash memo"];
+
+/** Flipkart's page: E-Kart label above a tax invoice, cut apart by a dashed line. */
+function isFlipkartPage(t: string) {
+  return t.includes("awb no") && t.includes("shipping/customer address");
+}
 
 /** Meesho prints the courier label and the invoice on one page. */
 function isMeeshoPage(t: string) {
@@ -102,6 +105,15 @@ export function classifyPages(texts: string[]): PageInfo[] {
 
     if (!text) {
       return { ...base, kind: "label", platform: "unknown", orderId: null, reason: "no text layer (graphic label)" };
+    }
+    if (isFlipkartPage(lower)) {
+      return {
+        ...base,
+        kind: "label",
+        platform: "flipkart",
+        orderId: /OD\d{15,22}/.exec(text)?.[0] ?? null,
+        reason: "label + invoice page",
+      };
     }
     if (isMeeshoPage(lower)) {
       return {

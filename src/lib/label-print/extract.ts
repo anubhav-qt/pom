@@ -173,3 +173,128 @@ export async function extractImageBoxes(data: Uint8Array, pageIndexes: number[])
   await doc.destroy();
   return out;
 }
+
+/** Everything drawn on a page, as fractions of the page from its top-left. */
+export interface PageLayout {
+  /** Bounding box of all ink: text, pictures and rules. Null on a blank page. */
+  ink: { left: number; top: number; right: number; bottom: number } | null;
+  /**
+   * The outline of a boxed label printed above a cut line (Flipkart puts the
+   * label on top and the invoice below). Found from the page's own rules.
+   */
+  frame?: { left: number; top: number; width: number; height: number };
+}
+
+const PAINT_PATH = new Set<number>();
+
+/**
+ * Where things are on each requested page (0-based), read from the drawing
+ * operators and text positions. Used to place things relative to what is
+ * actually on the page instead of at fixed spots.
+ */
+export async function extractPageLayouts(data: Uint8Array, pageIndexes: number[]): Promise<Map<number, PageLayout>> {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const { OPS } = pdfjs;
+  if (PAINT_PATH.size === 0) {
+    for (const op of [OPS.fill, OPS.eoFill, OPS.stroke, OPS.closeStroke, OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke]) {
+      PAINT_PATH.add(op);
+    }
+  }
+  const doc = await pdfjs.getDocument({
+    data: data.slice(),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    useSystemFonts: true,
+    verbosity: 0,
+  }).promise;
+
+  const out = new Map<number, PageLayout>();
+  for (const index of pageIndexes) {
+    const page = await doc.getPage(index + 1);
+    const [vx0, vy0, vx1, vy1] = page.view;
+    const W = vx1 - vx0;
+    const H = vy1 - vy0;
+    const { fnArray, argsArray } = await page.getOperatorList();
+
+    // Boxes in page fractions; y measured downward from the top.
+    type Box = { l: number; t: number; r: number; b: number };
+    const boxes: Box[] = [];
+    const rules: Box[] = [];
+    const add = (x0: number, y0: number, x1: number, y1: number, thin: boolean) => {
+      const box = {
+        l: (Math.min(x0, x1) - vx0) / W,
+        r: (Math.max(x0, x1) - vx0) / W,
+        t: (vy1 - Math.max(y0, y1)) / H,
+        b: (vy1 - Math.min(y0, y1)) / H,
+      };
+      // A page-sized backdrop is not content.
+      if ((box.r - box.l) * (box.b - box.t) > 0.9) return;
+      boxes.push(box);
+      if (thin) rules.push(box);
+    };
+
+    let ctm: Matrix = [1, 0, 0, 1, 0, 0];
+    const stack: Matrix[] = [];
+    let path: number[] | null = null;
+    for (let i = 0; i < fnArray.length; i++) {
+      const fn = fnArray[i];
+      const args = argsArray[i];
+      if (fn === OPS.save) stack.push(ctm);
+      else if (fn === OPS.restore) ctm = stack.pop() ?? ctm;
+      else if (fn === OPS.transform) ctm = mul(ctm, args as Matrix);
+      else if (fn === OPS.paintFormXObjectBegin) {
+        stack.push(ctm);
+        if (args?.[0]) ctm = mul(ctm, args[0] as Matrix);
+      } else if (fn === OPS.paintFormXObjectEnd) ctm = stack.pop() ?? ctm;
+      else if (fn === OPS.constructPath) path = (args?.[2] as number[] | undefined) ?? null;
+      else if (fn === OPS.endPath || fn === OPS.clip || fn === OPS.eoClip) path = null;
+      else if (PAINT_PATH.has(fn) && path) {
+        const [a, b, c, d] = path;
+        const xs = [a, c].flatMap((x) => [b, d].map((y) => ctm[0] * x + ctm[2] * y + ctm[4]));
+        const ys = [a, c].flatMap((x) => [b, d].map((y) => ctm[1] * x + ctm[3] * y + ctm[5]));
+        const w = Math.max(...xs) - Math.min(...xs);
+        const h = Math.max(...ys) - Math.min(...ys);
+        add(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys), Math.min(w, h) < 3 && Math.max(w, h) >= 60);
+        path = null;
+      } else if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject) {
+        const xs = [0, 1].flatMap((u) => [0, 1].map((v) => ctm[0] * u + ctm[2] * v + ctm[4]));
+        const ys = [0, 1].flatMap((u) => [0, 1].map((v) => ctm[1] * u + ctm[3] * v + ctm[5]));
+        add(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys), false);
+      }
+    }
+
+    const content = await page.getTextContent();
+    for (const it of content.items) {
+      if (!("str" in it) || !it.str.trim()) continue;
+      const x = it.transform[4];
+      const y = it.transform[5];
+      add(x, y - it.height * 0.25, x + it.width, y + it.height * 0.75, false);
+    }
+
+    const layout: PageLayout = { ink: null };
+    if (boxes.length > 0) {
+      layout.ink = {
+        left: Math.min(...boxes.map((b) => b.l)),
+        top: Math.min(...boxes.map((b) => b.t)),
+        right: Math.max(...boxes.map((b) => b.r)),
+        bottom: Math.max(...boxes.map((b) => b.b)),
+      };
+    }
+
+    // The label frame: rules that are not page-wide, above the first page-wide
+    // rule (the cut line separating the label from the invoice).
+    const cut = Math.min(...rules.filter((r) => r.r - r.l >= 0.6).map((r) => r.t), 1);
+    const frameRules = rules.filter((r) => r.r - r.l < 0.6 && r.b <= cut + 0.002);
+    if (frameRules.length >= 4 && cut < 1) {
+      const l = Math.min(...frameRules.map((r) => r.l));
+      const t = Math.min(...frameRules.map((r) => r.t));
+      const r = Math.max(...frameRules.map((x) => x.r));
+      const b = Math.max(...frameRules.map((x) => x.b));
+      layout.frame = { left: l, top: t, width: r - l, height: b - t };
+    }
+    out.set(index, layout);
+    page.cleanup();
+  }
+  await doc.destroy();
+  return out;
+}

@@ -17,12 +17,10 @@ export interface ComposeOptions {
 const A4 = { width: 595.28, height: 841.89 };
 
 /**
- * Where the stamp goes on each platform's page, as fractions of the source
- * page measured from its top-left, plus the largest font (in source points).
- *
- * Amazon: the empty band between the customer-declaration table and the
- * routing box. Meesho: the empty area under the invoice at the foot of the
- * page. These are the numbers to nudge if the stamp sits in the wrong place.
+ * Fallback stamp position per platform (fractions of the source page from its
+ * top-left, plus the largest font in source points), used only when the
+ * label's own blank space could not be measured (see index.ts). Flipkart is
+ * never stamped.
  */
 const STAMP_BOX: Partial<Record<Platform, { x: number; y: number; w: number; h: number; font: number }>> = {
   amazon: { x: 0.085, y: 0.775, w: 0.86, h: 0.072, font: 17 },
@@ -132,8 +130,18 @@ export async function composeFourUp(
       sources.set(ref.fileIndex, src);
     }
     const page = src.getPage(ref.pageIndex);
-    if (stripLabelFrame(src, page)) framesRemoved++;
-    embedded.set(key, await out.embedPage(page));
+    if (ref.platform !== "flipkart" && stripLabelFrame(src, page)) framesRemoved++;
+    let bounds: { left: number; bottom: number; right: number; top: number } | undefined;
+    if (ref.crop) {
+      const { x, y, width, height } = page.getMediaBox();
+      bounds = {
+        left: x + ref.crop.x * width,
+        right: x + (ref.crop.x + ref.crop.w) * width,
+        top: y + height - ref.crop.y * height,
+        bottom: y + height - (ref.crop.y + ref.crop.h) * height,
+      };
+    }
+    embedded.set(key, await out.embedPage(page, bounds));
   }
 
   const cellW = (sheet.width - margin * 2) / 2;
@@ -159,17 +167,18 @@ export async function composeFourUp(
       page.drawPage(emb, { x, y, width: w, height: h });
 
       const fallback = STAMP_BOX[ref.platform];
+      const measured = ref.stampArea && ref.platform !== "flipkart" ? ref.stampArea : null;
       // A measured band is padded a little so the text never touches the table
       // above it or the routing box below it.
-      const box = ref.stampArea
+      const box = measured
         ? {
-            ...ref.stampArea,
-            y: ref.stampArea.y + ref.stampArea.h * 0.06,
-            h: ref.stampArea.h * 0.88,
+            ...measured,
+            y: measured.y + measured.h * 0.06,
+            h: measured.h * 0.88,
             font: fallback?.font ?? 17,
           }
         : fallback;
-      if (stamp && box && ref.products.length > 0) {
+      if (stamp && ref.platform !== "flipkart" && box && ref.products.length > 0) {
         drawStamp(page, font, ref.products, ref.orderId, box, { x, y, w, h, scale });
       }
     }

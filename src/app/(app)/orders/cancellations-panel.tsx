@@ -12,7 +12,6 @@ import { dayLabel, money } from "@/lib/utils";
 import { checkInCancellation, reopenCancellation } from "./actions";
 import { BarcodeIcon, OrderThumb } from "./order-table";
 import type { CancellationRecord } from "./queries";
-import { RailTabs } from "./rail-tabs";
 import { ScanModal } from "./scan/scan-modal";
 
 export function CancellationsPanel({
@@ -63,17 +62,6 @@ export function CancellationsPanel({
 
   return (
     <div className="space-y-4">
-      {/* Styled and positioned to read as a direct continuation of the
-          header's own category rail — first thing in the page, no gap. */}
-      <RailTabs
-        tabs={[
-          { id: "pending" as const, label: "Pending", count: counts.pending },
-          { id: "completed" as const, label: "Completed", count: counts.completed },
-        ]}
-        active={resolved ? "completed" : "pending"}
-        onSelect={(id) => selectResolved(id === "completed")}
-      />
-
       {/* Scan Barcode moves to the mobile bottom nav's "Scanner" tab; this
           stays for desktop, which has no such nav. */}
       <div className="hidden justify-end sm:flex">{rightSlot}</div>
