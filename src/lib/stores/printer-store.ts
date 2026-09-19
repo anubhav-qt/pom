@@ -18,9 +18,18 @@ const LOADER_HTML = `<!doctype html><title>POM</title><meta name="viewport" cont
 html,body{height:100%;margin:0}
 body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
 background:linear-gradient(180deg,#eef7fb,#f8fbfd);font:500 14px system-ui,sans-serif;color:#3a2a30}
-.s{width:34px;height:34px;border-radius:50%;border:3px solid #cdeaf5;border-top-color:#0ea5d9;animation:r .8s linear infinite}
-@keyframes r{to{transform:rotate(360deg)}}
-</style><div class="s"></div><div>Building your label sheet</div>`;
+.s{--z:2.8rem;position:relative;width:var(--z);height:var(--z)}
+.s i{position:absolute;inset:0;display:flex;align-items:center}
+.s i:before{content:"";width:20%;height:20%;border-radius:50%;background:#0ea5e9;transform:scale(0);opacity:.5;animation:p 1s ease-in-out infinite;box-shadow:0 0 20px rgba(14,165,233,.3)}
+.s i:nth-child(2){transform:rotate(45deg)}.s i:nth-child(2):before{animation-delay:-0.875s}
+.s i:nth-child(3){transform:rotate(90deg)}.s i:nth-child(3):before{animation-delay:-0.75s}
+.s i:nth-child(4){transform:rotate(135deg)}.s i:nth-child(4):before{animation-delay:-0.625s}
+.s i:nth-child(5){transform:rotate(180deg)}.s i:nth-child(5):before{animation-delay:-0.5s}
+.s i:nth-child(6){transform:rotate(225deg)}.s i:nth-child(6):before{animation-delay:-0.375s}
+.s i:nth-child(7){transform:rotate(270deg)}.s i:nth-child(7):before{animation-delay:-0.25s}
+.s i:nth-child(8){transform:rotate(315deg)}.s i:nth-child(8):before{animation-delay:-0.125s}
+@keyframes p{0%,100%{transform:scale(0);opacity:.5}50%{transform:scale(1);opacity:1}}
+</style><div class="s"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div>Building your label sheet</div>`;
 const isPdf = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
 
 interface PrinterState {

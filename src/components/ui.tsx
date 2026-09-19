@@ -65,6 +65,22 @@ export function StatusBadge({ status }: { status: OrderStatus }) {
   );
 }
 
+/** Eight pulsing dots in a ring. Brand blue by default; `color` / `size` override. */
+export function Spinner({ size = "2.8rem", color, className }: { size?: string; color?: string; className?: string }) {
+  return (
+    <div
+      className={cn("dot-spinner", className)}
+      style={{ "--uib-size": size, ...(color ? { "--uib-color": color } : {}) } as React.CSSProperties}
+      role="status"
+      aria-label="Loading"
+    >
+      {Array.from({ length: 8 }, (_, i) => (
+        <div key={i} className="dot-spinner__dot" />
+      ))}
+    </div>
+  );
+}
+
 export function Empty({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="flex flex-col items-center px-4 py-20 text-center">
