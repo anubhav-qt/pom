@@ -3,18 +3,18 @@
 import { LoadingOverlay } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 
-import { Segmented } from "@/components/segmented";
+import { RailCrumb } from "@/components/rail-crumb";
 import { Empty, Stat, StatStrip } from "@/components/ui";
 import { useOrdersCache } from "@/lib/stores/orders-cache";
 import { dashKey, useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
+import { useLedgerNav } from "@/lib/stores/ledger-cache";
 import { stripBasePath, withBasePath } from "@/lib/base-path";
 import { cn, money } from "@/lib/utils";
 
 import { StatusBars, TopSkuBars, TrendChart } from "./charts";
 import { DonutChart, LabelBars } from "./finance-charts";
 import { LedgerView } from "./ledger-view";
-import { isBasis, isRangePreset, type Basis, type RangePreset } from "./range";
-import { RangePicker } from "./range-picker";
+import { RANGE_LABEL, RANGE_PRESETS, isBasis, isRangePreset, type Basis, type RangePreset } from "./range";
 import { getDashboardView, type DashboardView } from "./view-actions";
 
 /**
@@ -72,6 +72,7 @@ export function DashboardWorkspace({
   const basis = useDashboardNav((s) => s.basis);
   const adopt = useDashboardNav((s) => s.adopt);
   const go = useDashboardNav((s) => s.go);
+  const ledgerView = useLedgerNav((s) => s.view);
 
   const [tab, setTab] = useState<Tab>(initialTab);
   const [view, setView] = useState<DashboardView>(initialView);
@@ -138,26 +139,42 @@ export function DashboardWorkspace({
 
   return (
     <div className="relative space-y-6 pb-16 sm:pb-0">
-      <div className="flex flex-wrap items-center gap-3">
-        <Segmented
-          label="Finance view"
-          items={[
-            { key: "overview" as Tab, label: "Overview" },
-            { key: "ledger" as Tab, label: "Ledger" },
-          ]}
-          value={tab}
-          onChange={selectTab}
-        />
-        <div className="ml-auto flex flex-wrap items-center gap-3">
-          <Segmented
-            label="Count money by"
-            items={(["paid", "ordered"] as Basis[]).map((b) => ({ key: b, label: BASIS_LABEL[b] }))}
-            value={basis}
-            onChange={(b) => go({ basis: b })}
-          />
-          {tab === "overview" ? <RangePicker active={range} onSelect={(next) => go({ range: next })} /> : null}
-        </div>
-      </div>
+      <RailCrumb
+        search={false}
+        primary={{
+          activeId: tab,
+          activeLabel: tab === "overview" ? "Overview" : "Ledger",
+          options: [
+            { id: "overview", label: "Overview" },
+            { id: "ledger", label: "Ledger" },
+          ],
+          onSelect: (id) => selectTab(id as Tab),
+        }}
+        sub={
+          tab === "overview"
+            ? {
+                activeId: range,
+                activeLabel: RANGE_LABEL[range],
+                options: RANGE_PRESETS.map((r) => ({ id: r, label: RANGE_LABEL[r] })),
+                onSelect: (id) => go({ range: id as RangePreset }),
+              }
+            : {
+                activeId: ledgerView,
+                activeLabel: ledgerView === "products" ? "Products" : "Orders",
+                options: [
+                  { id: "products", label: "Products" },
+                  { id: "orders", label: "Orders" },
+                ],
+                onSelect: (id) => useLedgerNav.getState().set({ view: id as "products" | "orders" }),
+              }
+        }
+        third={{
+          activeId: basis,
+          activeLabel: BASIS_LABEL[basis],
+          options: (["paid", "ordered"] as Basis[]).map((b) => ({ id: b, label: BASIS_LABEL[b] })),
+          onSelect: (id) => go({ basis: id as Basis }),
+        }}
+      />
 
       {tab === "ledger" ? <LedgerView basis={basis} /> : <Overview view={view} />}
 

@@ -19,11 +19,14 @@ export function Modal({
   onClose,
   children,
   width = "36rem",
+  aboveNav = false,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   width?: string;
+  /** On a phone, stop above the bottom nav instead of covering it. */
+  aboveNav?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -40,9 +43,9 @@ export function Modal({
   }, [onClose]);
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-stretch justify-center overflow-y-auto sm:items-start sm:px-4 sm:pb-10 sm:pt-20 lg:pt-28">
+    <div className={`fixed inset-x-0 top-0 z-50 flex items-stretch justify-center overflow-y-auto sm:items-start sm:px-4 sm:pb-10 sm:pt-20 lg:pt-28 ${aboveNav ? "bottom-[calc(56px+env(safe-area-inset-bottom))] sm:bottom-0" : "bottom-0"}`}>
       <div
-        className="fixed inset-0"
+        className={`fixed inset-x-0 top-0 ${aboveNav ? "bottom-[calc(56px+env(safe-area-inset-bottom))] sm:bottom-0" : "bottom-0"}`}
         style={{ background: "rgba(10, 20, 30, 0.35)", backdropFilter: "blur(3px)" }}
         onClick={onClose}
         aria-hidden

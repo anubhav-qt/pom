@@ -62,6 +62,7 @@ export function MobileNav() {
   /** Open an Orders view, swapping in place when it is cached and navigating when it is not. */
   function openOrders(next: OrdersViewParams) {
     setAssistantOpen(false);
+    setScanning(false);
     if (onOrders) {
       useOrdersNav.getState().go(next);
       return;
@@ -122,13 +123,14 @@ export function MobileNav() {
       active: screen === "pdf-printer",
       onClick: () => {
         setAssistantOpen(false);
+        setScanning(false);
         // Swap in place, like the header toggle does. A real navigation would
         // leave a screen override set, which keeps painting over the printer.
         window.history.pushState(null, "", withBasePath("/pdf-printer"));
         useScreenNav.getState().setOverride("pdf-printer");
       },
     },
-    { kind: "button", key: "ai", label: "AI", Icon: Sparkles, active: false, onClick: () => setAssistantOpen(true) },
+    { kind: "button", key: "ai", label: "AI", Icon: Sparkles, active: false, onClick: () => { setScanning(false); setAssistantOpen(true); } },
   ];
 
   return (
