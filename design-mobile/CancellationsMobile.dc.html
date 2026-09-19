@@ -1,0 +1,123 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: #0f2536; font-feature-settings: "cv11","ss01"; -webkit-font-smoothing: antialiased; }
+    a { color: #0ea5e9; } a:hover { color: #0284c7; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  </style>
+</helmet>
+
+<!-- Rail 2 of 2 — "Cancelled & RTO" panel (cancellations-panel.tsx), reached
+     from the same band-2 tab strip as the To Ship rail. Different component,
+     different columns and actions — kept separate rather than folded into
+     one generic list. Mirrors CancellationsPanel's real Pending/Completed
+     sub-tabs and its physical check-in workflow. -->
+<div style="width: 375px; height: 812px; box-sizing: border-box; background: #f4f9fc; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="flex-shrink: 0; background: #ffffff; border-bottom: 1px solid rgba(13,110,140,0.1);">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px;">
+      <div style="font-size: 16px; font-weight: 600; letter-spacing: -0.01em;">Orders</div>
+      <div style="flex-grow: 1;"></div>
+      <button style="width: 34px; height: 34px; border-radius: 999px; border: 1px solid rgba(13,110,140,0.1); background: #ffffff; display: flex; align-items: center; justify-content: center;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0f2536" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      </button>
+    </div>
+    <div style="display: flex; gap: 8px; padding: 0 16px 10px; overflow-x: auto;">
+      <div style="flex-shrink: 0; padding: 7px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 500; color: #5c7386; background: #eef6fa; border: 1px solid rgba(13,110,140,0.1);">To Ship</div>
+      <div style="flex-shrink: 0; padding: 7px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 500; color: #5c7386; background: #eef6fa; border: 1px solid rgba(13,110,140,0.1);">Shipped</div>
+      <div style="flex-shrink: 0; padding: 7px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 500; color: #5c7386; background: #eef6fa; border: 1px solid rgba(13,110,140,0.1);">Delivered</div>
+      <div style="flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 600; color: #fff; background: linear-gradient(135deg, #0ea5e9, #22d3ee);">Cancelled &amp; RTO <span style="background: rgba(255,255,255,0.28); border-radius: 999px; padding: 1px 6px; font-size: 10.5px;">9</span></div>
+      <div style="flex-shrink: 0; padding: 7px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 500; color: #5c7386; background: #eef6fa; border: 1px solid rgba(13,110,140,0.1);">All orders</div>
+    </div>
+  </div>
+
+  <!-- Pending / Completed sub-tabs — CancellationsPanel's real SubTab component -->
+  <div style="flex-shrink: 0; padding: 10px 16px; background: #ffffff; border-bottom: 1px solid rgba(13,110,140,0.1);">
+    <div style="display: inline-flex; border-radius: 10px; padding: 3px; background: #f4f9fc; border: 1px solid rgba(13,110,140,0.1);">
+      <div style="padding: 6px 14px; border-radius: 7px; font-size: 12.5px; font-weight: 600; background: rgba(14,165,233,0.1); color: #0b7fb0;">Pending <span style="opacity: 0.7; margin-left: 3px;">6</span></div>
+      <div style="padding: 6px 14px; border-radius: 7px; font-size: 12.5px; font-weight: 500; color: #5c7386;">Completed <span style="opacity: 0.7; margin-left: 3px;">3</span></div>
+    </div>
+  </div>
+
+  <!-- list: cancellations-panel.tsx's real columns (order, items, status
+       change, detected, value, check-in action) as stacked cards -->
+  <div style="flex-grow: 1; overflow-y: auto; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px;">
+
+    <!-- stage: ready — RTO confirmed by Amazon, awaiting physical check-in -->
+    <div style="border-radius: 14px; background: #ffffff; border: 1px solid rgba(13,110,140,0.1); box-shadow: 0 1px 2px rgba(13,60,82,0.04); padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+        <span style="display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 2px 7px 2px 5px; font-size: 10px; font-weight: 500; background: rgba(14,165,233,0.12); color: #0b7fb0;"><span style="width:4px;height:4px;border-radius:999px;background:#0ea5e9;"></span>Amazon</span>
+        <span class="mono" style="font-size: 11.5px; font-weight: 600;">₹1,249</span>
+      </div>
+      <div class="mono" style="font-size: 11.5px; color: #5c7386;">407-5521098-3341 · ordered 28 Aug</div>
+      <div class="clamp2" style="font-size: 12.5px; line-height: 1.4;">Rayon A-Line Kurti with Palazzo (M, Teal) <span class="mono" style="color:#5c7386; font-size: 11px;">1× RY-AL-TL-M</span></div>
+      <div style="display: flex; align-items: center; gap: 6px; padding-top: 4px; border-top: 1px solid rgba(13,110,140,0.1);">
+        <span style="display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 9px; font-size: 10.5px; font-weight: 500; background: rgba(14,165,233,0.1); color: #0ea5e9;"><span style="width:5px;height:5px;border-radius:999px;background:#0ea5e9;"></span>Packed</span>
+        <span style="color: #5c7386;">→</span>
+        <span style="display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 9px; font-size: 10.5px; font-weight: 500; background: rgba(224,69,90,0.1); color: #e0455a;"><span style="width:5px;height:5px;border-radius:999px;background:#e0455a;"></span>RTO</span>
+      </div>
+      <div style="font-size: 11px; color: #5c7386;">Detected 9 Sep, 11:20 AM · sync #482</div>
+      <div style="border-radius: 10px; background: #eef6fa; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 500;">
+          <input type="checkbox" style="width: 18px; height: 18px; accent-color: #0ea5e9;">
+          Received &amp; shelved
+        </label>
+        <div style="font-size: 11px; color: #5c7386;">Amazon returned it 9 Sep</div>
+        <a href="#" style="font-size: 11px; color: #5c7386; text-decoration: underline; align-self: flex-start;">not returning</a>
+      </div>
+    </div>
+
+    <!-- stage: awaiting — cancelled, Amazon hasn't confirmed the parcel back yet -->
+    <div style="border-radius: 14px; background: #ffffff; border: 1px solid rgba(13,110,140,0.1); box-shadow: 0 1px 2px rgba(13,60,82,0.04); padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+        <span style="display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 2px 7px 2px 5px; font-size: 10px; font-weight: 500; background: rgba(14,165,233,0.12); color: #0b7fb0;"><span style="width:4px;height:4px;border-radius:999px;background:#0ea5e9;"></span>Amazon</span>
+        <span class="mono" style="font-size: 11.5px; font-weight: 600;">₹649</span>
+      </div>
+      <div class="mono" style="font-size: 11.5px; color: #5c7386;">MSH-88213-K · ordered 5 Sep</div>
+      <div class="clamp2" style="font-size: 12.5px; line-height: 1.4;">Printed Straight Kurta (S, Mustard) <span class="mono" style="color:#5c7386; font-size: 11px;">1× PR-ST-MU-S</span></div>
+      <div style="display: flex; align-items: center; gap: 6px; padding-top: 4px; border-top: 1px solid rgba(13,110,140,0.1);">
+        <span style="color: #5c7386; font-size: 11px;">first seen</span>
+        <span style="color: #5c7386;">→</span>
+        <span style="display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 9px; font-size: 10.5px; font-weight: 500; background: rgba(148,152,171,0.14); color: #5c7386;"><span style="width:5px;height:5px;border-radius:999px;background:#8ba0b0;"></span>Cancelled</span>
+      </div>
+      <div style="font-size: 11px; color: #5c7386;">Detected 8 Sep, 6:04 PM</div>
+      <div style="border-radius: 10px; background: #eef6fa; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+        <span style="font-size: 12px; color: #5c7386;">Awaiting parcel — Amazon has not confirmed a return</span>
+        <a href="#" style="font-size: 11px; color: #5c7386; text-decoration: underline; align-self: flex-start;">mark not returning</a>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="flex-shrink: 0; display: flex; padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 10px)); background: #ffffff; border-top: 1px solid rgba(13,110,140,0.1); box-shadow: 0 -1px 1px rgba(13,60,82,0.04), 0 -10px 24px -12px rgba(13,60,82,0.1);">
+    <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0; color: #5c7386;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+      <span style="font-size: 10.5px; font-weight: 500;">Dashboard</span>
+    </div>
+    <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0; border-radius: 12px; color: #0ea5e9; background: rgba(14,165,233,0.1);">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18l-1.5 12H5.5L4 3Z"/><path d="M4 8h16"/></svg>
+      <span style="font-size: 10.5px; font-weight: 600;">Orders</span>
+    </div>
+    <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0; color: #5c7386;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12c0 1.1.9 2 2 2h14v-4"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+      <span style="font-size: 10.5px; font-weight: 500;">Pack</span>
+    </div>
+    <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0; color: #5c7386;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.41.16.77.43 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+      <span style="font-size: 10.5px; font-weight: 500;">More</span>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

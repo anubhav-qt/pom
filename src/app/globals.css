@@ -278,3 +278,14 @@ body {
     display: none !important;
   }
 }
+
+/* Square corners on data surfaces only: tables, and the cards, panels and
+   modals that show order data, along with everything inside them except
+   buttons and form controls. The header/nav, buttons and the PDF printer keep
+   their rounding. Delete this block to bring the rounding back everywhere. */
+.grid-table,
+.grid-table *:not(button, .btn, input, select, textarea),
+.panel:not(.printer-surface *, header *),
+.panel:not(.printer-surface *, header *) *:not(button, .btn, input, select, textarea) {
+  border-radius: 0 !important;
+}

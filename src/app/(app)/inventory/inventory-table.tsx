@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Empty } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import { cn, compareByTail } from "@/lib/utils";
 
 import { adoptUnmappedSku, setBuffer, setStock, syncStockToChannels } from "./actions";
 
@@ -31,7 +31,7 @@ export function InventoryTable({ rows }: { rows: StockRow[] }) {
         (r) =>
           r.sku.toLowerCase().includes(filter.toLowerCase()) ||
           r.name.toLowerCase().includes(filter.toLowerCase()),
-      )
+      ).sort((a, b) => compareByTail(a.sku, b.sku))
     : rows;
 
   function pushAll() {

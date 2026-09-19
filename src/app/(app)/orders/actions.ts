@@ -255,7 +255,10 @@ export async function createManifest(orderIds: number[]) {
   const { moved } = await markManifestedLocal(orderIds, user.id);
 
   if (moved.length === 0) {
-    return { ok: false as const, error: "None of the selected orders are packed yet." };
+    // Nothing left to move means every selected order was already manifested
+    // (e.g. scanned out on another device while this screen was stale) — the
+    // desired end state, so report it as done rather than as a failure.
+    return { ok: true as const, count: 0, note: "Already marked shipped — list refreshed." };
   }
 
   const [batch] = await db

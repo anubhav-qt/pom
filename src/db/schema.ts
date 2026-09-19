@@ -469,6 +469,32 @@ export const batchOrders = pgTable(
   (t) => [uniqueIndex("batch_orders_pair_idx").on(t.batchId, t.orderId)],
 );
 
+/**
+ * One row per label sheet generated on the PDF Printer page, with the finished
+ * PDF itself. Kept permanently: it is both the file the new tab shows and the
+ * log of what was printed, so "which sheet did that label go out on" can be
+ * answered months later. A sheet is a few hundred KB.
+ */
+export const labelPrintRuns = pgTable(
+  "label_print_runs",
+  {
+    id: serial("id").primaryKey(),
+    createdBy: integer("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    pdf: bytea("pdf").notNull(),
+    labelCount: integer("label_count").notNull(),
+    sheetCount: integer("sheet_count").notNull(),
+    /** Per uploaded file: name, page and label counts, what was skipped and why. */
+    sources: jsonb("sources").notNull(),
+    /** Per label, in print order: platform, order id and product read from its invoice. */
+    labels: jsonb("labels").notNull(),
+    duplicateOrderIds: jsonb("duplicate_order_ids").notNull().default([]),
+    framesRemoved: integer("frames_removed").notNull().default(0),
+    unstamped: integer("unstamped").notNull().default(0),
+  },
+  (t) => [index("label_print_runs_created_idx").on(t.createdAt)],
+);
+
 /* -------------------------------------------------------------------------- */
 /* Sync bookkeeping                                                           */
 /* -------------------------------------------------------------------------- */

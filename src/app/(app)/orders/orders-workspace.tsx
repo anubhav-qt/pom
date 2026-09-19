@@ -18,9 +18,7 @@ import { MobileOrdersNav } from "./mobile-orders-nav";
 import { OrderTable } from "./order-table";
 import { OrdersToolbar } from "./orders-toolbar";
 import { AllOrdersTiles, PickList } from "./pick-list";
-import { RailTabs } from "./rail-tabs";
 import { RestockPlanner } from "./restock-planner";
-import { ScanBarcodeButton } from "./scan/scan-button";
 import { getOrdersView, type OrdersView, type OrdersViewParams } from "./view-actions";
 
 /**
@@ -68,6 +66,8 @@ export function OrdersWorkspace({
   }, [adopt]);
 
   const key = ordersViewKey(params);
+  // A finished sync empties the cache; re-read so new orders show without a reload.
+  const syncStamp = useOrdersCache((s) => s.syncStamp);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +84,15 @@ export function OrdersWorkspace({
           setData(fresh);
           setLoading(false);
         }
+        // A stale entry is served instantly while a refetch runs in the
+        // background; pick that refetch up too, otherwise the screen keeps
+        // showing the old queue (e.g. orders already shipped elsewhere).
+        const inFlight = useOrdersCache.getState().entries[key]?.inFlight;
+        inFlight
+          ?.then((latest) => {
+            if (!cancelled) setData(latest);
+          })
+          .catch(() => {});
       })
       .catch(() => {
         if (!cancelled) setLoading(false);
@@ -94,7 +103,7 @@ export function OrdersWorkspace({
     };
     // `key` is the whole identity of a view; `params` only ever changes with it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, syncStamp]);
 
   /** Re-read the current tab from the server after we changed something. */
   function refresh() {
@@ -118,7 +127,7 @@ export function OrdersWorkspace({
         <MobileOrdersCrumb />
         <OrdersToolbar activeView="planner" activeChannel={data.channel} query={data.query} />
         <RestockPlanner initialPlan={data.plan} />
-        <MobileOrdersNav activeView="planner" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
+        <MobileOrdersNav activeView="planner" activeChannel={data.channel} query={data.query} />
       </div>
     );
   }
@@ -164,19 +173,14 @@ export function OrdersWorkspace({
           activeChannel={data.channel}
           query={data.query}
           showSwitcher={data.category === "toShip"}
-          rightSlot={
-            <div className="flex items-center gap-2">
-              <CollectionSheetButton rows={data.rows} />
-              <ScanBarcodeButton station="outbound" onDone={refresh} />
-            </div>
-          }
+          rightSlot={<CollectionSheetButton rows={data.rows} />}
         />
         {isAllRoot ? (
           <AllOrdersTiles tiles={data.tiles ?? []} />
         ) : (
           <PickList rows={data.rows} category={data.category} />
         )}
-        <MobileOrdersNav activeView="collection" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
+        <MobileOrdersNav activeView="collection" activeChannel={data.channel} query={data.query} />
       </div>
     );
   }
@@ -202,9 +206,8 @@ export function OrdersWorkspace({
           counts={data.counts}
           resolved={data.resolved}
           onResolvedChange={setResolved}
-          rightSlot={<ScanBarcodeButton station="inbound" onDone={refresh} />}
         />
-        <MobileOrdersNav activeView={null} query="" scanStation="inbound" onScanDone={refresh} />
+        <MobileOrdersNav activeView={null} query="" />
       </div>
     );
   }
@@ -230,21 +233,6 @@ export function OrdersWorkspace({
         }
       />
 
-      {/* Styled and positioned to read as a direct continuation of the
-          header's own category rail — first thing in the page, no gap.
-          Desktop only; mobile gets the crumb above instead. */}
-      {data.isQueueView && data.counts ? (
-        <RailTabs
-          tabs={[
-            { id: "unshipped" as const, label: "Unshipped", count: data.counts.unshipped },
-            { id: "packed" as const, label: "Packed", count: data.counts.packed },
-            { id: "shipped24h" as const, label: "Shipped (24h)", count: data.counts.shipped24h },
-          ]}
-          active={data.activeTab}
-          onSelect={(tab) => go({ ...params, tab: tab === "unshipped" ? undefined : tab })}
-        />
-      ) : null}
-
       {data.isQueueView && data.counts && data.activeTab === "unshipped" && data.counts.late > 0 ? (
         <div
           className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
@@ -260,12 +248,11 @@ export function OrdersWorkspace({
         activeChannel={data.channel}
         query={data.query}
         showSwitcher={data.isQueueView}
-        rightSlot={data.isQueueView ? <ScanBarcodeButton station="outbound" onDone={refresh} /> : undefined}
       />
 
       <OrderTable rows={data.rows} activeTab={data.activeTab} onChanged={refresh} />
 
-      <MobileOrdersNav activeView="list" activeChannel={data.channel} query={data.query} scanStation="outbound" onScanDone={refresh} />
+      <MobileOrdersNav activeView="list" activeChannel={data.channel} query={data.query} />
     </div>
   );
 }

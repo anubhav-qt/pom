@@ -1,0 +1,62 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 375, "h": 812, "title": "Dashboard — mobile" },
+    { "file": "OrdersList.dc.html", "x": 475, "y": 0, "w": 375, "h": 812, "title": "Orders — To Ship rail" },
+    { "file": "CancellationsMobile.dc.html", "x": 950, "y": 0, "w": 375, "h": 812, "title": "Orders — Cancelled & RTO rail" },
+    { "file": "OrderDetail.dc.html", "x": 1425, "y": 0, "w": 375, "h": 812, "title": "Order detail — mobile" },
+    { "file": "ImageLightbox.dc.html", "x": 1900, "y": 0, "w": 375, "h": 812, "title": "Product image — lightbox" },
+    { "file": "ScanPack.dc.html", "x": 2375, "y": 0, "w": 375, "h": 812, "title": "Pack station — mobile" }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 0,
+      "y": -170,
+      "w": 900,
+      "text": "Paribelle OMS — mobile-responsive redesign (phone only, 375×812)\n\nSix screens ops staff reach for on a phone. Tokens, radii, shadows and type lifted exactly from globals.css / ui.tsx / app-header.tsx. Orders is now two real rails (To Ship / Cancelled & RTO), matching orders-workspace.tsx — not a generic flat list. Print-label UI is dropped throughout: the shop is read-only with the carrier."
+    },
+    {
+      "id": "nav-note",
+      "x": 0,
+      "y": 850,
+      "w": 375,
+      "text": "The header's Dashboard/Orders switch + avatar menu collapse into a bottom tab bar — thumb reach beats a top target on a one-handed phone grip. Unchanged from the last round."
+    },
+    {
+      "id": "list-note",
+      "x": 475,
+      "y": 850,
+      "w": 375,
+      "text": "This is data.kind default/isQueueView from orders-workspace.tsx — OrderTable's real columns, plus the Unshipped / Packed / Shipped (24h) sub-tabs. Bulk bar keeps Mark packed / Create manifest / Undo, drops Print labels + crop toggle entirely (FEATURES.labelPrinting is effectively off here).\n\nTop card shows the split tap target: the dashed-outline thumbnail alone opens the lightbox (see the ImageLightbox artboard); the rest of the card opens Order detail."
+    },
+    {
+      "id": "cancel-note",
+      "x": 950,
+      "y": 850,
+      "w": 375,
+      "text": "This is data.kind === 'cancellations' — a different component (CancellationsPanel) with different columns: status change (from → to), detected date/sync run, and the physical check-in action (Received & shelved / not returning), split by real Pending/Completed sub-tabs and the 'awaiting' vs 'ready' stages from checkInCancellation."
+    },
+    {
+      "id": "detail-note",
+      "x": 1425,
+      "y": 850,
+      "w": 375,
+      "text": "The 36rem centred Modal becomes a full-screen sheet (back closes it), fields go one-per-row. order-detail-modal.tsx has no action buttons in the real app — none are invented here, print-label included. The item photo carries the same tap-to-enlarge affordance as the list card."
+    },
+    {
+      "id": "lightbox-note",
+      "x": 1900,
+      "y": 850,
+      "w": 375,
+      "text": "What tapping only the thumbnail opens: image alone on a scrim, one close control, no order info. A lighter interaction than pushing the full detail sheet just to glance at the product photo."
+    },
+    {
+      "id": "pack-note",
+      "x": 2375,
+      "y": 850,
+      "w": 375,
+      "text": "Unchanged from the last round — already the busiest phone screen in the shop, its own full-screen route with the viewfinder given the space and Confirm/Skip in the thumb zone."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

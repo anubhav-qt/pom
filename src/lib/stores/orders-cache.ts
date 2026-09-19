@@ -1,9 +1,9 @@
 "use client";
 
+import { withBasePath } from "@/lib/base-path";
 import { create } from "zustand";
 
 import type { OrdersView, OrdersViewParams } from "@/app/(app)/orders/view-actions";
-import { withBasePath } from "@/lib/base-path";
 import { useDashboardCache } from "./dashboard-cache";
 import { useOrderDetailCache } from "./order-detail-cache";
 

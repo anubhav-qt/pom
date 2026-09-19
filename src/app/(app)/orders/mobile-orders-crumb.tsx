@@ -1,6 +1,9 @@
 "use client";
 
-import { useOrderTabs } from "@/components/app-header";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+
+import { HeaderSearch, RAIL_SLOT_ID, useOrderTabs } from "@/components/app-header";
 import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
 import { useHeaderCounts } from "@/lib/stores/header-counts";
 
@@ -45,11 +48,15 @@ export function MobileOrdersCrumb({
 
   const subCount = sub?.options.find((o) => o.id === sub.activeId)?.count;
 
-  return (
-    <div
-      className="sticky z-30 -mx-4 -mt-6 flex items-center gap-1.5 px-4 py-2.5 sm:hidden"
-      style={{ top: 56, borderTop: "1px solid var(--border)", background: "var(--panel)" }}
-    >
+  // Desktop shows the same crumb as a single band inside the header (its slot
+  // is looked up after mount so server and client markup agree).
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setSlot(document.getElementById(RAIL_SLOT_ID));
+  }, []);
+
+  const crumb = (
+    <>
       <DropdownMenu
         trigger={
           <span className="flex items-center gap-1.5">
@@ -94,7 +101,32 @@ export function MobileOrdersCrumb({
           </span>
         </>
       ) : null}
-    </div>
+    </>
+  );
+
+  return (
+    <>
+      <div
+        className="sticky z-30 -mx-4 -mt-6 flex items-center gap-1.5 px-4 py-2.5 sm:hidden"
+        style={{ top: 56, borderTop: "1px solid var(--border)", background: "var(--panel)" }}
+      >
+        {crumb}
+      </div>
+      {slot
+        ? createPortal(
+            <div style={{ borderTop: "1px solid var(--border)" }}>
+              <div className="mx-auto hidden max-w-7xl items-center gap-1.5 px-4 py-2.5 sm:flex sm:px-6">
+                {crumb}
+                <div className="flex-1" />
+                <div className="hidden md:block">
+                  <HeaderSearch />
+                </div>
+              </div>
+            </div>,
+            slot,
+          )
+        : null}
+    </>
   );
 }
 
