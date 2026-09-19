@@ -144,7 +144,9 @@ export function MobileNav() {
       }}
     >
       {slots.map((slot) => {
-        const color = slot.active ? "var(--accent)" : "var(--muted)";
+        // While the scanner sheet is open it is the current place, not whatever is behind it.
+        const active = slot.key === "scanner" ? scanning : slot.active && !scanning;
+        const color = active ? "var(--accent)" : "var(--muted)";
         const Icon = slot.Icon;
         if (slot.kind === "menu") {
           return (

@@ -47,6 +47,8 @@ export interface FinanceStats {
 export interface DayNet {
   day: string;
   net: number;
+  /** Distinct orders with a Shipment line that day. */
+  orders: number;
 }
 
 export interface Payout {
@@ -167,7 +169,8 @@ export async function getFinanceOverview(from: Date, to: Date, basis: Basis): Pr
   const daily = (
     await db.execute(sql`
       WITH ${linesCte(from, to, basis)}
-      SELECT date_trunc('day', bucket_at) AS day, SUM(total) AS net
+      SELECT date_trunc('day', bucket_at) AS day, SUM(total) AS net,
+             COUNT(DISTINCT external_order_id) FILTER (WHERE type = 'Shipment') AS orders
       FROM in_range WHERE type <> 'Transfer'
       GROUP BY 1 ORDER BY 1
     `)
@@ -198,7 +201,7 @@ export async function getFinanceOverview(from: Date, to: Date, basis: Basis): Pr
       ordersWithCost: n(stat.with_cost),
       ordersMissingCost: n(stat.missing_cost),
     },
-    daily: daily.map((r) => ({ day: new Date(r.day as string).toISOString(), net: n(r.net) })),
+    daily: daily.map((r) => ({ day: new Date(r.day as string).toISOString(), net: n(r.net), orders: n(r.orders) })),
     payouts: payouts
       .map((r) => ({ at: new Date(r.posted_at as string).toISOString(), amount: n(r.total) }))
       .reverse(),

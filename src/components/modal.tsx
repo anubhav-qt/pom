@@ -20,6 +20,7 @@ export function Modal({
   children,
   width = "36rem",
   aboveNav = false,
+  headerOnDesktopOnly = false,
 }: {
   title: string;
   onClose: () => void;
@@ -27,6 +28,8 @@ export function Modal({
   width?: string;
   /** On a phone, stop above the bottom nav instead of covering it. */
   aboveNav?: boolean;
+  /** On a phone, drop the title bar; the bottom nav is what switches away. */
+  headerOnDesktopOnly?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -59,7 +62,7 @@ export function Modal({
         style={{ maxWidth: width, animation: "rise-in 0.18s var(--ease-premium)" }}
       >
         <div
-          className="flex shrink-0 items-center justify-between border-b px-5 py-4"
+          className={`shrink-0 items-center justify-between border-b px-5 py-4 ${headerOnDesktopOnly ? "hidden sm:flex" : "flex"}`}
           style={{ borderColor: "var(--border)" }}
         >
           <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>

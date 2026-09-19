@@ -416,7 +416,6 @@ input[type="checkbox"]:disabled {
   border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
-  padding-left: 15px;
   box-shadow: var(--shadow-xs);
   transition: border-color 0.15s ease;
 }
@@ -438,7 +437,7 @@ input[type="checkbox"]:disabled {
 }
 .search-label {
   cursor: text;
-  padding: 0 12px;
+  padding: 0 8px 0 12px;
   display: flex;
   align-items: center;
 }
@@ -518,8 +517,8 @@ input[type="checkbox"]:disabled {
    buttons and form controls. The header/nav, buttons and the PDF printer keep
    their rounding. Delete this block to bring the rounding back everywhere. */
 .grid-table,
-.grid-table *:not(button, .btn, input, select, textarea, .ui-checkbox, .search-box, .search-box *),
+.grid-table *:not(button, .btn, input, select, textarea, .ui-checkbox, .search-box, .search-box *, .seg, .seg *),
 .panel:not(.printer-surface *, header *),
-.panel:not(.printer-surface *, header *) *:not(button, .btn, input, select, textarea, .ui-checkbox, .search-box, .search-box *) {
+.panel:not(.printer-surface *, header *) *:not(button, .btn, input, select, textarea, .ui-checkbox, .search-box, .search-box *, .seg, .seg *) {
   border-radius: 0 !important;
 }

@@ -32,7 +32,7 @@ export function Segmented<T extends string>({
     <div
       role="group"
       aria-label={label}
-      className={cn("inline-flex max-w-full overflow-x-auto rounded-[10px] p-[3px]", className)}
+      className={cn("seg inline-flex max-w-full overflow-x-auto rounded-[10px] p-[3px]", className)}
       style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "var(--shadow-xs)" }}
     >
       {items.map((t) => {

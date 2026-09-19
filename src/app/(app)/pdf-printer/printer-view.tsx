@@ -122,14 +122,14 @@ export function PrinterView(props: PrinterViewProps) {
   return (
     // Below `lg` this is exactly one screen tall: the viewport minus the header,
     // the page padding and the docked action bar. Nothing scrolls the page.
-    <div className="printer-surface flex h-[calc(100dvh-57px-24px-76px-56px-env(safe-area-inset-bottom))] flex-col sm:h-[calc(100dvh-57px-24px-76px-env(safe-area-inset-bottom))] overflow-hidden lg:block lg:h-auto lg:overflow-visible lg:pb-0">
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-x-5 lg:flex-none lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-none">
+    <div className="printer-surface flex h-[calc(100dvh-57px-24px-76px-56px-env(safe-area-inset-bottom))] flex-col sm:-mt-[17px] sm:h-[calc(100dvh-57px-7px-76px-env(safe-area-inset-bottom))] overflow-hidden lg:block lg:h-auto lg:overflow-visible lg:pb-0">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-x-5 lg:gap-x-[7px] lg:flex-none lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-none">
         {/* ------------------------------------------------------ left column -- */}
         <div className="flex min-h-0 min-w-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain lg:block lg:overflow-visible">
           <Presence value={phase === "done" && result}>{(r) => <ResultHead result={r} />}</Presence>
           <Presence value={phase === "done" && result && hasWarnings(result) && result}>{(r) => <Warnings result={r} />}</Presence>
           <Presence value={phase === "error" && error}>{(e) => <ErrorHead error={e} />}</Presence>
-          <div className={cn("pb-3 lg:pb-5", files.length === 0 && "flex flex-1 flex-col lg:block")}>
+          <div className={cn("pb-3 lg:pb-[7px]", files.length === 0 && "flex flex-1 flex-col lg:h-full lg:pb-0")}>
             <Dropzone {...props} disabled={busy} compact={files.length > 0} />
           </div>
           <Presence value={files.length > 0}>
@@ -143,9 +143,9 @@ export function PrinterView(props: PrinterViewProps) {
 
         {/* ----------------------------------------------------- right column -- */}
         <aside className="hidden lg:block">
-          <div className="sticky top-[88px]">
+          <div className={cn("sticky top-16", files.length === 0 && phase !== "done" && "lg:h-full")}>
             <Presence value={phase === "done" && result} gap="pb-4">{(r) => <MetricStrip result={r} />}</Presence>
-            <ActionPanel {...props} total={total} canBuild={canBuild} />
+            <ActionPanel {...props} total={total} canBuild={canBuild} fill={files.length === 0 && phase !== "done"} />
           </div>
         </aside>
       </div>
@@ -255,7 +255,7 @@ function Dropzone({
         "panel flex flex-col items-center justify-center text-center transition-colors",
         compact
           ? "gap-2 px-4 py-3 sm:flex-row sm:justify-between sm:gap-3 sm:px-5 sm:py-6 sm:text-left"
-          : "flex-1 gap-4 px-6 py-8 sm:py-16 lg:flex-none",
+          : "flex-1 gap-4 px-6 py-8 sm:py-16 lg:h-full",
       )}
       style={{
         borderStyle: "dashed",
@@ -414,10 +414,10 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
   );
 }
 
-function ActionPanel(props: PrinterViewProps & { total: number; canBuild: boolean }) {
-  const { options, onOptions, total } = props;
+function ActionPanel(props: PrinterViewProps & { total: number; canBuild: boolean; fill?: boolean }) {
+  const { options, onOptions, total, fill } = props;
   return (
-    <div className="space-y-4">
+    <div className={cn("space-y-[7px]", fill && "flex h-full flex-col space-y-0 gap-[7px]")}>
       <section className="panel space-y-4 p-5">
         <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
           Sheet options
@@ -434,7 +434,7 @@ function ActionPanel(props: PrinterViewProps & { total: number; canBuild: boolea
         />
       </section>
 
-      <section className="panel space-y-3 p-5">
+      <section className={cn("panel space-y-3 p-5", fill && "flex-1")}>
         <div className="flex items-center justify-between text-xs">
           <span className="muted font-medium">Data limit</span>
           <span className="muted tabular-nums">{formatSize(total)} of {formatSize(MAX_TOTAL_BYTES)}</span>

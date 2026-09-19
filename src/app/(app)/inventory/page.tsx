@@ -48,7 +48,7 @@ export default async function InventoryPage() {
   }));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:-mt-[17px] sm:space-y-[7px]">
       {unmapped.length > 0 ? (
         <UnmappedSkus
           rows={unmapped.map((u) => ({
