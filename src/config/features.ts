@@ -21,8 +21,8 @@ export const FEATURES = {
   /** Manual stock editing and pushing stock out to channels. */
   inventoryManagement: false,
 
-  /** Returns and RTO check-in screen. */
-  returns: false,
+  /** Returns desk: customer returns, RTO and cancelled parcels, check-in and claims. */
+  returns: true,
 
   /** Meesho order-sheet and label upload form in Settings. */
   meeshoImport: false,

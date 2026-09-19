@@ -19,6 +19,7 @@
     "check:amazon": "tsx scripts/check-amazon.ts",
     "check:amazon:full": "tsx scripts/check-amazon-full.ts",
     "backfill:amazon": "tsx scripts/backfill-amazon.ts",
+    "backfill:finance": "tsx scripts/backfill-finance.ts",
     "reconcile:amazon": "tsx scripts/reconcile-amazon.ts",
     "link:catalogue": "tsx scripts/link-catalogue.ts",
     "close:stale-checkins": "tsx scripts/close-stale-checkins.ts",

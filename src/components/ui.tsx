@@ -134,12 +134,16 @@ export function Stat({
   label,
   value,
   tone,
+  hint,
 }: {
   label: string;
   value: string | number;
-  tone?: "danger" | "warn";
+  tone?: "danger" | "warn" | "ok";
+  /** One short line under the number, for what the number is made of. */
+  hint?: string;
 }) {
-  const accent = tone === "danger" ? "var(--danger)" : tone === "warn" ? "var(--warn)" : "var(--accent)";
+  const accent =
+    tone === "danger" ? "var(--danger)" : tone === "warn" ? "var(--warn)" : tone === "ok" ? "var(--ok)" : "var(--accent)";
   return (
     <div className="panel relative overflow-hidden py-4 pl-5 pr-4">
       <span
@@ -154,6 +158,7 @@ export function Stat({
       >
         {value}
       </div>
+      {hint ? <div className="muted mt-1.5 text-[11px] leading-snug">{hint}</div> : null}
     </div>
   );
 }

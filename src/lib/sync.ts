@@ -6,6 +6,7 @@ import { AmazonAdapter } from "@/channels/amazon";
 import type { CanonicalOrder, CanonicalReturn } from "@/channels/types";
 import { isChannelEnabled } from "@/config/features";
 import { db } from "@/db";
+import { syncFinance } from "@/lib/finance";
 import {
   catalogImages,
   channelAccounts,
@@ -433,6 +434,10 @@ export async function ingestReturns(account: ChannelAccount, incoming: Canonical
         awb: r.awb ?? null,
         status: r.status ?? null,
         expectedAt: r.expectedAt ?? null,
+        requestedAt: r.requestedAt ?? null,
+        refundAmount: r.refundAmount == null ? null : r.refundAmount.toFixed(2),
+        labelCost: r.labelCost == null ? null : r.labelCost.toFixed(2),
+        resolution: r.resolution ?? null,
         raw: r.raw,
       })
       .onConflictDoUpdate({
@@ -441,6 +446,10 @@ export async function ingestReturns(account: ChannelAccount, incoming: Canonical
           status: r.status ?? null,
           awb: r.awb ?? null,
           expectedAt: r.expectedAt ?? null,
+          requestedAt: r.requestedAt ?? null,
+          refundAmount: r.refundAmount == null ? null : r.refundAmount.toFixed(2),
+          labelCost: r.labelCost == null ? null : r.labelCost.toFixed(2),
+          resolution: r.resolution ?? null,
           orderId,
           raw: r.raw,
         },
@@ -704,9 +713,10 @@ export async function startManualOrderSync(accountId: number) {
     // one. The routine case ignores this cap entirely and pages until Amazon
     // reports no more; see the comment at `ordersLimit` in syncAccount.
     await syncAccount(account, "orders", 100, { runId: run.id }).catch(() => {});
-    // Returns piggyback on the same trigger, silently — currently a no-op for
-    // Amazon and fast enough elsewhere that it doesn't need its own bar.
+    // Returns and money piggyback on the same trigger, silently. Each is
+    // best-effort: a failure here must never mark the orders sync as failed.
     await syncAccount(account, "returns").catch(() => {});
+    await syncFinance(account).catch(() => {});
   });
 
   return { ok: true as const, runId: run.id };

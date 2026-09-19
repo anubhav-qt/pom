@@ -4,7 +4,7 @@ import { withBasePath } from "@/lib/base-path";
 import { create } from "zustand";
 
 import type { DashboardView } from "@/app/(app)/dashboard/view-actions";
-import type { RangePreset } from "@/app/(app)/dashboard/range";
+import { dashKey, type Basis, type RangePreset } from "@/app/(app)/dashboard/range";
 
 /**
  * Client-side cache for the dashboard, keyed by range preset.
@@ -27,42 +27,40 @@ interface Entry {
 }
 
 interface DashboardCacheState {
-  entries: Partial<Record<RangePreset, Entry>>;
+  /** Keyed by `dashKey(range, basis)`. */
+  entries: Partial<Record<string, Entry>>;
 
-  peek: (range: RangePreset) => DashboardView | null;
-  put: (range: RangePreset, data: DashboardView) => void;
+  peek: (key: string) => DashboardView | null;
+  put: (key: string, data: DashboardView) => void;
   clear: () => void;
 
-  load: (
-    range: RangePreset,
-    fetcher: (range: string) => Promise<DashboardView>,
-  ) => Promise<DashboardView>;
+  load: (key: string, fetcher: () => Promise<DashboardView>) => Promise<DashboardView>;
 }
 
 export const useDashboardCache = create<DashboardCacheState>((set, get) => ({
   entries: {},
 
-  peek: (range) => get().entries[range]?.data ?? null,
+  peek: (key) => get().entries[key]?.data ?? null,
 
-  put: (range, data) =>
-    set((s) => ({ entries: { ...s.entries, [range]: { data, fetchedAt: Date.now() } } })),
+  put: (key, data) =>
+    set((s) => ({ entries: { ...s.entries, [key]: { data, fetchedAt: Date.now() } } })),
 
   clear: () => set({ entries: {} }),
 
-  load: async (range, fetcher) => {
-    const entry = get().entries[range];
+  load: async (key, fetcher) => {
+    const entry = get().entries[key];
     if (entry?.inFlight) return entry.inFlight;
     if (entry && Date.now() - entry.fetchedAt <= STALE_MS) return entry.data;
 
-    const promise = fetcher(range).then((data) => {
-      set((s) => ({ entries: { ...s.entries, [range]: { data, fetchedAt: Date.now() } } }));
+    const promise = fetcher().then((data) => {
+      set((s) => ({ entries: { ...s.entries, [key]: { data, fetchedAt: Date.now() } } }));
       return data;
     });
 
     set((s) => ({
       entries: {
         ...s.entries,
-        [range]: {
+        [key]: {
           data: entry?.data ?? (undefined as unknown as DashboardView),
           fetchedAt: entry?.fetchedAt ?? 0,
           inFlight: promise,
@@ -88,21 +86,44 @@ export const useDashboardCache = create<DashboardCacheState>((set, get) => ({
  */
 interface DashboardNavState {
   range: RangePreset;
-  go: (range: RangePreset, opts?: { replace?: boolean }) => void;
-  adopt: (range: RangePreset) => void;
+  basis: Basis;
+  go: (next: { range?: RangePreset; basis?: Basis }, opts?: { replace?: boolean }) => void;
+  adopt: (next: { range: RangePreset; basis: Basis }) => void;
 }
 
-export const useDashboardNav = create<DashboardNavState>((set) => ({
-  range: "30d",
+/** `/dashboard`, with only the parameters that differ from the defaults. */
+export function dashboardUrl(range: RangePreset, basis: Basis, tab?: string): string {
+  const q = new URLSearchParams();
+  if (range !== "30d") q.set("range", range);
+  if (basis !== "paid") q.set("basis", basis);
+  if (tab && tab !== "overview") q.set("tab", tab);
+  const s = q.toString();
+  return s ? `/dashboard?${s}` : "/dashboard";
+}
 
-  go: (range, opts) => {
+export const useDashboardNav = create<DashboardNavState>((set, get) => ({
+  range: "30d",
+  basis: "paid",
+
+  go: (next, opts) => {
+    const range = next.range ?? get().range;
+    const basis = next.basis ?? get().basis;
     if (typeof window !== "undefined") {
-      const url = withBasePath(range === "30d" ? "/dashboard" : `/dashboard?range=${range}`);
+      const tab = new URLSearchParams(window.location.search).get("tab") ?? undefined;
+      const url = withBasePath(dashboardUrl(range, basis, tab));
       if (opts?.replace) window.history.replaceState(null, "", url);
       else window.history.pushState(null, "", url);
     }
-    set({ range });
+    set({ range, basis });
   },
 
-  adopt: (range) => set({ range }),
+  adopt: ({ range, basis }) => set({ range, basis }),
 }));
+
+export { dashKey };
+
+/** The cached view for whatever range and basis is currently selected, if any. */
+export function peekCurrentDashboard(): DashboardView | null {
+  const { range, basis } = useDashboardNav.getState();
+  return useDashboardCache.getState().peek(dashKey(range, basis));
+}

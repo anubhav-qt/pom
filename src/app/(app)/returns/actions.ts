@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/db";
@@ -37,6 +37,7 @@ export async function receiveReturn(input: {
       receivedAt: new Date(),
       receivedBy: user.id,
       restocked: input.restock,
+      outcome: input.restock ? "reshelved" : "damaged",
       conditionNote: input.conditionNote?.trim() || null,
     })
     .where(eq(returns.id, input.returnId));
@@ -63,5 +64,59 @@ export async function receiveReturn(input: {
 
   revalidatePath("/returns");
   revalidatePath("/inventory");
+  return { ok: true as const };
+}
+
+/**
+ * Close a return that will not be checked in: the parcel never came back
+ * (`written_off`) or we have taken it up with Amazon (`claim_raised`). Neither
+ * touches stock, and both can be undone with `reopenReturn`.
+ */
+export async function closeReturnWithoutParcel(input: {
+  returnId: number;
+  outcome: "written_off" | "claim_raised";
+  note?: string;
+}) {
+  await requireUser();
+  const [row] = await db.select().from(returns).where(eq(returns.id, input.returnId)).limit(1);
+  if (!row) return { ok: false as const, error: "Return not found." };
+  if (row.receivedAt) return { ok: false as const, error: "Already checked in." };
+
+  await db
+    .update(returns)
+    .set({ outcome: input.outcome, conditionNote: input.note?.trim() || row.conditionNote })
+    .where(eq(returns.id, input.returnId));
+
+  revalidatePath("/returns");
+  return { ok: true as const };
+}
+
+/**
+ * Close every open return the customer raised more than 30 days ago, without
+ * touching stock. For the backlog from before returns were tracked here, so the
+ * to-do list starts at what is actually recent.
+ */
+export async function closeOldReturns() {
+  await requireUser();
+  const cutoff = new Date(Date.now() - 30 * 86_400_000);
+  const res = await db
+    .update(returns)
+    .set({ outcome: "closed", conditionNote: "Closed in bulk, older than 30 days" })
+    .where(and(isNull(returns.receivedAt), isNull(returns.outcome), lt(returns.requestedAt, cutoff)))
+    .returning({ id: returns.id });
+
+  revalidatePath("/returns");
+  return { ok: true as const, closed: res.length };
+}
+
+/** Undo a write-off or a claim. A check-in is not undone here: it moved stock. */
+export async function reopenReturn(returnId: number) {
+  await requireUser();
+  const [row] = await db.select().from(returns).where(eq(returns.id, returnId)).limit(1);
+  if (!row) return { ok: false as const, error: "Return not found." };
+  if (row.receivedAt) return { ok: false as const, error: "A checked-in return cannot be reopened." };
+
+  await db.update(returns).set({ outcome: null }).where(eq(returns.id, returnId));
+  revalidatePath("/returns");
   return { ok: true as const };
 }

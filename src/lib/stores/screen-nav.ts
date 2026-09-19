@@ -3,7 +3,7 @@
 import { create } from "zustand";
 
 import { ordersViewKey, useOrdersCache, useOrdersNav } from "./orders-cache";
-import { useDashboardCache, useDashboardNav } from "./dashboard-cache";
+import { peekCurrentDashboard } from "./dashboard-cache";
 
 /**
  * The screens the top toggle switches between. Everything else in the app
@@ -68,7 +68,7 @@ export function resolveScreen(pathname: string, override: Screen | null): Screen
       ? true
       : override === "orders"
         ? useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
-        : useDashboardCache.getState().peek(useDashboardNav.getState().range) !== null;
+        : peekCurrentDashboard() !== null;
 
   return cached ? override : route;
 }
