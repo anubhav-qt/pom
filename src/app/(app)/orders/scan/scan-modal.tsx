@@ -5,28 +5,27 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Modal } from "@/components/modal";
+import { Segmented } from "@/components/segmented";
 import type { ScanStation } from "@/lib/scan";
 
 import { CancellationCard } from "../cancellations-panel";
-import { OrderCard as PackedOrderCard, type OrderRow } from "../order-table";
 import {
   scanCheckIn,
   scanConfirmPacked,
   scanListAwaitingCheckIn,
-  scanListPackedOrders,
   scanLookup,
-  scanMapAndDispatch,
   scanRecordReturnCode,
 } from "../scan-actions";
 import { playScanBeep } from "./beep";
 import { useBarcodeScanner } from "./use-barcode-scanner";
 
 /**
- * The scan bench, both stations.
+ * The scan bench, both stations behind one toggle: Packed and Returned.
  *
- * Outbound ships the instant a scan matches: take the stock off, mark it
+ * Packed ships the instant a scan matches: take the stock off, mark it
  * dispatched, done — no review step, so a bench scanner can fire the next
- * code the moment this one resolves. Inbound ends in a question (did the
+ * code the moment this one resolves. Amazon hands us each order's tracking ID,
+ * so there is nothing to pick by hand. Returned ends in a question (did the
  * goods come back sellable?) because restocking a worn return is how a used
  * item reaches the next customer, so it can never be automatic.
  *
@@ -58,32 +57,16 @@ interface CheckInTarget {
 }
 
 export function ScanModal({
-  station,
+  station: initialStation = "outbound",
   onClose,
   onDone,
-  mapTo,
-  checkInFor,
 }: {
-  station: ScanStation;
+  /** Which side the toggle starts on. */
+  station?: ScanStation;
   onClose: () => void;
   onDone?: () => void;
-  /**
-   * "Map an AWB to this specific order" mode: every scan is tied straight to
-   * `mapTo.orderId` instead of being looked up first. Set by the "map an AWB"
-   * flow elsewhere in Orders, which already knows which order it wants —
-   * running it through the normal lookup would just fail with "no match"
-   * since that AWB is, by definition, not attached to any order yet.
-   */
-  mapTo?: { orderId: number; externalOrderId: string };
-  /**
-   * "Scan return for this order" mode — the goods-in mirror of `mapTo`. The
-   * record is already known (a row's own scan icon opened this), so a scan
-   * here only needs to confirm identity (or, failing a match, log the code)
-   * before moving straight to the sellable question. A code that matches a
-   * *different* order refuses rather than checking in the wrong parcel.
-   */
-  checkInFor?: CheckInTarget;
 }) {
+  const [station, setStation] = useState<ScanStation>(initialStation);
   const outbound = station === "outbound";
 
   const [feedback, setFeedback] = useState<Feedback>(null);
@@ -91,7 +74,7 @@ export function ScanModal({
   const [log, setLog] = useState<Entry[]>([]);
   const [pending, startTransition] = useTransition();
   const [committing, setCommitting] = useState(false);
-  /** Set when an outbound scan matched nothing, so it can be offered up for AWB mapping. */
+  /** Set when a goods-in scan matched nothing, so it can be offered up for picking. */
   const [unmapped, setUnmapped] = useState<string | null>(null);
   /** Set once a pending cancellation/RTO/return is confirmed, ready for the sellable question. */
   const [checkInTarget, setCheckInTarget] = useState<CheckInTarget | null>(null);
@@ -128,33 +111,12 @@ export function ScanModal({
       setUnmapped(null);
       startTransition(async () => {
         // The code stays visible in the box only while there is something
-        // pending on screen for it (an inbound hit to review, or a
-        // map-to-order picker). Otherwise it is cleared once the scan
-        // resolves so a bench scanner's next code doesn't get typed onto the
-        // end of this one.
+        // pending on screen for it (an inbound hit to review, or a picker).
+        // Otherwise it is cleared once the scan resolves so a bench scanner's
+        // next code doesn't get typed onto the end of this one.
         let keepInBox = false;
         try {
-          if (mapTo) {
-            // Already know which order this AWB belongs to, so skip the
-            // lookup entirely — it would only ever come back "no match". A
-            // manual AWB entry means the parcel is already in hand, so this
-            // dispatches it in the same step rather than leaving a second
-            // Confirm dispatch to click.
-            const res = await scanMapAndDispatch(mapTo.orderId, code);
-            if (!res.ok) {
-              setFeedback({ tone: "stop", title: "Not mapped", text: res.error });
-              push(code, "Refused", "stop");
-            } else {
-              changedRef.current = true;
-              push(code, "Mapped + dispatched", "ok");
-              setFeedback({
-                tone: "ok",
-                text: `Mapped ${code} to ${mapTo.externalOrderId} and marked shipped.`,
-              });
-              reset();
-              onDone?.();
-            }
-          } else if (outbound) {
+          if (outbound) {
             // A packing-bench scan ships the parcel outright — no review
             // step, so the bench can fire the next code the instant this one
             // resolves.
@@ -166,10 +128,6 @@ export function ScanModal({
               } else if (res.reason !== "empty") {
                 setFeedback({ tone: "warn", text: res.message });
                 push(code, "No match", "warn");
-                // Amazon never hands us an AWB through sync, so "no match" at
-                // the packing bench usually means this is one, not a bad scan.
-                setUnmapped(code);
-                keepInBox = true;
               }
             } else {
               const ship = await scanConfirmPacked(res.order.orderId);
@@ -186,37 +144,6 @@ export function ScanModal({
                 onDone?.();
               }
               reset();
-            }
-          } else if (checkInFor) {
-            // The record is already known — a scan here only needs to
-            // confirm it's the right parcel (or, failing any match, log the
-            // code) before moving to the sellable question.
-            const res = await scanLookup(station, code);
-            if (res.ok && res.order.orderId === checkInFor.orderId) {
-              if (res.inbound?.alreadyReceived) {
-                setFeedback({ tone: "warn", text: "This one was already checked in. Nothing changed." });
-                push(code, "Already checked in", "warn");
-              } else {
-                push(code, "Matched", "ok");
-                setCheckInTarget(checkInFor);
-              }
-            } else if (res.ok) {
-              // Belongs to a different order entirely — refuse rather than
-              // checking in the wrong parcel.
-              setFeedback({
-                tone: "stop",
-                title: "Wrong order",
-                text: `That code belongs to ${res.order.externalOrderId}, not ${checkInFor.externalOrderId}.`,
-              });
-              push(code, "Wrong order", "stop");
-            } else if (res.reason !== "empty") {
-              // No match anywhere — almost certainly the return's own AWB or
-              // tracking sticker. Cancellations/RTOs have no field of their
-              // own to hold that, so this just logs it against the order and
-              // moves straight to the sellable question.
-              await scanRecordReturnCode(checkInFor.orderId, code);
-              push(code, "Logged", "ok");
-              setCheckInTarget(checkInFor);
             }
           } else {
             // Plain goods-in scan: find whatever is pending for this code and
@@ -257,7 +184,7 @@ export function ScanModal({
         }
       });
     },
-    [committing, station, mapTo, checkInFor, outbound, onDone, push],
+    [committing, station, outbound, onDone, push],
   );
 
   // Camera detections land in the bottom bar first, exactly like a typed or
@@ -291,6 +218,14 @@ export function ScanModal({
     // was scanned rather than going blank mid-lookup.
     if (input.value.trim()) playScanBeep();
     handleCode(input.value);
+  }
+
+  /** Switching side drops whatever was half-done on the other one. */
+  function switchStation(next: ScanStation) {
+    if (next === station) return;
+    setStation(next);
+    setFeedback(null);
+    reset();
   }
 
   /* ------------------------------------------------------------ commit -- */
@@ -346,20 +281,19 @@ export function ScanModal({
   const busy = pending || committing;
 
   return (
-    <Modal
-      title={
-        mapTo
-          ? `Scan AWB for ${mapTo.externalOrderId}`
-          : checkInFor
-            ? `Scan return for ${checkInFor.externalOrderId}`
-            : outbound
-              ? "Scan barcode, packing"
-              : "Scan barcode, goods in"
-      }
-      onClose={close}
-      width="36rem"
-    >
+    <Modal title="Scan barcode" onClose={close} width="36rem">
       <div className="flex flex-col gap-4">
+        <Segmented
+          label="What are you scanning"
+          className="self-start"
+          items={[
+            { key: "outbound" as ScanStation, label: "Packed" },
+            { key: "inbound" as ScanStation, label: "Returned" },
+          ]}
+          value={station}
+          onChange={switchStation}
+        />
+
         <Viewfinder scanner={scanner} />
 
         {/* manual entry */}
@@ -391,41 +325,19 @@ export function ScanModal({
               </svg>
             </div>
             <button type="submit" className="btn btn-primary shrink-0 whitespace-nowrap" disabled={busy}>
-              {busy ? <Spinner size="1rem" color="currentColor" /> : mapTo ? "Map AWB" : "Look up"}
+              {busy ? <Spinner size="1rem" color="currentColor" /> : "Look up"}
             </button>
           </div>
           <p className="muted text-xs">
-            {mapTo
-              ? `Scan the courier label's AWB. It will be saved to ${mapTo.externalOrderId}.`
-              : checkInFor
-                ? `Scan the return's own label. It'll be logged against ${checkInFor.externalOrderId}.`
-                : outbound
-                ? "Order ID, AWB or shipment ID. A bench scanner types straight into this box."
-                : "Order ID, AWB or return ID. RTOs and customer returns are both found here."}
+            {outbound
+              ? "Order ID, tracking ID or shipment ID. A bench scanner types straight into this box."
+              : "Order ID, tracking ID or return ID. RTOs and customer returns are both found here."}
           </p>
         </form>
 
         {feedback ? <FeedbackBanner feedback={feedback} /> : null}
 
-        {unmapped && outbound && !mapTo ? (
-          <AwbMapper
-            code={unmapped}
-            busy={busy}
-            onOpenImage={(src, alt) => setLightbox({ src, alt })}
-            onMapped={(res, code) => {
-              changedRef.current = true;
-              push(res.externalOrderId, "Mapped + dispatched", "ok");
-              setFeedback({
-                tone: "ok",
-                text: `Mapped ${code} to ${res.externalOrderId} and marked shipped.`,
-              });
-              reset();
-              onDone?.();
-            }}
-          />
-        ) : null}
-
-        {unmapped && !outbound && !checkInFor ? (
+        {unmapped && !outbound ? (
           <CheckInPicker
             code={unmapped}
             busy={busy}
@@ -480,127 +392,6 @@ export function ScanModal({
 }
 
 /* -------------------------------------------------------------------------- */
-
-/**
- * "No match" at the packing bench: offer to tie the scanned code to whichever
- * packed order it belongs to, since it is almost always an AWB Amazon never
- * gave us through sync rather than a bad scan.
- *
- * Shows the exact same rows, in the exact same order, as the Orders page's
- * Packed tab — including orders that already have an AWB, since mapping one
- * just replaces it (`mapAwbToOrder` still refuses a code already tied to a
- * *different* order). Rows render with the same mobile `OrderCard` the Packed
- * tab itself uses, so nothing here looks or sorts differently from what the
- * operator can see on that tab.
- */
-type MapAndDispatchResult = Awaited<ReturnType<typeof scanMapAndDispatch>>;
-type MapAndDispatchOk = Extract<MapAndDispatchResult, { ok: true }>;
-
-function AwbMapper({
-  code,
-  busy,
-  onOpenImage,
-  onMapped,
-}: {
-  code: string;
-  busy: boolean;
-  onOpenImage: (src: string, alt: string) => void;
-  onMapped: (res: MapAndDispatchOk, code: string) => void;
-}) {
-  const [orders, setOrders] = useState<OrderRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [mapping, setMapping] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    scanListPackedOrders().then((rows) => {
-      if (!cancelled) setOrders(rows);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const q = query.trim().toLowerCase();
-  const filtered = orders?.filter(
-    (o) =>
-      !q ||
-      o.externalOrderId.toLowerCase().includes(q) ||
-      o.buyerName?.toLowerCase().includes(q),
-  );
-
-  async function pick(orderId: number) {
-    setMapping(orderId);
-    setError(null);
-    try {
-      const res = await scanMapAndDispatch(orderId, code);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      // Shipped — it belongs on neither this picker nor the Packed tab
-      // anymore. Removing it here covers the moment before the parent
-      // dismisses the whole picker; a fresh `unmapped` code remounts this
-      // component and refetches from scratch regardless.
-      setOrders((prev) => prev?.filter((o) => o.id !== orderId) ?? prev);
-      onMapped(res, code);
-    } finally {
-      setMapping(null);
-    }
-  }
-
-  const locked = busy || mapping !== null;
-
-  if (orders?.length === 0) {
-    return <p className="muted text-xs">No packed orders right now.</p>;
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="muted text-xs">
-        Packed orders &middot; tap to map <span className="font-mono">{code}</span>
-      </p>
-
-      {error ? (
-        <p className="text-xs" style={{ color: "var(--danger)" }}>
-          {error}
-        </p>
-      ) : null}
-
-      {orders === null ? (
-        <CenteredSpinner className="py-4" />
-      ) : (
-        <>
-          {orders.length > 5 ? (
-            <input
-              className="input text-[13px]"
-              placeholder="Filter by order id or buyer"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          ) : null}
-
-          <div className="flex max-h-72 flex-col gap-2 overflow-y-auto">
-            {filtered?.length === 0 ? (
-              <p className="muted text-xs">No packed orders match &ldquo;{query}&rdquo;.</p>
-            ) : (
-              filtered?.map((row) => (
-                <PackedOrderCard
-                  key={row.id}
-                  row={row}
-                  onOpen={locked ? () => {} : () => pick(row.id)}
-                  onOpenImage={onOpenImage}
-                  onScanAwb={locked ? undefined : () => pick(row.id)}
-                />
-              ))
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 /**
  * "No match" at goods-in: offer to tie the scanned code to whichever pending

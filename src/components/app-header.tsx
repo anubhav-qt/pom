@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { ScanBarcodeButton } from "@/app/(app)/orders/scan/scan-button";
 import { DropdownMenu } from "@/components/dropdown-menu";
 import {
   ordersViewKey,
@@ -14,6 +15,7 @@ import {
   useOrdersNav,
 } from "@/lib/stores/orders-cache";
 import { dashboardUrl, peekCurrentDashboard, useDashboardNav } from "@/lib/stores/dashboard-cache";
+import { peekCurrentReturns } from "@/lib/stores/returns-cache";
 import { useHeaderCounts } from "@/lib/stores/header-counts";
 import { resolveScreen, screenFromPath, screenHref, useScreenNav, type Screen } from "@/lib/stores/screen-nav";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
@@ -148,6 +150,8 @@ export function AppHeader({
 
         <SyncStatus lastSyncAt={lastSyncAt} />
 
+        <HeaderScan />
+
         {primaryAccountId !== null ? (
           <SyncNowButton
             accountId={primaryAccountId}
@@ -179,10 +183,6 @@ function dashboardHref(): string {
   return dashboardUrl(range, basis);
 }
 
-function isReturnsPath(pathname: string): boolean {
-  return pathname === "/returns" || pathname.startsWith("/returns/");
-}
-
 function ordersHref(): string {
   return `/orders${paramsToQuery(useOrdersNav.getState().params)}`;
 }
@@ -190,6 +190,7 @@ function ordersHref(): string {
 function hrefFor(screen: Screen): string {
   if (screen === "orders") return ordersHref();
   if (screen === "pdf-printer") return "/pdf-printer";
+  if (screen === "returns") return "/returns";
   return dashboardHref();
 }
 
@@ -201,6 +202,7 @@ function targetIsCached(screen: Screen): boolean {
       useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
     );
   }
+  if (screen === "returns") return peekCurrentReturns() !== null;
   return peekCurrentDashboard() !== null;
 }
 
@@ -218,10 +220,9 @@ function MobileScreenMenu({
   routeScreen: Screen | null;
 }) {
   const router = useRouter();
-  const onReturns = isReturnsPath(usePathname());
 
   function select(screen: Screen) {
-    if (screen === effectiveScreen && !onReturns) return;
+    if (screen === effectiveScreen) return;
     // App-relative. Raw pushState needs the basePath added by hand, but
     // router.push adds it itself, so it is given this unprefixed form.
     const href = hrefFor(screen);
@@ -258,15 +259,8 @@ function MobileScreenMenu({
         { id: "orders", label: "Orders" },
         { id: "returns", label: "Returns" },
       ]}
-      activeId={onReturns ? "returns" : (effectiveScreen ?? "orders")}
-      onSelect={(id) => {
-        if (id === "returns") {
-          useScreenNav.getState().setOverride(null);
-          router.push("/returns");
-          return;
-        }
-        select(id as Screen);
-      }}
+      activeId={effectiveScreen ?? "orders"}
+      onSelect={(id) => select(id as Screen)}
     />
   );
 }
@@ -281,11 +275,7 @@ function AppSwitch({
   /** Mobile reaches the printer from the Orders bottom bar, not from here. */
   hidePrinter?: boolean;
 }) {
-  const pathname = usePathname();
-  const onReturns = isReturnsPath(pathname);
-  // Returns is an ordinary route, not a cached screen swap, so it sits beside
-  // the screens in the switch without joining the `Screen` machinery.
-  const items: { screen: Screen | "returns"; label: string }[] = [
+  const items: { screen: Screen; label: string }[] = [
     { screen: "dashboard", label: "Finance" },
     { screen: "orders", label: "Orders" },
     { screen: "returns", label: "Returns" },
@@ -327,19 +317,12 @@ function AppSwitch({
       style={{ background: "var(--panel-2)", border: "1px solid var(--border)" }}
     >
       {items.map((item) => {
-        const isReturns = item.screen === "returns";
-        const active = isReturns ? onReturns : effectiveScreen === item.screen;
+        const active = effectiveScreen === item.screen;
         return (
           <Link
             key={item.screen}
-            href={isReturns ? "/returns" : screenHref(item.screen as Screen)}
-            onClick={(e) => {
-              if (isReturns) {
-                useScreenNav.getState().setOverride(null);
-                return;
-              }
-              onNav(e, item.screen as Screen);
-            }}
+            href={screenHref(item.screen)}
+            onClick={(e) => onNav(e, item.screen)}
             className={cn(
               "rounded-[7px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
               !active && "muted hover:text-[var(--text)]",
@@ -366,6 +349,20 @@ function AppSwitch({
 /* -------------------------------------------------------------------------- */
 /* Band 1 — sync status text                                                  */
 /* -------------------------------------------------------------------------- */
+
+/** The scanner, reachable from every screen on desktop (phones have it in the bottom bar). */
+function HeaderScan() {
+  const router = useRouter();
+  return (
+    <ScanBarcodeButton
+      className="btn hidden shrink-0 sm:inline-flex"
+      onDone={() => {
+        useOrdersCache.getState().bumpSync();
+        router.refresh();
+      }}
+    />
+  );
+}
 
 function SyncStatus({ lastSyncAt }: { lastSyncAt: string | null }) {
   // Rendered only after mount: the relative time would otherwise differ

@@ -21,6 +21,8 @@ export function DropdownMenu({
   activeId,
   onSelect,
   align = "left",
+  side = "down",
+  className,
 }: {
   trigger: React.ReactNode;
   options: DropdownOption[];
@@ -29,6 +31,10 @@ export function DropdownMenu({
   /** Which edge the popover hangs from — "right" for a trigger near the
    *  screen's right edge, so the menu opens inward instead of off-screen. */
   align?: "left" | "right";
+  /** "up" for a trigger docked to the bottom of the screen (the mobile nav). */
+  side?: "down" | "up";
+  /** Extra classes for the wrapper, e.g. `flex-1` to share a bar's width. */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -42,12 +48,13 @@ export function DropdownMenu({
   }, []);
 
   return (
-    <div className="relative shrink-0" ref={ref}>
+    <div className={className ?? "relative shrink-0"} ref={ref} style={className ? { position: "relative" } : undefined}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
+        className={className ? "w-full" : undefined}
       >
         {trigger}
       </button>
@@ -55,7 +62,7 @@ export function DropdownMenu({
       {open ? (
         <div
           role="menu"
-          className="panel absolute top-full z-20 mt-2 w-52 origin-top p-1.5"
+          className={`panel absolute z-20 w-52 p-1.5 ${side === "up" ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`}
           style={{
             animation: "rise-in 0.15s var(--ease-premium)",
             ...(align === "right" ? { right: 0 } : { left: 0 }),

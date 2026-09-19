@@ -5,6 +5,8 @@ import { create } from "zustand";
 
 import type { OrdersView, OrdersViewParams } from "@/app/(app)/orders/view-actions";
 import { useDashboardCache } from "./dashboard-cache";
+import { useLedgerCache } from "./ledger-cache";
+import { useReturnsCache } from "./returns-cache";
 import { useOrderDetailCache } from "./order-detail-cache";
 
 /**
@@ -100,6 +102,8 @@ export const useOrdersCache = create<OrdersCacheState>((set, get) => ({
     // dashboard's aggregates included.
     useOrderDetailCache.getState().clear();
     useDashboardCache.getState().clear();
+    useLedgerCache.getState().clear();
+    useReturnsCache.getState().clear();
     set((s) => ({ entries: {}, syncStamp: s.syncStamp + 1 }));
   },
 

@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 
-import type { ScanStation } from "@/lib/scan";
-
 import { ScanModal } from "./scan-modal";
 
 /**
@@ -13,10 +11,10 @@ import { ScanModal } from "./scan-modal";
  * page owns its placement rather than this component reaching for a corner.
  */
 export function ScanBarcodeButton({
-  station,
   onDone,
+  className = "btn",
 }: {
-  station: ScanStation;
+  className?: string;
   /** Called after anything was committed, so the page can refetch. */
   onDone?: () => void;
 }) {
@@ -27,7 +25,7 @@ export function ScanBarcodeButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="btn"
+        className={className}
         aria-haspopup="dialog"
       >
         <ScanIcon />
@@ -35,7 +33,7 @@ export function ScanBarcodeButton({
       </button>
 
       {open ? (
-        <ScanModal station={station} onClose={() => setOpen(false)} onDone={onDone} />
+        <ScanModal onClose={() => setOpen(false)} onDone={onDone} />
       ) : null}
     </>
   );

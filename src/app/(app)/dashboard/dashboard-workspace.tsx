@@ -3,6 +3,7 @@
 import { LoadingOverlay } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 
+import { Segmented } from "@/components/segmented";
 import { Empty, Stat } from "@/components/ui";
 import { useOrdersCache } from "@/lib/stores/orders-cache";
 import { dashKey, useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
@@ -58,42 +59,6 @@ function paramsFromSearch(search: string): { range: RangePreset; basis: Basis; t
 }
 
 const BASIS_LABEL: Record<Basis, string> = { paid: "Payment date", ordered: "Order date" };
-
-/** Same pill as the range picker, so the two controls read as a set. */
-function Pills<T extends string>({
-  items,
-  active,
-  onSelect,
-  label,
-}: {
-  items: { key: T; label: string }[];
-  active: T;
-  onSelect: (k: T) => void;
-  label: string;
-}) {
-  return (
-    <div
-      className="inline-flex items-center gap-0.5 rounded-full border p-1"
-      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-      role="group"
-      aria-label={label}
-    >
-      {items.map((i) => (
-        <button
-          key={i.key}
-          onClick={() => onSelect(i.key)}
-          className={cn(
-            "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-            active === i.key ? "text-white" : "muted hover:text-[var(--text)]",
-          )}
-          style={active === i.key ? { background: "linear-gradient(135deg, var(--accent), var(--accent-2))" } : undefined}
-        >
-          {i.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 export function DashboardWorkspace({
   initialView,
@@ -174,21 +139,21 @@ export function DashboardWorkspace({
   return (
     <div className="relative space-y-6">
       <div className="flex flex-wrap items-center gap-3">
-        <Pills
+        <Segmented
           label="Finance view"
           items={[
             { key: "overview" as Tab, label: "Overview" },
-            { key: "ledger" as Tab, label: "Order ledger" },
+            { key: "ledger" as Tab, label: "Ledger" },
           ]}
-          active={tab}
-          onSelect={selectTab}
+          value={tab}
+          onChange={selectTab}
         />
         <div className="ml-auto flex flex-wrap items-center gap-3">
-          <Pills
+          <Segmented
             label="Count money by"
             items={(["paid", "ordered"] as Basis[]).map((b) => ({ key: b, label: BASIS_LABEL[b] }))}
-            active={basis}
-            onSelect={(b) => go({ basis: b })}
+            value={basis}
+            onChange={(b) => go({ basis: b })}
           />
           {tab === "overview" ? <RangePicker active={range} onSelect={(next) => go({ range: next })} /> : null}
         </div>

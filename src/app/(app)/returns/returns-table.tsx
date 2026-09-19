@@ -1,19 +1,21 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
-import { Empty, Spinner, Stat } from "@/components/ui";
+import { Segmented } from "@/components/segmented";
+import { Empty, LoadingOverlay, Spinner, Stat } from "@/components/ui";
 import { friendlyItem } from "@/lib/friendly-item";
 import { withBasePath } from "@/lib/base-path";
-import { cn, dayLabel, money } from "@/lib/utils";
+import { returnsKey, useReturnsCache, useReturnsNav } from "@/lib/stores/returns-cache";
+import { useOrdersCache } from "@/lib/stores/orders-cache";
+import { dayLabel, money } from "@/lib/utils";
 
 import { LabelBars } from "../dashboard/finance-charts";
 import { CancellationsPanel } from "../orders/cancellations-panel";
-import type { CancellationRecord } from "../orders/queries";
 import { ScanModal } from "../orders/scan/scan-modal";
 import { closeReturnWithoutParcel, receiveReturn, reopenReturn } from "./actions";
-import type { ReasonCount, ReturnDeskRow, ReturnsKpis, ReturnStage } from "./queries";
+import type { ReturnDeskRow, ReturnStage } from "./queries";
+import { getReturnsView, type ReturnsView } from "./view-actions";
 
 /**
  * The Returns desk.
@@ -58,27 +60,62 @@ function StagePill({ row }: { row: ReturnDeskRow }) {
 
 const SIZE_REASONS = new Set(["Poor fit", "Too small", "Too large"]);
 
-export function ReturnsDesk({
-  rows,
-  kpis,
-  reasons,
-  cancellations,
-  cancelCounts,
-  initialTab,
-  resolvedCancel,
-}: {
-  rows: ReturnDeskRow[];
-  kpis: ReturnsKpis;
-  reasons: ReasonCount[];
-  cancellations: CancellationRecord[];
-  cancelCounts: { pending: number; completed: number };
-  initialTab: Tab;
-  resolvedCancel: boolean;
-}) {
-  const router = useRouter();
+export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsView; initialTab: Tab }) {
+  const resolvedCancel = useReturnsNav((s) => s.resolved);
+  const syncStamp = useOrdersCache((s) => s.syncStamp);
+  const [view, setView] = useState<ReturnsView>(initialView);
+  const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<Tab>(initialTab);
   const [filter, setFilter] = useState<Filter>("todo");
   const [scanning, setScanning] = useState(false);
+
+  // Seed synchronously so the server's first payload counts as already fetched.
+  const seeded = useRef(false);
+  if (!seeded.current) {
+    seeded.current = true;
+    useReturnsCache.getState().put(returnsKey(initialView.resolved), initialView);
+    useReturnsNav.setState({ resolved: initialView.resolved });
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    const cache = useReturnsCache.getState();
+    const key = returnsKey(resolvedCancel);
+
+    const cached = cache.peek(key);
+    if (cached) setView(cached);
+    else setLoading(true);
+
+    cache
+      .load(key, () => getReturnsView(resolvedCancel))
+      .then((fresh) => {
+        if (cancelled) return;
+        setView(fresh);
+        setLoading(false);
+        useReturnsCache.getState().entries[key]?.inFlight?.then((latest) => !cancelled && setView(latest)).catch(() => {});
+      })
+      .catch(() => !cancelled && setLoading(false));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedCancel, syncStamp]);
+
+  /** Something changed here: drop what was cached and read this list again. */
+  function refresh() {
+    useReturnsCache.getState().clear();
+    setLoading(true);
+    useReturnsCache
+      .getState()
+      .load(returnsKey(resolvedCancel), () => getReturnsView(resolvedCancel))
+      .then((fresh) => {
+        setView(fresh);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }
+
+  const { rows, kpis, reasons, cancellations, cancelCounts } = view;
 
   function selectTab(next: Tab) {
     setTab(next);
@@ -103,7 +140,7 @@ export function ReturnsDesk({
   const sizeCount = reasons.filter((r) => SIZE_REASONS.has(r.reason)).reduce((a, r) => a + r.count, 0);
 
   return (
-    <div className="space-y-5">
+    <div className="relative space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="To check in" value={kpis.toDo} tone={kpis.arrived > 0 ? "warn" : undefined} />
         <Stat
@@ -119,29 +156,15 @@ export function ReturnsDesk({
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-4">
           <div className="flex flex-wrap items-center gap-3">
-            <div
-              className="inline-flex items-center gap-0.5 rounded-full border p-1"
-              style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-            >
-              {(
-                [
-                  { key: "returns", label: `Customer returns · ${counts.todo}` },
-                  { key: "rto", label: `RTO & cancelled · ${cancelCounts.pending}` },
-                ] as { key: Tab; label: string }[]
-              ).map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => selectTab(t.key)}
-                  className={cn(
-                    "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-                    tab === t.key ? "text-white" : "muted hover:text-[var(--text)]",
-                  )}
-                  style={tab === t.key ? { background: "linear-gradient(135deg, var(--accent), var(--accent-2))" } : undefined}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              label="Returns view"
+              items={[
+                { key: "returns" as Tab, label: "Customer returns", count: counts.todo },
+                { key: "rto" as Tab, label: "RTO & cancelled", count: cancelCounts.pending },
+              ]}
+              value={tab}
+              onChange={selectTab}
+            />
             <button className="btn btn-primary ml-auto text-xs" onClick={() => setScanning(true)}>
               Scan a return
             </button>
@@ -149,28 +172,16 @@ export function ReturnsDesk({
 
           {tab === "returns" ? (
             <>
-              <div className="flex flex-wrap items-center gap-2">
-                {(
-                  [
-                    ["todo", "To do"],
-                    ["overdue", "Not received"],
-                    ["done", "Done"],
-                  ] as [Filter, string][]
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => setFilter(key)}
-                    className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors", filter !== key && "muted")}
-                    style={
-                      filter === key
-                        ? { background: "var(--accent-soft)", borderColor: "var(--accent)", color: "var(--text)" }
-                        : { background: "var(--panel)", borderColor: "var(--border)" }
-                    }
-                  >
-                    {label} <span className="tabular-nums">{counts[key]}</span>
-                  </button>
-                ))}
-              </div>
+              <Segmented
+                label="Show"
+                items={[
+                  { key: "todo" as Filter, label: "To do", count: counts.todo },
+                  { key: "overdue" as Filter, label: "Not received", count: counts.overdue },
+                  { key: "done" as Filter, label: "Done", count: counts.done },
+                ]}
+                value={filter}
+                onChange={setFilter}
+              />
 
               {shown.length === 0 ? (
                 <div className="panel">
@@ -179,7 +190,7 @@ export function ReturnsDesk({
               ) : (
                 <div className="space-y-3">
                   {shown.map((r) => (
-                    <ReturnCard key={r.id} row={r} onChanged={() => router.refresh()} />
+                    <ReturnCard key={r.id} row={r} onChanged={refresh} />
                   ))}
                 </div>
               )}
@@ -189,7 +200,11 @@ export function ReturnsDesk({
               records={cancellations}
               counts={cancelCounts}
               resolved={resolvedCancel}
-              onResolvedChange={(next) => router.replace(`/returns?tab=rto${next ? "&resolved=1" : ""}`)}
+              onResolvedChange={(next) => {
+                useReturnsNav.getState().setResolved(next);
+                window.history.replaceState(null, "", withBasePath(`/returns?tab=rto${next ? "&resolved=1" : ""}`));
+              }}
+              onChanged={refresh}
             />
           )}
         </div>
@@ -221,10 +236,12 @@ export function ReturnsDesk({
           onClose={() => setScanning(false)}
           onDone={() => {
             setScanning(false);
-            router.refresh();
+            refresh();
           }}
         />
       ) : null}
+
+      {loading ? <LoadingOverlay /> : null}
     </div>
   );
 }

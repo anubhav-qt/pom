@@ -8,6 +8,7 @@ import { PageLoader } from "@/components/ui";
 import { stripBasePath } from "@/lib/base-path";
 import { ordersViewKey, useOrdersCache, useOrdersNav } from "@/lib/stores/orders-cache";
 import { peekCurrentDashboard } from "@/lib/stores/dashboard-cache";
+import { peekCurrentReturns } from "@/lib/stores/returns-cache";
 import { resolveScreen, screenFromPath, useScreenNav } from "@/lib/stores/screen-nav";
 
 // Only pulled when an override actually activates, so /settings and friends do
@@ -18,6 +19,10 @@ const OrdersWorkspace = dynamic(
 );
 const PdfPrinter = dynamic(
   () => import("@/app/(app)/pdf-printer/pdf-printer").then((m) => m.PdfPrinter),
+  { ssr: false, loading: () => <PageLoader /> },
+);
+const ReturnsDesk = dynamic(
+  () => import("@/app/(app)/returns/returns-table").then((m) => m.ReturnsDesk),
   { ssr: false, loading: () => <PageLoader /> },
 );
 const DashboardWorkspace = dynamic(
@@ -110,6 +115,11 @@ export function ScreenSwitcher({ children }: { children: React.ReactNode }) {
   if (override === "dashboard" && resolved === "dashboard") {
     const view = peekCurrentDashboard();
     if (view) return <DashboardWorkspace initialView={view} />;
+  }
+
+  if (override === "returns" && resolved === "returns") {
+    const view = peekCurrentReturns();
+    if (view) return <ReturnsDesk initialView={view} initialTab="returns" />;
   }
 
   if (override === "pdf-printer" && resolved === "pdf-printer") return <PdfPrinter />;
