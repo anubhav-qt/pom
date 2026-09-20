@@ -181,47 +181,6 @@ function summary(row: {
   };
 }
 
-/* ------------------------------------------------------------- outbound -- */
-
-/**
- * Outbound: the parcel is packed and about to go out.
- *
- * The one thing this must never do is wave through an order the marketplace has
- * already cancelled. That is the entire reason a scan step exists between
- * picking and handing the parcel to the courier, so a cancelled order is a hard
- * `blocked`, not a warning the packer can scroll past.
- */
-export async function lookupOutbound(code: string): Promise<ScanLookup> {
-  const value = code.trim().toLowerCase();
-  if (!value) return { ok: false, code, reason: "empty", message: "Nothing scanned." };
-
-  const found = await findOrder(value);
-  if (!found) {
-    return { ok: false, code, reason: "not_found", message: `No order matches "${code.trim()}".` };
-  }
-  const { row, matchedOn } = found;
-
-  if ((TERMINAL_STATUSES as readonly string[]).includes(row.status)) {
-    return {
-      ok: false,
-      code,
-      reason: "blocked",
-      message: `STOP. ${row.externalOrderId} is ${row.status.toUpperCase()}. Do not ship it.`,
-    };
-  }
-
-  return {
-    ok: true,
-    code,
-    matchedOn,
-    order: summary(row, await itemsFor(row.id)),
-    outbound: {
-      alreadyPacked: row.fulfilmentState === "manifested",
-      packedAt: row.packedAt,
-    },
-  };
-}
-
 /* -------------------------------------------------------------- inbound -- */
 
 /**
@@ -367,8 +326,8 @@ export async function lookupInbound(code: string): Promise<ScanLookup> {
   };
 }
 
-export async function lookupScan(station: ScanStation, code: string): Promise<ScanLookup> {
-  return station === "outbound" ? lookupOutbound(code) : lookupInbound(code);
+export async function lookupScan(code: string): Promise<ScanLookup> {
+  return lookupInbound(code);
 }
 
 /** Pending inbound work, for the scan modal's header. */

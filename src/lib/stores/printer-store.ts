@@ -99,13 +99,18 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
     // Opened now, inside the click, so the browser treats it as user-initiated;
     // it is pointed at the sheet once that exists. If blocked, the result card
     // still has an "Open sheet" link.
-    const tab = window.open("", "_blank");
+    // The loader is opened as a real page (a blob), not document.write()n into
+    // an about:blank tab: phone browsers ignore the viewport tag on a written
+    // document and draw it at desktop width, which is what shrank the spinner
+    // into a corner.
+    let loaderUrl: string | null = null;
     try {
-      tab?.document.write(LOADER_HTML);
-      tab?.document.close();
+      loaderUrl = URL.createObjectURL(new Blob([LOADER_HTML], { type: "text/html" }));
     } catch {
-      // A tab we cannot write to just stays blank until the sheet lands.
+      // No blob support: the tab just stays blank until the sheet lands.
     }
+    const tab = window.open(loaderUrl ?? "", "_blank");
+    if (loaderUrl) setTimeout(() => URL.revokeObjectURL(loaderUrl!), 60_000);
     set({ phase: "processing", result: null, error: null, popupBlocked: false });
 
     const body = new FormData();

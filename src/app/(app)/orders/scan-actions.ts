@@ -4,176 +4,26 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/db";
-import { orderFulfilment, orderItems, orders, returns } from "@/db/schema";
+import { orderItems, returns } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
-import { mapAwbToOrder, markManifestedLocal, recordScan } from "@/lib/fulfilment";
+import { recordScan } from "@/lib/fulfilment";
 import { adjustStock } from "@/lib/inventory";
-import { lookupScan, type ScanLookup, type ScanStation } from "@/lib/scan";
-import { recomputeReserved } from "@/lib/sync";
+import { lookupScan, type ScanLookup } from "@/lib/scan";
 
 import { checkInCancellation } from "./actions";
 import { getCancellationRecords } from "./queries";
-import { getOrdersView } from "./view-actions";
 
 /**
  * Server actions behind the Scan Barcode modal.
  *
- * Deliberately thin: the lookup lives in lib/scan and the two commit paths
- * reuse the same functions the existing screens already use, so a scan and a
- * click on the table produce identical records.
+ * Deliberately thin: the lookup lives in lib/scan and the commit paths reuse
+ * the same functions the existing screens already use, so a scan and a click
+ * on the table produce identical records.
  */
 
-export async function scanLookup(station: ScanStation, code: string): Promise<ScanLookup> {
+export async function scanLookup(code: string): Promise<ScanLookup> {
   await requireUser();
-  return lookupScan(station, code);
-}
-
-/**
- * Packed orders for the "map this scan" picker — the exact same rows, in the
- * exact same order, as the Orders page's Packed tab (all enabled channels, no
- * search). Mapping an order that already has an AWB just replaces it, so
- * there is no "already mapped" filtering here; `mapAwbToOrder` still refuses
- * a code already tied to a *different* order.
- */
-export async function scanListPackedOrders() {
-  await requireUser();
-  const view = await getOrdersView({ tab: "packed" });
-  return view.kind === "list" ? view.rows : [];
-}
-
-/**
- * Tie a scanned code (an AWB Amazon never handed us through sync) to a packed
- * order the operator picks by hand. On success this behaves exactly like a
- * normal outbound scan of that order, since the code now resolves on its own.
- */
-export async function scanMapAwb(orderId: number, code: string): Promise<ScanLookup | { ok: false; error: string }> {
-  const user = await requireUser();
-
-  const res = await mapAwbToOrder(orderId, code, user.id);
-  await recordScan({
-    orderId,
-    station: "outbound",
-    code,
-    matchedOn: "awb",
-    applied: res.ok,
-    rejectedReason: res.ok ? null : res.error,
-    scannedBy: user.id,
-  });
-
-  if (!res.ok) return res;
-
-  revalidatePath("/orders");
-  return lookupScan("outbound", code);
-}
-
-/**
- * Map an AWB to an order and immediately mark it dispatched. A manual AWB
- * entry — from the "no match" picker or mapTo mode — means the parcel is
- * already in hand and going out; there is no separate packing step to wait
- * for, so this always finishes the job in one round trip rather than leaving
- * the operator to hit a second "Confirm dispatch".
- *
- * Reuses `scanMapAwb` and `scanConfirmPacked` as-is (both already record
- * their own scan and are idempotent) instead of duplicating either.
- */
-export async function scanMapAndDispatch(
-  orderId: number,
-  code: string,
-): Promise<{ ok: true; externalOrderId: string; already: boolean } | { ok: false; error: string }> {
-  const mapped = await scanMapAwb(orderId, code);
-  if (!mapped.ok) {
-    return { ok: false, error: "error" in mapped ? mapped.error : mapped.message };
-  }
-
-  return scanConfirmPacked(orderId);
-}
-
-/* ------------------------------------------------------------- outbound -- */
-
-/**
- * Outbound scan marks parcel manifested (dispatched) and takes stock off shelf.
- *
- * Safe to call twice: a duplicate scan returns a soft 'already' rather than an error
- * and avoids decrementing stock again.
- */
-export async function scanConfirmPacked(orderId: number) {
-  const user = await requireUser();
-
-  const [order] = await db
-    .select({
-      status: orders.status,
-      externalOrderId: orders.externalOrderId,
-      state: orderFulfilment.state,
-    })
-    .from(orders)
-    .leftJoin(orderFulfilment, eq(orderFulfilment.orderId, orders.id))
-    .where(eq(orders.id, orderId))
-    .limit(1);
-
-  if (!order) return { ok: false as const, error: "Order not found." };
-
-  // The marketplace still gets a veto on shipping: a cancelled order must not
-  // go out whatever our bench thinks.
-  if (["cancelled", "rto", "returned"].includes(order.status)) {
-    await recordScan({
-      orderId,
-      station: "outbound",
-      code: order.externalOrderId,
-      applied: false,
-      rejectedReason: `order is ${order.status}`,
-      scannedBy: user.id,
-    });
-    return { ok: false as const, error: `STOP. This order is ${order.status.toUpperCase()}.` };
-  }
-
-  // If already manifested, it is already dispatched.
-  if (order.state === "manifested") {
-    await recordScan({
-      orderId,
-      station: "outbound",
-      code: order.externalOrderId,
-      applied: false,
-      rejectedReason: "already dispatched",
-      scannedBy: user.id,
-    });
-    return { ok: true as const, already: true as const, externalOrderId: order.externalOrderId };
-  }
-
-  // Adjust stock if it hasn't been packed yet
-  if ((order.state ?? "to_pack") === "to_pack") {
-    const items = await db
-      .select({ productId: orderItems.productId, quantity: orderItems.quantity })
-      .from(orderItems)
-      .where(eq(orderItems.orderId, orderId));
-
-    for (const item of items) {
-      if (item.productId === null) continue; // Unmapped SKUs are not stock-controlled.
-      await adjustStock({
-        productId: item.productId,
-        delta: -item.quantity,
-        reason: "order_packed",
-        refType: "order",
-        refId: orderId,
-        userId: user.id,
-        note: "Scanned at outbound dispatch",
-      });
-    }
-  }
-
-  await markManifestedLocal([orderId], user.id);
-  await recordScan({
-    orderId,
-    station: "outbound",
-    code: order.externalOrderId,
-    matchedOn: "order_id",
-    applied: true,
-    scannedBy: user.id,
-  });
-
-  await recomputeReserved();
-  revalidatePath("/orders");
-
-  return { ok: true as const, already: false as const, externalOrderId: order.externalOrderId };
+  return lookupScan(code);
 }
 
 /* -------------------------------------------------------------- inbound -- */
