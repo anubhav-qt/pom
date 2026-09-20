@@ -5,13 +5,10 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Modal } from "@/components/modal";
-import { Segmented } from "@/components/segmented";
-import type { ScanStation } from "@/lib/scan";
 
 import { CancellationCard } from "../cancellations-panel";
 import {
   scanCheckIn,
-  scanConfirmPacked,
   scanListAwaitingCheckIn,
   scanLookup,
   scanRecordReturnCode,
@@ -20,14 +17,9 @@ import { playScanBeep } from "./beep";
 import { useBarcodeScanner } from "./use-barcode-scanner";
 
 /**
- * The scan bench, both stations behind one toggle: Packed and Returned.
- *
- * Packed ships the instant a scan matches: take the stock off, mark it
- * dispatched, done — no review step, so a bench scanner can fire the next
- * code the moment this one resolves. Amazon hands us each order's tracking ID,
- * so there is nothing to pick by hand. Returned ends in a question (did the
- * goods come back sellable?) because restocking a worn return is how a used
- * item reaches the next customer, so it can never be automatic.
+ * The goods-in scan bench. A scan ends in a question (did the goods come back
+ * sellable?) because restocking a worn return is how a used item reaches the
+ * next customer, so it can never be automatic.
  *
  * Three input routes, all landing on the same lookup: the camera, a bench
  * scanner typing into the box, and someone reading a code out and typing it.
@@ -62,18 +54,12 @@ function canAutoFocus(): boolean {
 }
 
 export function ScanModal({
-  station: initialStation = "outbound",
   onClose,
   onDone,
 }: {
-  /** Which side the toggle starts on. */
-  station?: ScanStation;
   onClose: () => void;
   onDone?: () => void;
 }) {
-  const [station, setStation] = useState<ScanStation>(initialStation);
-  const outbound = station === "outbound";
-
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [note, setNote] = useState("");
   const [log, setLog] = useState<Entry[]>([]);
@@ -121,64 +107,33 @@ export function ScanModal({
         // next code doesn't get typed onto the end of this one.
         let keepInBox = false;
         try {
-          if (outbound) {
-            // A packing-bench scan ships the parcel outright — no review
-            // step, so the bench can fire the next code the instant this one
-            // resolves.
-            const res = await scanLookup(station, code);
-            if (!res.ok) {
-              if (res.reason === "blocked") {
-                setFeedback({ tone: "stop", title: "STOP, do not ship this parcel", text: res.message });
-                push(code, "Blocked", "stop");
-              } else if (res.reason !== "empty") {
-                setFeedback({ tone: "warn", text: res.message });
-                push(code, "No match", "warn");
-              }
-            } else {
-              const ship = await scanConfirmPacked(res.order.orderId);
-              if (!ship.ok) {
-                setFeedback({ tone: "stop", title: "Not dispatched", text: ship.error });
-                push(res.order.externalOrderId, "Refused", "stop");
-              } else if (ship.already) {
-                setFeedback({ tone: "warn", text: "Already dispatched, so nothing moved." });
-                push(ship.externalOrderId, "Already dispatched", "warn");
-              } else {
-                changedRef.current = true;
-                setFeedback({ tone: "ok", text: `Shipped ${ship.externalOrderId}.` });
-                push(ship.externalOrderId, "Shipped", "ok");
-                onDone?.();
-              }
-              reset();
+          // Plain goods-in scan: find whatever is pending for this code and
+          // ask the sellable question, or offer the "no match" picker.
+          const res = await scanLookup(code);
+          if (!res.ok) {
+            if (res.reason !== "empty") {
+              setFeedback({ tone: "warn", text: res.message });
+              push(code, "No match", "warn");
+              // Almost always the return's own AWB or tracking sticker
+              // rather than a bad scan.
+              setUnmapped(code);
+              keepInBox = true;
             }
-          } else {
-            // Plain goods-in scan: find whatever is pending for this code and
-            // ask the sellable question, or offer the "no match" picker.
-            const res = await scanLookup(station, code);
-            if (!res.ok) {
-              if (res.reason !== "empty") {
-                setFeedback({ tone: "warn", text: res.message });
-                push(code, "No match", "warn");
-                // Almost always the return's own AWB or tracking sticker
-                // rather than a bad scan.
-                setUnmapped(code);
-                keepInBox = true;
-              }
-            } else if (res.inbound?.alreadyReceived) {
-              setFeedback({ tone: "warn", text: "This one was already checked in. Nothing changed." });
-              push(code, "Already checked in", "warn");
-            } else if (res.inbound) {
-              push(code, "Matched", "ok");
-              setCheckInTarget({
-                orderId: res.order.orderId,
-                externalOrderId: res.order.externalOrderId,
-                kind: res.inbound.kind,
-                recordId: res.inbound.recordId,
-              });
-            }
+          } else if (res.inbound?.alreadyReceived) {
+            setFeedback({ tone: "warn", text: "This one was already checked in. Nothing changed." });
+            push(code, "Already checked in", "warn");
+          } else if (res.inbound) {
+            push(code, "Matched", "ok");
+            setCheckInTarget({
+              orderId: res.order.orderId,
+              externalOrderId: res.order.externalOrderId,
+              kind: res.inbound.kind,
+              recordId: res.inbound.recordId,
+            });
           }
         } catch (err) {
           // Never fail quietly here: someone who sees nothing happen assumes
-          // the scan worked and ships the parcel anyway.
+          // the scan worked and puts the parcel away unchecked.
           setFeedback({
             tone: "stop",
             title: "Lookup failed",
@@ -189,7 +144,7 @@ export function ScanModal({
         }
       });
     },
-    [committing, station, outbound, onDone, push],
+    [committing, push],
   );
 
   // Camera detections land in the bottom bar first, exactly like a typed or
@@ -226,14 +181,6 @@ export function ScanModal({
     // was scanned rather than going blank mid-lookup.
     if (input.value.trim()) playScanBeep();
     handleCode(input.value);
-  }
-
-  /** Switching side drops whatever was half-done on the other one. */
-  function switchStation(next: ScanStation) {
-    if (next === station) return;
-    setStation(next);
-    setFeedback(null);
-    reset();
   }
 
   /* ------------------------------------------------------------ commit -- */
@@ -291,17 +238,6 @@ export function ScanModal({
   return (
     <Modal title="Scan barcode" onClose={close} width="36rem" aboveNav headerOnDesktopOnly>
       <div className="flex flex-col gap-4">
-        <Segmented
-          label="What are you scanning"
-          className="self-start"
-          items={[
-            { key: "outbound" as ScanStation, label: "Packed" },
-            { key: "inbound" as ScanStation, label: "Returned" },
-          ]}
-          value={station}
-          onChange={switchStation}
-        />
-
         <Viewfinder scanner={scanner} />
 
         {/* manual entry */}
@@ -337,15 +273,13 @@ export function ScanModal({
             </button>
           </div>
           <p className="muted text-xs">
-            {outbound
-              ? "Order ID, tracking ID or shipment ID. A bench scanner types straight into this box."
-              : "Order ID, tracking ID or return ID. RTOs and customer returns are both found here."}
+            Order ID, tracking ID or return ID. RTOs and customer returns are both found here.
           </p>
         </form>
 
         {feedback ? <FeedbackBanner feedback={feedback} /> : null}
 
-        {unmapped && !outbound ? (
+        {unmapped ? (
           <CheckInPicker
             code={unmapped}
             busy={busy}
