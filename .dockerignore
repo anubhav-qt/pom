@@ -1,0 +1,18 @@
+# Allowlist: ignore everything, then let back in only what the build needs.
+# The repo root collects marketplace exports, videos and scratch folders, and
+# a denylist would quietly start shipping the next one into the image.
+*
+
+!src
+!drizzle
+!scripts
+!package.json
+!package-lock.json
+!next.config.mjs
+!tsconfig.json
+!postcss.config.mjs
+!tailwind.config.ts
+!drizzle.config.ts
+
+# Loose data files that live under scripts/ but aren't code.
+scripts/*.json

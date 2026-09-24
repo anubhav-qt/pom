@@ -10,6 +10,13 @@ const basePath = "/pom";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  /**
+   * Emits .next/standalone: a server.js plus only the node_modules it traces
+   * as used. The Docker image ships that instead of the full install. Vercel
+   * ignores this setting, so the current deploy is unaffected.
+   */
+  output: "standalone",
+
   basePath,
   /**
    * Next already defaults assetPrefix to basePath, so this is the same value it
