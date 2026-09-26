@@ -505,10 +505,54 @@ input[type="checkbox"]:disabled {
   }
 }
 
-/* Only the label sheet should reach the printer, never the app chrome. */
+/* Only the page itself should reach the printer, never the app chrome. */
+.print-only {
+  display: none;
+}
 @media print {
   .no-print {
     display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
+
+/* Finance › Overview on paper (its PDF button prints the page): A4, white,
+   bars and tints kept, no card shadows, and panels never split across pages.
+   Wide tables show in full instead of scrolling. */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm 11mm;
+  }
+  html:has(.print-sheet),
+  html:has(.print-sheet) body {
+    background: #fff !important;
+    background-image: none !important;
+  }
+  html:has(.print-sheet) main {
+    max-width: none;
+    padding: 0;
+  }
+  .print-sheet {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .print-sheet .panel {
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+  .print-sheet .overflow-x-auto {
+    overflow: visible !important;
+  }
+  .print-sheet table {
+    font-size: 11.5px;
+  }
+  .print-sheet td,
+  .print-sheet th {
+    padding-top: 4px;
+    padding-bottom: 4px;
   }
 }
 

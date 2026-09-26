@@ -43,30 +43,61 @@ declare global {
   }
 }
 
+/** After a read, nothing else is read for this long: time to take the parcel away. */
+const COOLDOWN_MS = 1500;
+/**
+ * A code that has been read can't be read again until it has been out of view
+ * this long. Longer than one missed frame, since focus hunting drops a few and
+ * ZXing only looks every 500 ms.
+ */
+const REARM_MS = 1500;
+
 export function useBarcodeScanner(onDetect: (code: string) => void) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [state, setState] = useState<CameraState>({ status: "idle" });
+  /** True for the pause after a read, so the viewfinder can say so. */
+  const [cooling, setCooling] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
+  const zxingRef = useRef<{ stop: () => void } | null>(null);
+  const coolTimerRef = useRef<number | null>(null);
   const stoppedRef = useRef(false);
   const onDetectRef = useRef(onDetect);
   onDetectRef.current = onDetect;
 
   /**
-   * The same barcode stays in frame for many video frames, so without this a
-   * single parcel would fire dozens of scans a second.
+   * A parcel stays in frame for many video frames, and its label usually
+   * carries more than one barcode, so reading every frame fires the same
+   * parcel over and over. Instead, a read code is "held" (with anything seen
+   * in the same frame, being the same label) until it leaves the view, and
+   * after any read nothing else is read for COOLDOWN_MS.
    */
-  const lastCodeRef = useRef<{ value: string; at: number } | null>(null);
-  const DEBOUNCE_MS = 2500;
+  const heldRef = useRef(new Map<string, number>()); // code -> last time it was in view
+  const lastReadAtRef = useRef(0);
 
-  const emit = useCallback((value: string) => {
-    const code = value.trim();
-    if (!code) return;
-    const last = lastCodeRef.current;
-    if (last && last.value === code && Date.now() - last.at < DEBOUNCE_MS) return;
-    lastCodeRef.current = { value: code, at: Date.now() };
-    onDetectRef.current(code);
+  const see = useCallback((values: string[]) => {
+    const codes = values.map((v) => v.trim()).filter(Boolean);
+    const now = Date.now();
+    const held = heldRef.current;
+
+    for (const [code, at] of held) if (now - at >= REARM_MS) held.delete(code);
+
+    const sameLabel = codes.some((c) => held.has(c));
+    if (sameLabel) {
+      for (const c of codes) held.set(c, now);
+      return;
+    }
+    // A new code seen during the pause is left alone, not held, so it is read
+    // as soon as the pause ends if it is still in view.
+    if (codes.length === 0 || now - lastReadAtRef.current < COOLDOWN_MS) return;
+
+    for (const c of codes) held.set(c, now);
+    lastReadAtRef.current = now;
+    setCooling(true);
+    if (coolTimerRef.current !== null) window.clearTimeout(coolTimerRef.current);
+    coolTimerRef.current = window.setTimeout(() => setCooling(false), COOLDOWN_MS);
+    onDetectRef.current(codes[0]);
   }, []);
 
   const stop = useCallback(() => {
@@ -75,9 +106,17 @@ export function useBarcodeScanner(onDetect: (code: string) => void) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+    zxingRef.current?.stop();
+    zxingRef.current = null;
+    if (coolTimerRef.current !== null) {
+      window.clearTimeout(coolTimerRef.current);
+      coolTimerRef.current = null;
+    }
+    heldRef.current.clear();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
+    setCooling(false);
     setState({ status: "idle" });
   }, []);
 
@@ -161,7 +200,7 @@ export function useBarcodeScanner(onDetect: (code: string) => void) {
         if (stoppedRef.current || !videoRef.current) return;
         try {
           const found = await detector!.detect(videoRef.current);
-          if (found[0]?.rawValue) emit(found[0].rawValue);
+          see(found.map((f) => f.rawValue));
         } catch {
           /* A single failed frame is normal while focus hunts, so keep going. */
         }
@@ -176,9 +215,14 @@ export function useBarcodeScanner(onDetect: (code: string) => void) {
       const { BrowserMultiFormatReader } = await import("@zxing/browser");
       if (stoppedRef.current) return;
       const reader = new BrowserMultiFormatReader();
-      await reader.decodeFromVideoElement(video, (result) => {
-        if (result) emit(result.getText());
+      // ZXing finds one code per look, and a look that finds nothing reports
+      // an error rather than an empty result.
+      const controls = await reader.decodeFromVideoElement(video, (result) => {
+        see(result ? [result.getText()] : []);
       });
+      // Its loop outlives the stream, so it is stopped with the camera.
+      if (stoppedRef.current) controls.stop();
+      else zxingRef.current = controls;
     } catch (err) {
       setState({
         status: "error",
@@ -188,10 +232,10 @@ export function useBarcodeScanner(onDetect: (code: string) => void) {
             : "Barcode decoding is unavailable on this browser.",
       });
     }
-  }, [emit]);
+  }, [see]);
 
   // Never leave the camera light on because a modal unmounted.
   useEffect(() => stop, [stop]);
 
-  return { videoRef, state, start, stop };
+  return { videoRef, state, cooling, start, stop };
 }

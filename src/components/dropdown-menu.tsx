@@ -7,6 +7,8 @@ export interface DropdownOption {
   label: string;
   count?: number;
   disabled?: boolean;
+  /** Draw a thin rule above this option, to split a long list into groups. */
+  dividerBefore?: boolean;
 }
 
 /**
@@ -62,7 +64,7 @@ export function DropdownMenu({
       {open ? (
         <div
           role="menu"
-          className={`panel absolute z-20 w-52 p-1.5 ${side === "up" ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`}
+          className={`panel absolute z-20 max-h-[min(70vh,26rem)] w-52 overflow-y-auto p-1.5 ${side === "up" ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`}
           style={{
             animation: "rise-in 0.15s var(--ease-premium)",
             ...(align === "right" ? { right: 0 } : { left: 0 }),
@@ -71,36 +73,38 @@ export function DropdownMenu({
           {options.map((o) => {
             const active = o.id === activeId;
             return (
-              <button
-                key={o.id}
-                type="button"
-                role="menuitem"
-                disabled={o.disabled}
-                onClick={() => {
-                  if (o.disabled) return;
-                  onSelect(o.id);
-                  setOpen(false);
-                }}
-                className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-[13px] transition-colors disabled:cursor-default"
-                style={{
-                  background: active ? "var(--accent-soft)" : undefined,
-                  color: o.disabled ? "var(--muted-2)" : active ? "#0b7fb0" : "var(--text)",
-                  fontWeight: active ? 600 : 500,
-                }}
-              >
-                <span>{o.label}</span>
-                {o.count !== undefined ? (
-                  <span
-                    className="shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-semibold tabular-nums"
-                    style={{
-                      background: active ? "var(--accent-soft)" : "var(--panel-2)",
-                      color: active ? "#0b7fb0" : "var(--muted)",
-                    }}
-                  >
-                    {o.count}
-                  </span>
-                ) : null}
-              </button>
+              <div key={o.id}>
+                {o.dividerBefore ? <div className="mx-2 my-1.5 border-t" style={{ borderColor: "var(--border)" }} /> : null}
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={o.disabled}
+                  onClick={() => {
+                    if (o.disabled) return;
+                    onSelect(o.id);
+                    setOpen(false);
+                  }}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-[13px] transition-colors disabled:cursor-default"
+                  style={{
+                    background: active ? "var(--accent-soft)" : undefined,
+                    color: o.disabled ? "var(--muted-2)" : active ? "#0b7fb0" : "var(--text)",
+                    fontWeight: active ? 600 : 500,
+                  }}
+                >
+                  <span>{o.label}</span>
+                  {o.count !== undefined ? (
+                    <span
+                      className="shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-semibold tabular-nums"
+                      style={{
+                        background: active ? "var(--accent-soft)" : "var(--panel-2)",
+                        color: active ? "#0b7fb0" : "var(--muted)",
+                      }}
+                    >
+                      {o.count}
+                    </span>
+                  ) : null}
+                </button>
+              </div>
             );
           })}
         </div>
