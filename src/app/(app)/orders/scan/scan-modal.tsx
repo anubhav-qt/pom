@@ -441,7 +441,7 @@ function CheckInPicker({
 }
 
 function Viewfinder({ scanner }: { scanner: ReturnType<typeof useBarcodeScanner> }) {
-  const { videoRef, state, start, stop } = scanner;
+  const { videoRef, state, cooling, start, stop } = scanner;
   const running = state.status === "running" || state.status === "starting";
 
   return (
@@ -471,8 +471,11 @@ function Viewfinder({ scanner }: { scanner: ReturnType<typeof useBarcodeScanner>
             className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium"
             style={{ background: "rgba(8,20,28,0.6)", color: "#d6f4ff", backdropFilter: "blur(6px)" }}
           >
-            <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--ok)" }} />
-            {state.status === "starting" ? "Starting" : "Camera on"}
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ background: cooling ? "var(--accent-2)" : "var(--ok)" }}
+            />
+            {state.status === "starting" ? "Starting" : cooling ? "Scanned, next in a moment" : "Camera on"}
           </span>
           <button
             type="button"
