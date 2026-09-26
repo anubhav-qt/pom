@@ -51,7 +51,7 @@ const nextConfig = {
    * external it resolves from node_modules normally, which is the only way
    * label splitting works inside a route handler.
    */
-  serverExternalPackages: ["pdf-lib", "xlsx", "pdfjs-dist"],
+  serverExternalPackages: ["pdf-lib", "xlsx", "pdfjs-dist", "@napi-rs/canvas", "ffmpeg-static"],
 
   /**
    * pdfjs loads its worker with a dynamic import it builds at runtime, which
@@ -62,6 +62,16 @@ const nextConfig = {
   outputFileTracingIncludes: {
     "/api/label-print": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
     "/api/label-print/[id]": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
+    /**
+     * Reels render inside this route: it needs the ffmpeg binary that
+     * ffmpeg-static downloaded (a file no import points at), the canvas
+     * library's native build for the deploy platform, and the brand's end card.
+     */
+    "/api/reels/[id]/run": [
+      "./node_modules/ffmpeg-static/ffmpeg*",
+      "./node_modules/@napi-rs/canvas-linux-x64-gnu/**",
+      "./src/lib/reels/assets/**",
+    ],
   },
 };
 

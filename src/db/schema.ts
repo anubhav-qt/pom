@@ -7,6 +7,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  real,
   serial,
   text,
   timestamp,
@@ -577,6 +578,96 @@ export const labelPrintRuns = pgTable(
     unstamped: integer("unstamped").notNull().default(0),
   },
   (t) => [index("label_print_runs_created_idx").on(t.createdAt)],
+);
+
+/* -------------------------------------------------------------------------- */
+/* Reels                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The song library the Reels screen picks from. Each row holds only the
+ * reel-worthy stretch of a song (about 70 s around its hook, AAC), plus the
+ * beat map `scripts/reel-songs.ts` measured from it, so rendering never has to
+ * analyse audio. Rows are added from a local machine; see docs/reels/procedure.md.
+ */
+export const reelTracks = pgTable(
+  "reel_tracks",
+  {
+    id: serial("id").primaryKey(),
+    title: text("title").notNull(),
+    artist: text("artist").notNull(),
+    /** punjabi, hindi, haryanvi, ... Free text, for the library listing. */
+    language: text("language").notNull().default("punjabi"),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    bpm: real("bpm").notNull(),
+    /** Where the audio came from (a YouTube link, usually), for the record. */
+    source: text("source"),
+    /** Seconds into the full song where the stored stretch begins. */
+    windowStart: real("window_start").notNull().default(0),
+    duration: real("duration").notNull(),
+    audio: bytea("audio").notNull(),
+    audioMime: text("audio_mime").notNull().default("audio/mp4"),
+    /** `TrackAnalysis` from src/lib/reels/beats.ts, times relative to the stored stretch. */
+    analysis: jsonb("analysis").notNull(),
+    active: boolean("active").notNull().default(true),
+    useCount: integer("use_count").notNull().default(0),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("reel_tracks_title_artist_idx").on(t.title, t.artist)],
+);
+
+/**
+ * One reel being made, from upload to the finished MP4. The inputs live in
+ * `reel_job_files` so "different song" or "use my picks" can render again
+ * without a new upload. Jobs are short-lived: anything older than two days is
+ * deleted when the next one starts.
+ */
+export const reelJobs = pgTable(
+  "reel_jobs",
+  {
+    id: serial("id").primaryKey(),
+    createdBy: integer("created_by").references(() => users.id),
+    /** photos | video */
+    kind: text("kind").notNull(),
+    /** uploading | queued | selecting | analyzing | rendering | done | error */
+    status: text("status").notNull().default("uploading"),
+    progress: real("progress").notNull().default(0),
+    error: text("error"),
+    /** The failure was Gemini's, so the screen offers to go on without it. */
+    aiFailed: boolean("ai_failed").notNull().default(false),
+    /** Gemini's verdict per photo, in upload order. */
+    picks: jsonb("picks"),
+    /** The last render's plan: song, cue, shot order and timings. */
+    plan: jsonb("plan"),
+    trackId: integer("track_id").references(() => reelTracks.id, { onDelete: "set null" }),
+    /** Tracks this job has already rendered with, so "different song" moves on. */
+    triedTracks: jsonb("tried_tracks").$type<number[]>().notNull().default([]),
+    output: bytea("output"),
+    outputSilent: bytea("output_silent"),
+    /** Bumped on every finished render, so the player never shows a stale file. */
+    version: integer("version").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("reel_jobs_created_idx").on(t.createdAt)],
+);
+
+/** A job's uploads: photos with their small previews, or a video in chunks. */
+export const reelJobFiles = pgTable(
+  "reel_job_files",
+  {
+    id: serial("id").primaryKey(),
+    jobId: integer("job_id")
+      .notNull()
+      .references(() => reelJobs.id, { onDelete: "cascade" }),
+    /** photo | thumb | video (a video arrives as numbered chunks) */
+    kind: text("kind").notNull(),
+    idx: integer("idx").notNull(),
+    name: text("name"),
+    bytes: bytea("bytes").notNull(),
+  },
+  (t) => [uniqueIndex("reel_job_files_slot_idx").on(t.jobId, t.kind, t.idx)],
 );
 
 /* -------------------------------------------------------------------------- */
