@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 
 import { DashboardWorkspace } from "./dashboard-workspace";
+import { isBasis } from "./range";
 import { getDashboardView } from "./view-actions";
 
 /**
@@ -21,7 +22,13 @@ export default async function DashboardPage({
 }) {
   await requireUser();
   const { range, basis, tab } = await searchParams;
-  const view = await getDashboardView(range, basis);
+  const view = await getDashboardView(range);
 
-  return <DashboardWorkspace initialView={view} initialTab={tab === "ledger" ? "ledger" : "overview"} />;
+  return (
+    <DashboardWorkspace
+      initialView={view}
+      initialBasis={isBasis(basis) ? basis : undefined}
+      initialTab={tab === "ledger" ? "ledger" : "overview"}
+    />
+  );
 }

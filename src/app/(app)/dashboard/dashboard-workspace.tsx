@@ -1,20 +1,18 @@
 "use client";
 
-import { LoadingOverlay } from "@/components/ui";
+import { FileDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { RailCrumb } from "@/components/rail-crumb";
-import { Empty, Stat, StatStrip } from "@/components/ui";
+import { LoadingOverlay } from "@/components/ui";
 import { useOrdersCache } from "@/lib/stores/orders-cache";
-import { dashKey, useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
+import { useDashboardCache, useDashboardNav } from "@/lib/stores/dashboard-cache";
 import { useLedgerNav } from "@/lib/stores/ledger-cache";
 import { stripBasePath, withBasePath } from "@/lib/base-path";
-import { cn, money } from "@/lib/utils";
 
-import { StatusBars, TopSkuBars, TrendChart } from "./charts";
-import { DonutChart, LabelBars } from "./finance-charts";
 import { LedgerView } from "./ledger-view";
-import { RANGE_LABEL, RANGE_PRESETS, isBasis, isRangePreset, type Basis, type RangePreset } from "./range";
+import { ProfitOverview } from "./profit-overview";
+import { DEFAULT_RANGE, RANGE_PRESETS, isBasis, isDashRange, isRangePreset, rangeLabel, type Basis, type DashRange } from "./range";
 import { getDashboardView, type DashboardView } from "./view-actions";
 
 /**
@@ -27,32 +25,19 @@ import { getDashboardView, type DashboardView } from "./view-actions";
  * re-reads `useDashboardCache`, and the aggregate queries only run on a miss or
  * past the staleness window.
  *
- * Two tabs share the range and basis controls: Overview (this file) and Ledger
- * (`ledger-view.tsx`, which reads its own date range).
+ * Two tabs: Overview (`profit-overview.tsx`), which reads the range from the
+ * rail and always counts by order date, and Ledger (`ledger-view.tsx`), which
+ * reads its own dates and uses the rail's Payment date / Order date basis.
  */
-
-const STATUS_COLORS: Record<string, string> = {
-  fulfilled: "var(--ok)",
-  in_progress: "var(--accent)",
-  returned: "var(--danger)",
-  cancelled: "var(--muted-2)",
-};
-
-const compactMoney = new Intl.NumberFormat("en-IN", {
-  notation: "compact",
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 1,
-});
 
 type Tab = "overview" | "ledger";
 
-function paramsFromSearch(search: string): { range: RangePreset; basis: Basis; tab: Tab } {
+function paramsFromSearch(search: string): { range: DashRange; basis: Basis; tab: Tab } {
   const p = new URLSearchParams(search);
   const range = p.get("range") ?? undefined;
   const basis = p.get("basis") ?? undefined;
   return {
-    range: isRangePreset(range) ? range : "30d",
+    range: isDashRange(range) ? range : DEFAULT_RANGE,
     basis: isBasis(basis) ? basis : "paid",
     tab: p.get("tab") === "ledger" ? "ledger" : "overview",
   };
@@ -62,9 +47,12 @@ const BASIS_LABEL: Record<Basis, string> = { paid: "Payment date", ordered: "Ord
 
 export function DashboardWorkspace({
   initialView,
+  initialBasis,
   initialTab = "overview",
 }: {
   initialView: DashboardView;
+  /** The Ledger's basis from the URL; left as it is when omitted. */
+  initialBasis?: Basis;
   /** From the URL on the server, so the first client render matches the server HTML. */
   initialTab?: Tab;
 }) {
@@ -81,8 +69,8 @@ export function DashboardWorkspace({
   const seeded = useRef(false);
   if (!seeded.current) {
     seeded.current = true;
-    useDashboardCache.getState().put(dashKey(initialView.range, initialView.basis), initialView);
-    useDashboardNav.setState({ range: initialView.range, basis: initialView.basis });
+    useDashboardCache.getState().put(initialView.range, initialView);
+    useDashboardNav.setState({ range: initialView.range, ...(initialBasis ? { basis: initialBasis } : {}) });
   }
 
   // Back / forward move the URL without us, so the store has to be put back in
@@ -108,20 +96,22 @@ export function DashboardWorkspace({
     window.history.replaceState(null, "", withBasePath(s ? `/dashboard?${s}` : "/dashboard"));
   }
 
-  // A finished sync empties the cache; re-read so fresh numbers show without a reload.
+  // A finished sync empties the cache, and so does a cost saved in the Ledger.
+  // Re-read after a sync and on every return to Overview, so fresh numbers
+  // show without a reload; an untouched cache answers instantly.
   const syncStamp = useOrdersCache((s) => s.syncStamp);
 
   useEffect(() => {
+    if (tab !== "overview") return;
     let cancelled = false;
     const cache = useDashboardCache.getState();
-    const key = dashKey(range, basis);
 
-    const cached = cache.peek(key);
+    const cached = cache.peek(range);
     if (cached) setView(cached);
     else setLoading(true);
 
     cache
-      .load(key, () => getDashboardView(range, basis))
+      .load(range, () => getDashboardView(range))
       .then((fresh) => {
         if (!cancelled) {
           setView(fresh);
@@ -135,10 +125,13 @@ export function DashboardWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [range, basis, syncStamp]);
+  }, [range, syncStamp, tab]);
+
+  // The months come from the data; a month opened from a link may not be among them.
+  const months = isRangePreset(range) || view.months.includes(range) ? view.months : [range, ...view.months];
 
   return (
-    <div className="relative space-y-5 pb-16 sm:-mt-6 sm:space-y-[7px] sm:pb-0">
+    <div className="relative space-y-5 pb-16 sm:-mt-6 sm:space-y-[7px] sm:pb-0 print:m-0 print:p-0">
       <RailCrumb
         search={false}
         primary={{
@@ -154,9 +147,12 @@ export function DashboardWorkspace({
           tab === "overview"
             ? {
                 activeId: range,
-                activeLabel: RANGE_LABEL[range],
-                options: RANGE_PRESETS.map((r) => ({ id: r, label: RANGE_LABEL[r] })),
-                onSelect: (id) => go({ range: id as RangePreset }),
+                activeLabel: rangeLabel(range),
+                options: [
+                  ...RANGE_PRESETS.map((r) => ({ id: r, label: rangeLabel(r) })),
+                  ...months.map((m, i) => ({ id: m, label: rangeLabel(m as DashRange), dividerBefore: i === 0 })),
+                ],
+                onSelect: (id) => go({ range: id as DashRange }),
               }
             : {
                 activeId: ledgerView,
@@ -168,150 +164,53 @@ export function DashboardWorkspace({
                 onSelect: (id) => useLedgerNav.getState().set({ view: id as "products" | "orders" }),
               }
         }
-        third={{
-          activeId: basis,
-          activeLabel: BASIS_LABEL[basis],
-          options: (["paid", "ordered"] as Basis[]).map((b) => ({ id: b, label: BASIS_LABEL[b] })),
-          onSelect: (id) => go({ basis: id as Basis }),
-        }}
+        third={
+          tab === "ledger"
+            ? {
+                activeId: basis,
+                activeLabel: BASIS_LABEL[basis],
+                options: (["paid", "ordered"] as Basis[]).map((b) => ({ id: b, label: BASIS_LABEL[b] })),
+                onSelect: (id) => go({ basis: id as Basis }),
+              }
+            : undefined
+        }
+        actions={tab === "overview" && view.lineCount > 0 ? <PdfButton range={range} /> : undefined}
       />
 
-      {tab === "ledger" ? <LedgerView basis={basis} /> : <Overview view={view} />}
+      {tab === "ledger" ? <LedgerView basis={basis} /> : <ProfitOverview view={view} />}
 
       {loading && tab === "overview" ? <LoadingOverlay /> : null}
     </div>
   );
 }
 
-function Overview({ view }: { view: DashboardView }) {
-  const { stats, buckets, topSkus, finance } = view;
-  const f = finance.stats;
-
-  if (finance.lineCount === 0) {
-    return (
-      <div className="panel">
-        <Empty
-          title="No money data yet"
-          hint="Press Sync now."
-        />
-      </div>
-    );
+/**
+ * The browser's own print sheet, where "Save as PDF" is one of the printers:
+ * the PDF is this page with sharp, selectable text, laid out for A4 by the
+ * print rules in globals.css. The page title becomes the file's name.
+ */
+function PdfButton({ range }: { range: DashRange }) {
+  function print() {
+    const title = document.title;
+    document.title = `Paribelle profit - ${rangeLabel(range)}`;
+    const restore = () => {
+      document.title = title;
+      window.removeEventListener("afterprint", restore);
+    };
+    window.addEventListener("afterprint", restore);
+    window.print();
   }
 
-  const refundPct = f.sales > 0 ? Math.round((f.refunds / f.sales) * 100) : 0;
-  const kept = Math.max(0, f.sales - f.refunds - f.fees - f.ads);
-  const cancellationRate = stats.totalOrders > 0 ? Math.round((stats.cancelledCount / stats.totalOrders) * 100) : 0;
-  const avgSale = f.shippedOrders > 0 ? f.sales / f.shippedOrders : 0;
-
-  const daily = finance.daily.map((d) => ({ day: d.day, orders: d.orders, revenue: Math.max(0, d.net) }));
-
-  const payoutBars = finance.payouts.map((p) => ({
-    key: p.at,
-    label: new Date(p.at).toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
-    value: p.amount,
-  }));
-
   return (
-    <>
-      <StatStrip
-        items={[
-          { label: "Received", value: compactMoney.format(f.net), tone: "ok" },
-          { label: "Paid to bank", value: compactMoney.format(f.paidOut) },
-          { label: "Held", value: compactMoney.format(f.onHold) },
-          {
-            label: "Refunded",
-            value: compactMoney.format(f.refunds),
-            tone: refundPct >= 25 ? "danger" : refundPct >= 12 ? "warn" : undefined,
-          },
-          {
-            label: "Profit",
-            value: f.ordersWithCost > 0 ? compactMoney.format(f.profit) : "—",
-            tone: f.ordersWithCost > 0 ? (f.profit < 0 ? "danger" : "ok") : undefined,
-          },
-        ]}
-      />
-      <div className="hidden grid-cols-2 gap-3 sm:grid sm:gap-[7px] lg:grid-cols-5">
-        <Stat label="Received" value={compactMoney.format(f.net)} tone="ok" hint="After all deductions" />
-        <Stat label="Paid to bank" value={compactMoney.format(f.paidOut)} />
-        <Stat label="Held by Amazon" value={compactMoney.format(f.onHold)} />
-        <Stat
-          label="Refunded"
-          value={compactMoney.format(f.refunds)}
-          tone={refundPct >= 25 ? "danger" : refundPct >= 12 ? "warn" : undefined}
-          hint={`${refundPct}% of sales`}
-        />
-        <Stat
-          label="Profit"
-          value={f.ordersWithCost > 0 ? compactMoney.format(f.profit) : "—"}
-          tone={f.ordersWithCost > 0 ? (f.profit < 0 ? "danger" : "ok") : undefined}
-          hint={f.ordersWithCost > 0 ? `${f.ordersMissingCost} orders without cost` : "Add costs in the ledger"}
-        />
-      </div>
-
-      <div className="grid gap-5 sm:gap-[7px] lg:grid-cols-2 [&>*]:min-w-0">
-        <div className="panel p-5">
-          <h2 className="text-sm font-semibold">Where your sales money went</h2>
-          <div className="mb-4" />
-          <DonutChart
-            centerLabel="Sales"
-            centerValue={compactMoney.format(f.sales)}
-            slices={[
-              { key: "keep", label: "You keep", value: kept, color: "var(--ok)" },
-              { key: "refunds", label: "Refunded", value: f.refunds, color: "var(--danger)" },
-              { key: "fees", label: "Amazon fees", value: f.fees, color: "var(--warn)" },
-              { key: "ads", label: "Ads", value: f.ads, color: "var(--accent)" },
-            ]}
-          />
-        </div>
-
-        <div className="panel p-5">
-          <h2 className="text-sm font-semibold">Received per day</h2>
-          <div className="mb-3" />
-          <TrendChart data={daily} metric="revenue" color="var(--accent)" format="money" />
-        </div>
-      </div>
-
-      <div className="grid gap-5 sm:gap-[7px] lg:grid-cols-2 [&>*]:min-w-0">
-        <div className="panel p-5">
-          <h2 className="text-sm font-semibold">Payouts</h2>
-          <div className="mb-4" />
-          <LabelBars items={payoutBars} format={(n) => money(n)} color="var(--ok)" />
-        </div>
-
-        <div className="panel p-5">
-          <h2 className="text-sm font-semibold">Where orders stand</h2>
-          <div className="mb-4" />
-          <StatusBars buckets={buckets} colors={STATUS_COLORS} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 sm:gap-[7px] lg:grid-cols-4">
-        <Stat label="Orders shipped" value={f.shippedOrders} />
-        <Stat label="Avg order" value={money(avgSale.toFixed(0))} />
-        <Stat
-          label="Cancellation rate"
-          value={`${cancellationRate}%`}
-          tone={cancellationRate >= 15 ? "danger" : cancellationRate >= 8 ? "warn" : undefined}
-        />
-        <Stat
-          label="Late now"
-          value={stats.currentlyLate}
-          tone={stats.currentlyLate > 0 ? "danger" : undefined}
-        />
-      </div>
-
-      <div className="grid gap-5 sm:gap-[7px] lg:grid-cols-2 [&>*]:min-w-0">
-        <div className="panel p-5">
-          <h2 className="text-sm font-semibold">Best-selling SKUs</h2>
-          <div className="mb-4" />
-          <TopSkuBars items={topSkus} format="money" />
-        </div>
-        <div className="panel p-5">
-          <h2 className="text-sm font-semibold">Orders shipped per day</h2>
-          <div className="mb-3" />
-          <TrendChart data={daily} metric="orders" color="var(--accent-2)" format="number" />
-        </div>
-      </div>
-    </>
+    <button
+      type="button"
+      onClick={print}
+      className="flex items-center gap-1.5 text-[13px] font-medium transition-colors hover:text-[var(--text)]"
+      style={{ color: "var(--muted)" }}
+      title="Save this page as a PDF"
+    >
+      <FileDown className="h-4 w-4" aria-hidden />
+      PDF
+    </button>
   );
 }

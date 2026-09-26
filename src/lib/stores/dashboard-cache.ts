@@ -4,10 +4,10 @@ import { withBasePath } from "@/lib/base-path";
 import { create } from "zustand";
 
 import type { DashboardView } from "@/app/(app)/dashboard/view-actions";
-import { dashKey, type Basis, type RangePreset } from "@/app/(app)/dashboard/range";
+import { DEFAULT_RANGE, type Basis, type DashRange } from "@/app/(app)/dashboard/range";
 
 /**
- * Client-side cache for the dashboard, keyed by range preset.
+ * Client-side cache for the dashboard, keyed by range.
  *
  * Same shape and reasoning as the orders-view cache: switching range, or
  * toggling away to Orders and back, used to re-run four aggregate queries for
@@ -27,7 +27,7 @@ interface Entry {
 }
 
 interface DashboardCacheState {
-  /** Keyed by `dashKey(range, basis)`. */
+  /** Keyed by range. */
   entries: Partial<Record<string, Entry>>;
 
   peek: (key: string) => DashboardView | null;
@@ -82,19 +82,20 @@ export const useDashboardCache = create<DashboardCacheState>((set, get) => ({
  * The selected range, held outside React so it survives the workspace
  * unmounting when the toggle switches to Orders and back. Mirrors
  * `useOrdersNav`: `go` moves the URL with `pushState` and updates the store;
- * `adopt` takes the range back from the URL on a `popstate`.
+ * `adopt` takes the range back from the URL on a `popstate`. `basis` only
+ * applies to the Ledger; the Overview always counts by order date.
  */
 interface DashboardNavState {
-  range: RangePreset;
+  range: DashRange;
   basis: Basis;
-  go: (next: { range?: RangePreset; basis?: Basis }, opts?: { replace?: boolean }) => void;
-  adopt: (next: { range: RangePreset; basis: Basis }) => void;
+  go: (next: { range?: DashRange; basis?: Basis }, opts?: { replace?: boolean }) => void;
+  adopt: (next: { range: DashRange; basis: Basis }) => void;
 }
 
 /** `/dashboard`, with only the parameters that differ from the defaults. */
-export function dashboardUrl(range: RangePreset, basis: Basis, tab?: string): string {
+export function dashboardUrl(range: DashRange, basis: Basis, tab?: string): string {
   const q = new URLSearchParams();
-  if (range !== "30d") q.set("range", range);
+  if (range !== DEFAULT_RANGE) q.set("range", range);
   if (basis !== "paid") q.set("basis", basis);
   if (tab && tab !== "overview") q.set("tab", tab);
   const s = q.toString();
@@ -102,7 +103,7 @@ export function dashboardUrl(range: RangePreset, basis: Basis, tab?: string): st
 }
 
 export const useDashboardNav = create<DashboardNavState>((set, get) => ({
-  range: "30d",
+  range: DEFAULT_RANGE,
   basis: "paid",
 
   go: (next, opts) => {
@@ -120,10 +121,7 @@ export const useDashboardNav = create<DashboardNavState>((set, get) => ({
   adopt: ({ range, basis }) => set({ range, basis }),
 }));
 
-export { dashKey };
-
-/** The cached view for whatever range and basis is currently selected, if any. */
+/** The cached view for whatever range is currently selected, if any. */
 export function peekCurrentDashboard(): DashboardView | null {
-  const { range, basis } = useDashboardNav.getState();
-  return useDashboardCache.getState().peek(dashKey(range, basis));
+  return useDashboardCache.getState().peek(useDashboardNav.getState().range);
 }

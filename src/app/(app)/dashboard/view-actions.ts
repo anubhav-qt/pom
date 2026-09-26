@@ -1,53 +1,41 @@
 "use server";
 
-import { getFinanceOverview, type FinanceOverview } from "@/lib/finance-queries";
 import { requireUser } from "@/lib/auth";
+import { getProfitData, type MoneyToday, type ProfitView } from "@/lib/profit";
 
-import {
-  getDailySeries,
-  getPeriodStats,
-  getStatusBuckets,
-  getTopSkus,
-  type DailyPoint,
-  type PeriodStats,
-  type StatusBucket,
-  type TopSku,
-} from "./queries";
-import { DEFAULT_BASIS, isBasis, isRangePreset, rangeStart, type Basis, type RangePreset } from "./range";
+import { DEFAULT_RANGE, isDashRange, rangeBounds, type DashRange } from "./range";
 
 /**
- * Everything the Finance overview needs for one range and basis, in a single
- * call. The page calls it on the server for the first paint; the client cache
+ * Everything the Finance overview needs for one range, in a single call. The
+ * page calls it on the server for the first paint; the client cache
  * (`stores/dashboard-cache`) calls it for every later range change so a range
  * that has already been read is answered without a round trip.
  */
 
 export interface DashboardView {
-  range: RangePreset;
-  basis: Basis;
-  series: DailyPoint[];
-  stats: PeriodStats;
-  buckets: StatusBucket[];
-  topSkus: TopSku[];
-  finance: FinanceOverview;
+  range: DashRange;
+  /** Months with orders, newest first, for the range picker. */
+  months: string[];
+  profit: ProfitView;
+  /** Not tied to the range: where the money is right now. */
+  money: MoneyToday;
+  lineCount: number;
+  generatedAt: string;
 }
 
-export async function getDashboardView(rawRange?: string, rawBasis?: string): Promise<DashboardView> {
+export async function getDashboardView(rawRange?: string): Promise<DashboardView> {
   await requireUser();
 
-  const range: RangePreset = isRangePreset(rawRange) ? rawRange : "30d";
-  const basis: Basis = isBasis(rawBasis) ? rawBasis : DEFAULT_BASIS;
-  const from = rangeStart(range);
-  // Exclusive upper bound: the start of tomorrow, so today's lines are in.
-  const to = new Date(Date.now() + 86_400_000);
+  const range: DashRange = isDashRange(rawRange) ? rawRange : DEFAULT_RANGE;
+  const { from, to } = rangeBounds(range);
+  const data = await getProfitData(from, to);
 
-  const [series, stats, buckets, topSkus, finance] = await Promise.all([
-    getDailySeries(from),
-    getPeriodStats(from),
-    getStatusBuckets(from),
-    getTopSkus(from),
-    getFinanceOverview(from, to, basis),
-  ]);
-
-  return { range, basis, series, stats, buckets, topSkus, finance };
+  return {
+    range,
+    months: data.months,
+    profit: data.view,
+    money: data.money,
+    lineCount: data.lineCount,
+    generatedAt: new Date().toISOString(),
+  };
 }

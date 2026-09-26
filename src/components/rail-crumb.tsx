@@ -29,6 +29,7 @@ export function RailCrumb({
   third,
   staticSubLabel,
   search = true,
+  actions,
 }: {
   primary: CrumbSegment;
   sub?: CrumbSegment;
@@ -38,6 +39,8 @@ export function RailCrumb({
   search?: boolean;
   /** A non-interactive second segment, e.g. the "All orders › Cancelled" drill-down leaf. */
   staticSubLabel?: string;
+  /** Buttons at the right end of the rail, e.g. Finance's PDF export. */
+  actions?: React.ReactNode;
 }) {
   const primaryCount = primary.options.find((o) => o.id === primary.activeId)?.count;
   const subCount = sub?.options.find((o) => o.id === sub.activeId)?.count;
@@ -117,10 +120,11 @@ export function RailCrumb({
   return (
     <>
       <div
-        className="sticky z-30 -mx-4 -mt-6 flex items-center gap-1.5 px-4 py-2.5 sm:hidden"
+        className="no-print sticky z-30 -mx-4 -mt-6 flex items-center gap-1.5 px-4 py-2.5 sm:hidden"
         style={{ top: 56, borderTop: "1px solid var(--border)", background: "var(--panel)" }}
       >
         {crumb}
+        {actions ? <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div> : null}
       </div>
       {slot
         ? createPortal(
@@ -128,6 +132,7 @@ export function RailCrumb({
               <div className="mx-auto hidden max-w-7xl items-center gap-1.5 px-4 py-2.5 sm:flex sm:px-6">
                 {crumb}
                 <div className="flex-1" />
+                {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
                 {search ? (
                   <div className="hidden md:block">
                     <HeaderSearch />
