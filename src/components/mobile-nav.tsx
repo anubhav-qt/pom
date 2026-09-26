@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, LayoutGrid, List as ListIcon, Printer, ScanLine, Sparkles, type LucideIcon } from "lucide-react";
+import { Clapperboard, ClipboardList, LayoutGrid, List as ListIcon, Printer, ScanLine, Sparkles, type LucideIcon } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -36,8 +36,8 @@ type NavSlot =
 
 /**
  * The mobile-only bottom bar, on every screen (Finance, Orders, Returns, PDF
- * printer): the order list, the planner, the scanner, the printer and the
- * assistant. It lives above the screens rather than inside one, so it stays
+ * printer, Reels): the order list, the planner, the scanner, the printer,
+ * Reels and the assistant. It lives above the screens rather than inside one, so it stays
  * put while the screen underneath changes. Renders nothing at `sm` and up,
  * where the header carries all of this.
  *
@@ -128,6 +128,19 @@ export function MobileNav() {
         // leave a screen override set, which keeps painting over the printer.
         window.history.pushState(null, "", withBasePath("/pdf-printer"));
         useScreenNav.getState().setOverride("pdf-printer");
+      },
+    },
+    {
+      kind: "button",
+      key: "reels",
+      label: "Reels",
+      Icon: Clapperboard,
+      active: screen === "reels",
+      onClick: () => {
+        setAssistantOpen(false);
+        setScanning(false);
+        window.history.pushState(null, "", withBasePath("/reels"));
+        useScreenNav.getState().setOverride("reels");
       },
     },
     { kind: "button", key: "ai", label: "AI", Icon: Sparkles, active: false, onClick: () => { setScanning(false); setAssistantOpen(true); } },

@@ -124,11 +124,11 @@ export function AppHeader({
         >
           PariBelle
         </Link>
-        {/* On the PDF printer there is no search to make room for, so mobile
-            gets the same toggle as desktop instead of the hamburger. */}
+        {/* On the PDF printer and Reels there is no search to make room for, so
+            mobile gets the same toggle as desktop instead of the hamburger. */}
         <div className="sm:hidden">
-          {effectiveScreen === "pdf-printer" ? (
-            <AppSwitch effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} hidePrinter />
+          {effectiveScreen === "pdf-printer" || effectiveScreen === "reels" ? (
+            <AppSwitch effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} hideTools />
           ) : (
             <MobileScreenMenu effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
           )}
@@ -195,13 +195,14 @@ function ordersHref(): string {
 function hrefFor(screen: Screen): string {
   if (screen === "orders") return ordersHref();
   if (screen === "pdf-printer") return "/pdf-printer";
+  if (screen === "reels") return "/reels";
   if (screen === "returns") return "/returns";
   return dashboardHref();
 }
 
 function targetIsCached(screen: Screen): boolean {
-  // Nothing to fetch for the printer: its state is client-side.
-  if (screen === "pdf-printer") return true;
+  // Nothing to fetch for the printer or Reels: their state is client-side.
+  if (screen === "pdf-printer" || screen === "reels") return true;
   if (screen === "orders") {
     return (
       useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
@@ -273,18 +274,23 @@ function MobileScreenMenu({
 function AppSwitch({
   effectiveScreen,
   routeScreen,
-  hidePrinter = false,
+  hideTools = false,
 }: {
   effectiveScreen: Screen | null;
   routeScreen: Screen | null;
-  /** Mobile reaches the printer from the Orders bottom bar, not from here. */
-  hidePrinter?: boolean;
+  /** Mobile reaches the printer and Reels from the bottom bar, not from here. */
+  hideTools?: boolean;
 }) {
   const items: { screen: Screen; label: string }[] = [
     { screen: "dashboard", label: "Finance" },
     { screen: "orders", label: "Orders" },
     { screen: "returns", label: "Returns" },
-    ...(hidePrinter ? [] : [{ screen: "pdf-printer" as Screen, label: "PDF printer" }]),
+    ...(hideTools
+      ? []
+      : [
+          { screen: "pdf-printer" as Screen, label: "PDF printer" },
+          { screen: "reels" as Screen, label: "Reels" },
+        ]),
   ];
 
   function onNav(e: React.MouseEvent, screen: Screen) {
