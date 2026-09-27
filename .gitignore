@@ -12,3 +12,19 @@ next-env.d.ts
 
 # Generated test fixtures
 tmp/
+
+# Kept on the owner's machine only: marketplace sheets and videos dropped in
+# the root, listing uploads, and the one-off listing scripts
+/*.xls
+/*.xlsx
+/*.mp4
+/upload-ready/
+/harness_experimentation/
+/scripts/designer-photos.json
+/scripts/fill-channel-templates.ts
+/scripts/fill-flipkart-salwar.ts
+/scripts/fix-co-designer-photos.ts
+/scripts/fix-co-error-file.ts
+/scripts/fix-flipkart-error-file.ts
+/scripts/patch-meesho.py
+/scripts/xls-patch.ts
