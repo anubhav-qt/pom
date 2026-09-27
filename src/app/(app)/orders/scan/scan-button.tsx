@@ -13,8 +13,11 @@ import { ScanModal } from "./scan-modal";
 export function ScanBarcodeButton({
   onDone,
   className = "btn",
+  labelClassName,
 }: {
   className?: string;
+  /** For the "Scan" text, e.g. to keep it for screen readers only where the button is just the icon. */
+  labelClassName?: string;
   /** Called after anything was committed, so the page can refetch. */
   onDone?: () => void;
 }) {
@@ -29,7 +32,7 @@ export function ScanBarcodeButton({
         aria-haspopup="dialog"
       >
         <ScanIcon />
-        Scan
+        <span className={labelClassName}>Scan</span>
       </button>
 
       {open ? (
