@@ -44,6 +44,9 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0
 
 RUN useradd --system --uid 10001 oms
+# The commit, for /pom/api/health (CI passes it).
+ARG RELEASE=dev
+ENV RELEASE=$RELEASE
 
 # standalone/ holds server.js plus only the node_modules the server actually
 # imports. Static assets are left out of it by design and copied separately.

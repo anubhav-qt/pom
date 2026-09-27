@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { after } from "next/server";
 
 import { adapterFor } from "@/channels";
@@ -755,34 +755,61 @@ export async function getSyncProgress(runId: number): Promise<SyncProgress | nul
   };
 }
 
+/**
+ * An orders run still marked running after this long died with its server
+ * (a restart mid-sync) and never wrote its ending. A live one finishes well
+ * inside it.
+ */
+const RUN_STALE_MS = 15 * 60 * 1000;
+
+/** Whether an orders sync of this account is going right now (Sync now, or someone opening the app). */
+async function ordersSyncRunning(accountId: number) {
+  const [last] = await db
+    .select({ status: syncRuns.status, startedAt: syncRuns.startedAt })
+    .from(syncRuns)
+    .where(and(eq(syncRuns.channelAccountId, accountId), eq(syncRuns.kind, "orders")))
+    .orderBy(desc(syncRuns.startedAt))
+    .limit(1);
+  return last?.status === "running" && Date.now() - last.startedAt.getTime() < RUN_STALE_MS;
+}
+
 export async function syncAllAccounts() {
   const accounts = await db
     .select()
     .from(channelAccounts)
     .where(eq(channelAccounts.active, true));
 
-  const results: Record<string, unknown> = {};
+  // A channel switched off in config is not synced at all, even if an account
+  // row still exists — otherwise the cron keeps hammering a channel we have
+  // deliberately parked and fills the sync log with noise.
+  const enabled = accounts.filter((account) => isChannelEnabled(account.channel));
 
-  for (const account of accounts) {
-    // A channel switched off in config is not synced at all, even if an account
-    // row still exists — otherwise the cron keeps hammering a channel we have
-    // deliberately parked and fills the sync log with noise.
-    if (!isChannelEnabled(account.channel)) continue;
+  // Each account talks to its own marketplace, under its own rate limits, so
+  // they run side by side. Orders then returns within one account stay in
+  // turn: they share that account's limits.
+  const entries = await Promise.all(
+    enabled.map(async (account) => {
+      const key = `${account.channel}:${account.id}`;
+      try {
+        // Two syncs of one account at once double the calls against the same
+        // limits; the one already going covers this run.
+        if (await ordersSyncRunning(account.id)) return [key, { skipped: "running" }] as const;
+        return [
+          key,
+          {
+            orders: await syncAccount(account, "orders"),
+            returns: await syncAccount(account, "returns"),
+          },
+        ] as const;
+      } catch (err) {
+        // One broken channel must not stop the others — a Flipkart token expiring
+        // should never hold up Amazon's morning orders.
+        return [key, { error: err instanceof Error ? err.message : String(err) }] as const;
+      }
+    }),
+  );
 
-    const key = `${account.channel}:${account.id}`;
-    try {
-      results[key] = {
-        orders: await syncAccount(account, "orders"),
-        returns: await syncAccount(account, "returns"),
-      };
-    } catch (err) {
-      // One broken channel must not stop the others — a Flipkart token expiring
-      // should never hold up Amazon's morning orders.
-      results[key] = { error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-
-  return results;
+  return Object.fromEntries(entries) as Record<string, unknown>;
 }
 
 /* -------------------------------------------------------------------------- */

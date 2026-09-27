@@ -1,0 +1,21 @@
+{
+  "name": "paribelle-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Two-way sync between the ThinkPad's Postgres and the cloud copies, plus readiness, pruning and backups",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc",
+    "test": "node --test --test-concurrency=1 test/*.test.ts"
+  },
+  "dependencies": {
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "@types/pg": "^8.23.1",
+    "typescript": "^5.9.3"
+  }
+}

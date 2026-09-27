@@ -1,0 +1,231 @@
+# Paribelle on the ThinkPad: the storefront, the API, the OMS and their databases, behind a
+# Cloudflare Tunnel. The ThinkPad's Postgres is the source of truth; Vercel and Render keep
+# running as the fallback, on the Supabase copies. See README.md.
+#
+#   ./first-start.sh                  the first time
+#   docker compose up -d              after that (update.sh keeps it current)
+#
+# Every setting is in one file, infra/.env (copy .env.example; never commit it). Each service
+# below gets only the ones it uses. Nothing listens on the home network: the tunnel dials out.
+name: paribelle
+
+x-api: &api
+  image: ${API_IMAGE:-ghcr.io/anubhav-qt/paribelle-backend:latest}
+  environment:
+    NODE_ENV: production
+    PORT: "3001"
+    DATABASE_URL: "postgres://paribelle:${DB_PASSWORD}@db:5432/shop?sslmode=disable"
+    EDGE_KEY: "${EDGE_KEY:?set EDGE_KEY in infra/.env}"
+    # Requests from the gate carry the visitor's address (with the edge key) and are limited
+    # per visitor. The storefront's own server-side calls come from inside, and aren't.
+    THROTTLE_SKIP_PRIVATE: "true"
+    JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in infra/.env}"
+    JWT_EXPIRATION: "${JWT_EXPIRATION:-7d}"
+    ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-https://www.paribelle.in,https://paribelle.in}"
+    FRONTEND_URL: "${FRONTEND_URL:-https://www.paribelle.in}"
+    WEB_APP_URL: "${WEB_APP_URL:-https://www.paribelle.in}"
+    APP_URL: "${APP_URL:-https://www.paribelle.in}"
+    ADMIN_URL: "${ADMIN_URL:-}"
+    PRODUCTION_DOMAIN: "${PRODUCTION_DOMAIN:-paribelle.in}"
+    RAZORPAY_KEY_ID: "${RAZORPAY_KEY_ID:-}"
+    RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET:-}"
+    RAZORPAY_WEBHOOK_SECRET: "${RAZORPAY_WEBHOOK_SECRET:-}"
+    CLOUDINARY_CLOUD_NAME: "${CLOUDINARY_CLOUD_NAME:-}"
+    CLOUDINARY_API_KEY: "${CLOUDINARY_API_KEY:-}"
+    CLOUDINARY_API_SECRET: "${CLOUDINARY_API_SECRET:-}"
+    BREVO_API_KEY: "${BREVO_API_KEY:-}"
+    SMTP_FROM: "${SMTP_FROM:-}"
+    APP_NAME: "${APP_NAME:-}"
+    ADMIN_EMAIL: "${ADMIN_EMAIL:-}"
+    APP_ADDRESS: "${APP_ADDRESS:-}"
+    APP_EMAIL: "${APP_EMAIL:-}"
+    APP_PHONE: "${APP_PHONE:-}"
+    APP_GST: "${APP_GST:-}"
+  volumes: ["uploads:/app/uploads"]
+
+# The storefront and the OMS run as one process per core (cluster.cjs, PROCESSES).
+x-next: &next
+  command: ["node", "/cluster.cjs", "server.js"]
+  restart: unless-stopped
+
+services:
+  # Both databases: `shop` (the API's) and `oms`. Tuned for a 24 GB laptop; parallel query
+  # workers follow the core count.
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: paribelle
+      POSTGRES_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in infra/.env}"
+      POSTGRES_DB: postgres
+    entrypoint:
+      - sh
+      - -c
+      - |
+        n=$$(nproc); half=$$((n / 2)); [ "$$half" -ge 1 ] || half=1
+        exec docker-entrypoint.sh postgres \
+          -c shared_buffers=2GB -c effective_cache_size=8GB \
+          -c work_mem=32MB -c maintenance_work_mem=1GB \
+          -c max_connections=300 -c max_wal_size=4GB \
+          -c random_page_cost=1.1 -c effective_io_concurrency=200 \
+          -c max_worker_processes=$$((n + 8)) -c max_parallel_workers=$$n \
+          -c max_parallel_workers_per_gather=$$half -c max_parallel_maintenance_workers=$$half
+    shm_size: 1gb
+    volumes:
+      - db:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "paribelle", "-d", "postgres"], interval: 5s, retries: 30 }
+    restart: unless-stopped
+
+  # Keeps each ThinkPad database and its Supabase copy in step, tells the gate when the
+  # ThinkPad may serve, backs up, and runs the timed jobs. Healthy once both are bootstrapped.
+  sync:
+    image: ${SYNC_IMAGE:-ghcr.io/anubhav-qt/paribelle-sync:latest}
+    environment:
+      SHOP_LOCAL_URL: "postgres://paribelle:${DB_PASSWORD}@db:5432/shop"
+      OMS_LOCAL_URL: "postgres://paribelle:${DB_PASSWORD}@db:5432/oms"
+      SHOP_CLOUD_URL: "${SHOP_CLOUD_URL:?set SHOP_CLOUD_URL in infra/.env}"
+      OMS_CLOUD_URL: "${OMS_CLOUD_URL:?set OMS_CLOUD_URL in infra/.env}"
+      # The storefront calls the API from in here, where the Worker can't route around a
+      # restarting API; so while it's down the whole storefront goes to the fallback.
+      SHOP_APP_HEALTH: http://api:3001/api/v1/health
+      PRUNE_AT_MB: "${PRUNE_AT_MB:-400}"
+      BACKUP_RECIPIENT: "${BACKUP_RECIPIENT:-}"
+      S3_ENDPOINT: "${R2_ENDPOINT:-}"
+      S3_REGION: auto
+      S3_BACKUP_BUCKET: "${R2_BACKUP_BUCKET:-paribelle-backups}"
+      S3_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-}"
+      S3_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-}"
+      HEARTBEAT_URL: "${HEARTBEAT_URL:-}"
+      # Pull Amazon and Flipkart orders into the OMS every 10 minutes, while the ThinkPad
+      # serves it (on Vercel the OMS syncs when someone opens it).
+      JOB_OMS_ORDERS_URL: http://oms:3000/pom/api/cron/sync
+      JOB_OMS_ORDERS_EVERY: 10m
+      JOB_OMS_ORDERS_TOKEN: "${CRON_SECRET:?set CRON_SECRET in infra/.env}"
+      JOB_OMS_ORDERS_WHEN: oms
+      # Render's free plan sleeps after 15 idle minutes and takes most of a minute to wake;
+      # while the ThinkPad serves, nothing else would wake it before it's needed.
+      JOB_RENDER_AWAKE_URL: https://paribelle-backend.onrender.com/api/v1/health
+      JOB_RENDER_AWAKE_EVERY: 10m
+      JOB_RENDER_AWAKE_TIMEOUT: 90s
+    volumes: ["backups:/data/backups"]
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      start_period: 20s
+      retries: 6
+    restart: unless-stopped
+
+  # The API's TypeORM migrations, against the ThinkPad's `shop`, before a new API starts.
+  # (Render migrates Supabase's copy itself when it deploys.)
+  api-migrate:
+    <<: *api
+    command: ["node", "run-migrations.js"]
+    depends_on:
+      sync: { condition: service_healthy }
+    restart: "no"
+
+  # One process: its live stock updates (socket.io) and rate limits keep state in memory.
+  api:
+    <<: *api
+    depends_on:
+      api-migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      start_period: 60s
+    restart: unless-stopped
+
+  web:
+    <<: *next
+    image: ${WEB_IMAGE:-ghcr.io/anubhav-qt/paribelle-web:latest}
+    environment:
+      PROCESSES: "${WEB_PROCESSES:-auto}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      # The home page's server-side fetch: straight to the API.
+      API_URL: http://api:3001
+      # Its other server-side calls go to https://api.paribelle.in (built in), which inside
+      # this network is the gate's internal listener, signed by the gate's own CA.
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+    volumes: ["./cluster.cjs:/cluster.cjs:ro", "gate-ca:/ca:ro"]
+    depends_on:
+      gate-ca: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1),()=>process.exit(1))"]
+      interval: 15s
+      start_period: 60s
+
+  oms:
+    <<: *next
+    image: ${OMS_IMAGE:-ghcr.io/anubhav-qt/pom:latest}
+    environment:
+      PROCESSES: "${OMS_PROCESSES:-auto}"
+      DATABASE_URL: "postgres://paribelle:${DB_PASSWORD}@db:5432/oms"
+      AUTH_SECRET: "${AUTH_SECRET:?set AUTH_SECRET in infra/.env}"
+      CRON_SECRET: "${CRON_SECRET}"
+      AMAZON_LWA_CLIENT_ID: "${AMAZON_LWA_CLIENT_ID:-}"
+      AMAZON_LWA_CLIENT_SECRET: "${AMAZON_LWA_CLIENT_SECRET:-}"
+      AMAZON_MARKETPLACE_ID: "${AMAZON_MARKETPLACE_ID:-A21TJRUUN4KGV}"
+      AMAZON_SPAPI_ENDPOINT: "${AMAZON_SPAPI_ENDPOINT:-https://sellingpartnerapi-eu.amazon.com}"
+      FLIPKART_API_BASE: "${FLIPKART_API_BASE:-https://api.flipkart.net}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_API_KEYS: "${GEMINI_API_KEYS:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-}"
+      GEMINI_REEL_MODELS: "${GEMINI_REEL_MODELS:-}"
+    volumes: ["./cluster.cjs:/cluster.cjs:ro"]
+    depends_on:
+      sync: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/pom/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      start_period: 60s
+
+  # The only door in (Caddyfile). Lets a request through when it carries the edge key (only
+  # the Worker has it) and the sync says the ThinkPad has caught up; otherwise it answers so
+  # that the Worker sends the request to Vercel or Render instead.
+  gate:
+    image: caddy:2
+    environment:
+      EDGE_KEY: "${EDGE_KEY}"
+      API_HOST: api.paribelle.in
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - gate-data:/data
+    networks:
+      default:
+        aliases: ["api.paribelle.in"]
+    depends_on:
+      sync: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "test", "-f", "/data/caddy/pki/authorities/local/root.crt"]
+      interval: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # Caddy keeps its CA where only root can read it; the storefront runs as a normal user.
+  gate-ca:
+    image: caddy:2
+    command: ["sh", "-c", "cp /data/caddy/pki/authorities/local/root.crt /ca/root.crt && chmod 644 /ca/root.crt"]
+    volumes: ["gate-data:/data:ro", "gate-ca:/ca"]
+    depends_on:
+      gate: { condition: service_healthy }
+    restart: "no"
+
+  # The tunnel's one public hostname, set on its page in Cloudflare Zero Trust:
+  #   laptop.paribelle.in → HTTP gate:8080
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment: { TUNNEL_TOKEN: "${TUNNEL_TOKEN:?set TUNNEL_TOKEN in infra/.env}" }
+    depends_on:
+      gate: { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  db: {}
+  backups: {}
+  uploads: {}
+  gate-data: {}
+  gate-ca: {}
