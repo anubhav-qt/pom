@@ -3,3 +3,5 @@
 update.log
 # The deploy hook's note for update.sh's path unit (hook.mjs).
 .deploy/
+# What the gate and the hook last started with (update.sh).
+.mounted
