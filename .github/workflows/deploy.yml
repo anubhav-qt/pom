@@ -64,6 +64,20 @@ jobs:
       - name: Deploy the Worker
         if: env.CLOUDFLARE_API_TOKEN != ''
         run: npx wrangler deploy
+      # wrangler deploy rewrites the Worker's routes, which turns "fail open" back off. With it
+      # on, a day past the free allowance means Vercel serves www, not an error page.
+      - name: Fail open on www
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        env: { ZONE_ID: c0e3f99f1ee15de925d96bad2f39d652 } # paribelle.in
+        run: |
+          api="https://api.cloudflare.com/client/v4/zones/$ZONE_ID/workers/routes"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          id=$(curl -fsS -H "$auth" "$api" | jq -r '.result[] | select(.pattern == "www.paribelle.in/*") | .id')
+          [ -n "$id" ] || { echo "no www.paribelle.in/* route"; exit 1; }
+          curl -fsS -X PUT -H "$auth" -H "Content-Type: application/json" "$api/$id" \
+            -d '{"pattern":"www.paribelle.in/*","script":"paribelle-edge","request_limit_fail_open":true}' > /dev/null
+          curl -fsS -H "$auth" "$api" |
+            jq -e '.result[] | select(.pattern == "www.paribelle.in/*") | .request_limit_fail_open == true'
 
   oms:
     runs-on: ubuntu-latest

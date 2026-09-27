@@ -107,7 +107,8 @@ nameservers at GoDaddy are this account's pair).
 4. **Fail open**, once the deploy has made the route (the setting belongs to the route):
    paribelle.in › Workers Routes › `www.paribelle.in/*` › Edit › Request limit failure mode:
    **Fail open (proceed)**. Then a day past the free allowance means Vercel serves, not an
-   error page.
+   error page. Each deploy rewrites the route, so the workflow turns this back on after
+   `wrangler deploy`; setting it by hand is only needed the first time.
 5. **Go live**, once the ThinkPad is up (4): Workers & Pages › paribelle-edge › Settings ›
    Variables and Secrets › Add › type **Secret**, `EDGE_KEY`, the value from `infra/.env`.
    Within a minute pages come from the ThinkPad. Deleting the secret sends everything back to
