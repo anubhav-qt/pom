@@ -87,22 +87,27 @@ In this order. Nothing changes for visitors until the last step of 2.
 
 ### 2. Cloudflare (the account breader is on)
 
-1. **Fail open.** Workers & Pages › Workers Routes (on the paribelle.in zone) › Request limit
-   failure mode: **Fail open (proceed)**. Then a day past the free allowance means Vercel
-   serves, not an error page. Do this before anything deploys the Worker.
-2. **Tunnel**: Zero Trust › Networks › Tunnels › Create a tunnel › Cloudflared, named
-   `paribelle-thinkpad`. Copy the token after `--token` → `TUNNEL_TOKEN`. One public hostname:
-   `laptop.paribelle.in` → type **HTTP**, URL **`gate:8080`**.
-3. **R2**, for backups: a bucket `paribelle-backups`, with lifecycle rules deleting `daily/`
+`paribelle.in` lives in this account too (moved from its own account on 27 Sep 2026; its
+nameservers at GoDaddy are this account's pair).
+
+1. **Tunnel**: Networking › Tunnels › Create Tunnel, named `paribelle-thinkpad`. Its install
+   command (any system) ends in the token → `TUNNEL_TOKEN`. Then the tunnel's Routes › Add
+   route › Published application: `laptop` . `paribelle.in` → **`http://gate:8080`**
+   (Cloudflare adds the DNS record itself).
+2. **R2**, for backups: a bucket `paribelle-backups`, with lifecycle rules deleting `daily/`
    after 30 days and `weekly/` after 400. R2 › Manage API tokens › *Object Read & Write* on
    that bucket only → `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; the S3 endpoint →
    `R2_ENDPOINT`.
-4. **API token for GitHub**: My Profile › API Tokens › Create › template *Edit Cloudflare
+3. **API token for GitHub**: My Profile › API Tokens › Create › template *Edit Cloudflare
    Workers*, this account and the `paribelle.in` zone → pom's `CLOUDFLARE_API_TOKEN`; the
    account id (Workers & Pages, right side) → `CLOUDFLARE_ACCOUNT_ID`. Run pom's *deploy*
    workflow: it creates `paribelle-edge`, puts it on `www.paribelle.in/*`, and gives it
    `api.paribelle.in`. Without its key it sends everything to Vercel and Render, so the site
    is unchanged.
+4. **Fail open**, once the deploy has made the route (the setting belongs to the route):
+   paribelle.in › Workers Routes › `www.paribelle.in/*` › Edit › Request limit failure mode:
+   **Fail open (proceed)**. Then a day past the free allowance means Vercel serves, not an
+   error page.
 5. **Go live**, once the ThinkPad is up (4): Workers & Pages › paribelle-edge › Settings ›
    Variables and Secrets › Add › type **Secret**, `EDGE_KEY`, the value from `infra/.env`.
    Within a minute pages come from the ThinkPad. Deleting the secret sends everything back to
