@@ -2,23 +2,23 @@ import { createCanvas, loadImage, type Canvas, type SKRSContext2D } from "@napi-
 import { spawn } from "node:child_process";
 
 import { ffmpegPath } from "./ffmpeg";
-import type { Enter, PhotoPlan, PlannedShot } from "./plan";
+import type { PhotoPlan } from "./plan";
+import { transitionSeconds, type TransitionId } from "./transitions";
 import { FRAME_SIZE, type ReelLayout } from "./types";
 
 /**
  * Draws a photo reel frame by frame and pipes the frames into ffmpeg, which
  * encodes them and lays the song under them.
  *
- * Frames are drawn here rather than with ffmpeg's own filters because the
- * moves need to be smooth and exact: ffmpeg's zoompan snaps to whole pixels
- * (a slow zoom visibly shivers), and the transitions have to start or finish
- * precisely on a beat. A canvas draws at sub-pixel positions, and every frame
- * is a pure function of its time, so what the plan says is what plays.
+ * Every photo sits still in the frame, exactly as fitted: no zooms, no pans.
+ * All the movement is in the transitions (transitions.ts), which work in place
+ * on the picture and are centred on the beat their cut sits on. They are drawn
+ * here rather than with ffmpeg's filters so each one lands precisely on its
+ * beat; every frame is a pure function of its time (grain and dust come from a
+ * seeded generator), so what the plan says is what plays, every render.
  */
 
 export const FPS = 30;
-/** Photos are prepared this much larger than the frame, so a zoom never upsamples. */
-const OVERSCAN = 1.15;
 
 type Frame = { width: number; height: number };
 
@@ -28,19 +28,25 @@ type Frame = { width: number; height: number };
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const easeInOutSine = (x: number) => -(Math.cos(Math.PI * clamp01(x)) - 1) / 2;
-const easeOutCubic = (x: number) => 1 - Math.pow(1 - clamp01(x), 3);
-const easeInCubic = (x: number) => Math.pow(clamp01(x), 3);
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-
-/** How long each entrance takes, before the beat (`pre`) and after it (`post`). */
-const TIMING: Record<Enter, { pre: number; post: number }> = {
-  open: { pre: 0, post: 0.35 },
-  cut: { pre: 0, post: 0 },
-  punch: { pre: 0, post: 0.24 },
-  flash: { pre: 0, post: 0.22 },
-  whip: { pre: 0.13, post: 0.07 },
-  fade: { pre: 0.3, post: 0 },
+/** 0 before `a`, 1 after `b`, a smooth S between. */
+const smooth = (a: number, b: number, x: number) => {
+  const t = clamp01((x - a) / (b - a));
+  return t * t * (3 - 2 * t);
 };
+/** 0 → 1 → 0 across a transition, peaking on its cut. */
+const bell = (p: number) => Math.sin(Math.PI * clamp01(p));
+
+/** A small seeded generator (mulberry32): the same seed gives the same grain every render. */
+function random(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 /* -------------------------------------------------------------------------- */
 /* Plates: each photo prepared once at frame shape                            */
@@ -230,10 +236,10 @@ function fitted(img: Image, w: number, h: number, opts: { solid?: boolean } = {}
   return c;
 }
 
-/** A photo fitted to the frame at OVERSCAN size, ready to be zoomed without upsampling. */
+/** A photo fitted to the frame, exactly as it will stand on screen. */
 async function plate(bytes: Buffer, frame: Frame, opts: { solid?: boolean } = {}): Promise<Canvas> {
   const img = await loadImage(bytes);
-  return fitted(img, Math.round(frame.width * OVERSCAN), Math.round(frame.height * OVERSCAN), opts);
+  return fitted(img, frame.width, frame.height, opts);
 }
 
 /** The end card as one still at exactly the frame size (PNG), for the video renderer. */
@@ -243,47 +249,435 @@ export async function cardFrame(bytes: Buffer, layout: ReelLayout): Promise<Buff
 }
 
 /* -------------------------------------------------------------------------- */
-/* One frame                                                                  */
+/* Transitions                                                                */
 /* -------------------------------------------------------------------------- */
 
-interface Layer {
-  plate: Canvas;
-  scale: number;
-  pan: number;
-  dx: number;
-  dy?: number;
-  alpha: number;
-  /** Horizontal smear for a whip, in pixels. */
-  smear: number;
+/**
+ * Scratch surfaces, made once per render: the transitions composite through
+ * them, so a frame never allocates.
+ */
+export class Kit {
+  readonly W: number;
+  readonly H: number;
+  private made = new Map<string, Canvas>();
+  private grainPlates: Canvas[] | null = null;
+
+  constructor(frame: Frame) {
+    this.W = frame.width;
+    this.H = frame.height;
+  }
+
+  /** A named scratch canvas, `div` times smaller than the frame, cleared. */
+  scratch(name: string, div = 1): { canvas: Canvas; ctx: SKRSContext2D } {
+    return this.sized(name, Math.max(1, Math.round(this.W / div)), Math.max(1, Math.round(this.H / div)));
+  }
+
+  /**
+   * `img` at 1/`div` of the frame, inside a border `m` pixels wide that
+   * repeats its edge pixels. A blur or a shift of up to `m` pixels then never
+   * pulls in empty space, so no dark or coloured rim appears at the frame's edge.
+   */
+  padded(name: string, img: Canvas, div: number, m: number): Canvas {
+    const w = Math.round(this.W / div);
+    const h = Math.round(this.H / div);
+    const { canvas, ctx } = this.sized(name, w + 2 * m, h + 2 * m);
+    const iw = img.width;
+    const ih = img.height;
+    ctx.drawImage(img, m, m, w, h);
+    ctx.drawImage(img, 0, 0, iw, 1, m, 0, w, m);
+    ctx.drawImage(img, 0, ih - 1, iw, 1, m, m + h, w, m);
+    ctx.drawImage(img, 0, 0, 1, ih, 0, m, m, h);
+    ctx.drawImage(img, iw - 1, 0, 1, ih, m + w, m, m, h);
+    ctx.drawImage(img, 0, 0, 1, 1, 0, 0, m, m);
+    ctx.drawImage(img, iw - 1, 0, 1, 1, m + w, 0, m, m);
+    ctx.drawImage(img, 0, ih - 1, 1, 1, 0, m + h, m, m);
+    ctx.drawImage(img, iw - 1, ih - 1, 1, 1, m + w, m + h, m, m);
+    return canvas;
+  }
+
+  /**
+   * `img` blurred by `r` frame pixels, worked at 1/`div` size (cheap, and a big
+   * blur hides the resampling) with an edge-repeating border of `m` small
+   * pixels. Returns a function that draws the result over a frame, unmoved.
+   */
+  blur(name: string, img: Canvas, r: number, div: number, m: number) {
+    const pad = this.padded(`${name}-pad`, img, div, m);
+    const { canvas: out, ctx } = this.sized(`${name}-out`, pad.width, pad.height);
+    ctx.filter = `blur(${(r / div).toFixed(2)}px)`;
+    ctx.drawImage(pad, 0, 0);
+    ctx.filter = "none";
+    const w = pad.width - 2 * m;
+    const h = pad.height - 2 * m;
+    return (to: SKRSContext2D) => to.drawImage(out, m, m, w, h, 0, 0, this.W, this.H);
+  }
+
+  private sized(name: string, w: number, h: number): { canvas: Canvas; ctx: SKRSContext2D } {
+    let c = this.made.get(name);
+    if (!c || c.width !== w || c.height !== h) {
+      c = createCanvas(w, h);
+      this.made.set(name, c);
+    }
+    const ctx = c.getContext("2d");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.filter = "none";
+    ctx.imageSmoothingQuality = "high";
+    ctx.clearRect(0, 0, c.width, c.height);
+    return { canvas: c, ctx };
+  }
+
+  /** Four plates of film grain at half size (drawn up, the grain is soft, like film's), made on first use. */
+  grain(): Canvas[] {
+    if (this.grainPlates) return this.grainPlates;
+    const w = Math.round(this.W / 2);
+    const h = Math.round(this.H / 2);
+    this.grainPlates = [0, 1, 2, 3].map((k) => {
+      const next = random(9001 + k);
+      const c = createCanvas(w, h);
+      const ctx = c.getContext("2d");
+      const img = ctx.createImageData(w, h);
+      for (let i = 0; i < w * h; i++) {
+        // Three uniforms averaged: roughly bell-shaped around mid grey.
+        const v = 128 + ((next() + next() + next()) / 3 - 0.5) * 190;
+        img.data[i * 4] = v;
+        img.data[i * 4 + 1] = v;
+        img.data[i * 4 + 2] = v;
+        img.data[i * 4 + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      return c;
+    });
+    return this.grainPlates;
+  }
 }
 
-function drawLayer(ctx: SKRSContext2D, l: Layer, frame: Frame) {
-  const s = (frame.width / l.plate.width) * l.scale;
-  const room = Math.max(0, (l.plate.height * s - frame.height) / 2);
-  const cx = frame.width / 2 + l.dx;
-  const cy = frame.height / 2 + l.pan * room + (l.dy ?? 0);
-  // A whip's motion blur: copies along the direction of travel, each drawn at
-  // 1/(k+1) so the result is their running average — opaque, but streaked.
-  const copies = l.smear > 1 ? 6 : 1;
-  for (let c = 0; c < copies; c++) {
-    const off = copies > 1 ? (c / (copies - 1) - 0.5) * l.smear : 0;
-    ctx.globalAlpha = l.alpha / (c + 1);
-    ctx.setTransform(s, 0, 0, s, cx + off, cy);
-    ctx.drawImage(l.plate, -l.plate.width / 2, -l.plate.height / 2);
-  }
+function draw(ctx: SKRSContext2D, img: Canvas, alpha = 1) {
+  if (alpha <= 0) return;
+  ctx.globalAlpha = Math.min(1, alpha);
+  ctx.drawImage(img, 0, 0);
   ctx.globalAlpha = 1;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
-/** The shot's own slow move and beat pulses at time `t`, as a layer. */
-function shotLayer(shot: PlannedShot, p: Canvas, t: number): Layer {
-  const u = easeInOutSine((t - shot.start) / Math.max(0.001, shot.end - shot.start));
-  let scale = lerp(shot.motion.from, shot.motion.to, u);
-  for (const b of shot.pulses) {
-    const k = (t - b) / 0.16;
-    if (k >= 0 && k < 1) scale *= 1 + 0.025 * Math.pow(1 - k, 2);
+/** A, then B over it at weight `w` (0 = all A). */
+function mix(ctx: SKRSContext2D, A: Canvas, B: Canvas, w: number) {
+  if (w < 1) draw(ctx, A);
+  if (w > 0) draw(ctx, B, w);
+}
+
+/** Fill the frame with a colour, through a blend mode. */
+function wash(ctx: SKRSContext2D, kit: Kit, color: string, alpha: number, mode: GlobalCompositeOperation = "source-over") {
+  if (alpha <= 0.002) return;
+  ctx.globalCompositeOperation = mode;
+  ctx.globalAlpha = Math.min(1, alpha);
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, kit.W, kit.H);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+}
+
+/**
+ * A linear gradient across the frame from (x0,y0) to (x1,y1) whose opacity
+ * follows `alpha(g)`, g being 0..1 along it. Sampled finely, so any curve
+ * works and no stop ever falls outside 0..1.
+ */
+function curve(ctx: SKRSContext2D, x0: number, y0: number, x1: number, y1: number, rgb: string, alpha: (g: number) => number) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  const N = 48;
+  for (let i = 0; i <= N; i++) g.addColorStop(i / N, `rgba(${rgb},${clamp01(alpha(i / N)).toFixed(3)})`);
+  return g;
+}
+
+/** `img` defocused by `r` pixels, drawn over what is there (a sharp copy, which it fades in over while `r` is small). */
+function defocus(ctx: SKRSContext2D, kit: Kit, img: Canvas, r: number) {
+  if (r < 0.4) return;
+  const blurred = kit.blur("defocus", img, r, 4, 16);
+  ctx.globalAlpha = Math.min(1, r / 3);
+  blurred(ctx);
+  ctx.globalAlpha = 1;
+}
+
+type Draw = (ctx: SKRSContext2D, kit: Kit, A: Canvas, B: Canvas, p: number, seed: number, frame: number) => void;
+
+/**
+ * Each transition at progress `p` (0..1; 0.5 is the cut, on the beat), from
+ * photo A to photo B. None of them moves the pictures.
+ */
+const DRAW: Record<TransitionId, Draw> = {
+  cut: (ctx, _kit, A, B, p) => draw(ctx, p < 0.5 ? A : B),
+
+  dissolve: (ctx, _kit, A, B, p) => mix(ctx, A, B, easeInOutSine(p)),
+
+  dip_black: (ctx, kit, A, B, p) => {
+    draw(ctx, p < 0.5 ? A : B);
+    wash(ctx, kit, "#070505", p < 0.5 ? easeInOutSine(p * 2) : 1 - easeInOutSine((p - 0.5) * 2));
+  },
+
+  // Through light rather than paint: screen brightens the picture towards ivory.
+  dip_ivory: (ctx, kit, A, B, p) => {
+    draw(ctx, p < 0.5 ? A : B);
+    const a = p < 0.5 ? easeInOutSine(p * 2) : 1 - easeInOutSine((p - 0.5) * 2);
+    wash(ctx, kit, "#fbf3e8", a, "screen");
+    wash(ctx, kit, "#fbf3e8", a * a * 0.6);
+  },
+
+  light_leak: (ctx, kit, A, B, p, seed) => {
+    mix(ctx, A, B, smooth(0.36, 0.64, p));
+    const I = Math.pow(bell(p), 0.85);
+    if (I < 0.01) return;
+    const { W, H } = kit;
+    const next = random(seed * 7919 + 17);
+    const dir = next() < 0.5 ? 1 : -1;
+    const along = dir > 0 ? p : 1 - p;
+    const y0 = H * (0.25 + 0.5 * next());
+    // Blobs of warm light, stretched tall like a leak on film, drifting across.
+    const blob = (x: number, y: number, rx: number, ry: number, rgb: string, a: number) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(rx, ry);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      g.addColorStop(0, `rgba(${rgb},${(a * I).toFixed(3)})`);
+      g.addColorStop(0.55, `rgba(${rgb},${(a * I * 0.45).toFixed(3)})`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(-1, -1, 2, 2);
+      ctx.restore();
+    };
+    const x = W * (-0.25 + 1.5 * along);
+    ctx.globalCompositeOperation = "screen";
+    blob(x, y0, W * 0.75, H * 0.6, "255,138,58", 0.9);
+    blob(x - W * 0.3 * dir, y0 + H * 0.18, W * 0.55, H * 0.45, "255,84,112", 0.6);
+    blob(x + W * 0.12 * dir, y0 - H * 0.08, W * 0.3, H * 0.34, "255,228,176", 0.95);
+    ctx.globalCompositeOperation = "source-over";
+    wash(ctx, kit, "#ffc79a", 0.14 * I, "screen");
+  },
+
+  chroma: (ctx, kit, A, B, p) => {
+    const { canvas: base, ctx: b } = kit.scratch("chroma-base");
+    mix(b, A, B, smooth(0.44, 0.56, p));
+    const M = 24;
+    const shift = Math.min(M - 2, kit.W * 0.016 * Math.pow(bell(p), 1.6));
+    if (shift < 0.5) {
+      draw(ctx, base);
+      return;
+    }
+    // Each channel on its own, added back together a little apart. The border
+    // repeats the edge, so a shifted channel never leaves a coloured line there.
+    const pad = kit.padded("chroma-pad", base, 1, M);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, kit.W, kit.H);
+    const channels: [string, number, number][] = [
+      ["#ff0000", -shift, shift * 0.2],
+      ["#00ff00", 0, 0],
+      ["#0000ff", shift, -shift * 0.2],
+    ];
+    for (const [color, dx, dy] of channels) {
+      const { ctx: c, canvas: ch } = kit.scratch("chroma-channel");
+      c.drawImage(pad, M - dx, M - dy, kit.W, kit.H, 0, 0, kit.W, kit.H);
+      c.globalCompositeOperation = "multiply";
+      c.fillStyle = color;
+      c.fillRect(0, 0, kit.W, kit.H);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.drawImage(ch, 0, 0);
+    }
+    ctx.globalCompositeOperation = "source-over";
+  },
+
+  grain: (ctx, kit, A, B, p, seed, frame) => {
+    const I = bell(p);
+    const next = random(seed * 131 + frame * 7 + 1);
+    // Around the cut the film stutters between the two frames.
+    const stutter = Math.abs(p - 0.5) < 0.09;
+    draw(ctx, stutter ? (next() < 0.5 ? A : B) : p < 0.5 ? A : B);
+    // Exposure flicker.
+    const e = (next() - 0.5) * 0.22 * I;
+    if (e > 0) wash(ctx, kit, "#fff4e6", e, "screen");
+    else wash(ctx, kit, "#000", -e);
+    // Grain.
+    const plates = kit.grain();
+    ctx.globalCompositeOperation = "overlay";
+    ctx.globalAlpha = 0.25 + 0.5 * I;
+    ctx.drawImage(plates[frame % plates.length], 0, 0, kit.W, kit.H);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    // Dust and hairline scratches.
+    const specks = Math.round(26 * I);
+    for (let i = 0; i < specks; i++) {
+      const light = next() < 0.35;
+      const a = (0.35 + 0.4 * next()).toFixed(2);
+      ctx.fillStyle = light ? `rgba(255,248,235,${a})` : `rgba(20,14,10,${a})`;
+      ctx.beginPath();
+      ctx.ellipse(next() * kit.W, next() * kit.H, 1 + next() * 3.5, 1 + next() * 2.5, next() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const scratches = I > 0.4 ? Math.floor(next() * 3) : 0;
+    for (let i = 0; i < scratches; i++) {
+      const x = next() * kit.W;
+      const top = next() * kit.H * 0.4;
+      ctx.fillStyle = `rgba(245,238,225,${(0.18 + 0.2 * next()).toFixed(2)})`;
+      ctx.fillRect(x, top, 1.2, kit.H * (0.3 + 0.6 * next()));
+    }
+    // A burnt, warm edge that comes and goes with the grain.
+    const g = ctx.createRadialGradient(kit.W / 2, kit.H / 2, kit.H * 0.25, kit.W / 2, kit.H / 2, kit.H * 0.75);
+    g.addColorStop(0, "rgba(90,45,15,0)");
+    g.addColorStop(1, `rgba(90,45,15,${(0.55 * I).toFixed(3)})`);
+    ctx.globalCompositeOperation = "multiply";
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, kit.W, kit.H);
+    ctx.globalCompositeOperation = "source-over";
+  },
+
+  ripple: (ctx, kit, A, B, p) => {
+    // One long, slow wave travelling down the picture, with a gentler one under it: silk, not static.
+    const amp = kit.W * 0.016 * Math.pow(bell(p), 1.3);
+    const phase = p * Math.PI * 2;
+    const wave = kit.H * 0.34;
+    const band = 4;
+    const wavy = (to: SKRSContext2D, img: Canvas) => {
+      // The still picture underneath, so the bands never open a gap at the edges.
+      to.drawImage(img, 0, 0);
+      if (amp < 0.3) return;
+      for (let y = 0; y < kit.H; y += band) {
+        const dx = amp * Math.sin((2 * Math.PI * y) / wave - phase) + 0.18 * amp * Math.sin((2 * Math.PI * y) / (wave * 0.55) + 1.3 * phase);
+        to.drawImage(img, 0, y, kit.W, band, dx, y, kit.W, band);
+      }
+    };
+    const w = smooth(0.3, 0.7, p);
+    if (w < 1) wavy(ctx, A);
+    if (w > 0) {
+      const { canvas: layer, ctx: l } = kit.scratch("ripple-b");
+      wavy(l, B);
+      draw(ctx, layer, w);
+    }
+  },
+
+  focus: (ctx, kit, A, B, p) => {
+    const max = kit.W * 0.022;
+    const w = smooth(0.4, 0.6, p);
+    if (w < 1) {
+      draw(ctx, A);
+      defocus(ctx, kit, A, max * easeInOutSine(p * 2));
+    }
+    if (w > 0) {
+      const { canvas: layer, ctx: l } = kit.scratch("focus-b");
+      draw(l, B);
+      defocus(l, kit, B, max * (1 - easeInOutSine((p - 0.5) * 2)));
+      draw(ctx, layer, w);
+    }
+    // Out-of-focus light lifts the picture a touch, as a lens does.
+    wash(ctx, kit, "#fff8f0", 0.08 * bell(p), "screen");
+  },
+
+  silk_wipe: (ctx, kit, A, B, p, seed) => {
+    const f = 0.3;
+    const s = -f / 2 + easeInOutSine(p) * (1 + f);
+    // From the lower left to the upper right, or mirrored.
+    const [x0, y0, x1, y1] = seed % 2 === 1 ? [kit.W, kit.H, 0, 0] : [0, kit.H, kit.W, 0];
+    draw(ctx, A);
+    const { canvas: layer, ctx: l } = kit.scratch("silk");
+    l.drawImage(B, 0, 0);
+    l.globalCompositeOperation = "destination-in";
+    l.fillStyle = curve(l, x0, y0, x1, y1, "0,0,0", (g) => 1 - smooth(s - f / 2, s + f / 2, g));
+    l.fillRect(0, 0, kit.W, kit.H);
+    draw(ctx, layer);
+    // A faint sheen along the edge.
+    const sheen = 0.3 * bell(p);
+    if (sheen > 0.01) {
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = curve(ctx, x0, y0, x1, y1, "255,250,242", (g) => sheen * Math.max(0, 1 - Math.abs(g - s) / 0.07));
+      ctx.fillRect(0, 0, kit.W, kit.H);
+      ctx.globalCompositeOperation = "source-over";
+    }
+  },
+
+  glow: (ctx, kit, A, B, p) => {
+    const { canvas: base, ctx: b } = kit.scratch("glow-base");
+    mix(b, A, B, smooth(0.4, 0.6, p));
+    draw(ctx, base);
+    const I = bell(p);
+    if (I < 0.01) return;
+    // Bloom: a blurred copy of the picture screened over it, so the highlights glow.
+    const bloom = kit.blur("glow", base, 36 + 60 * I, 6, 40);
+    ctx.globalCompositeOperation = "screen";
+    ctx.globalAlpha = 0.9 * I;
+    bloom(ctx);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    wash(ctx, kit, "#fff3e6", 0.2 * I * I, "screen");
+  },
+};
+
+/* -------------------------------------------------------------------------- */
+/* The reel                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** One change of picture: on the beat `at`, from A to B, taking `half` seconds either side. */
+export interface Change {
+  at: number;
+  A: Canvas;
+  B: Canvas;
+  transition: TransitionId;
+  half: number;
+  /** The reel's first photo: only the second half plays, out of the transition into the picture. */
+  opening: boolean;
+  seed: number;
+}
+
+/**
+ * Every change in the reel, the end card's included. A transition takes at
+ * most 45% of the shot either side, so two never overlap and every photo is
+ * seen whole for a moment.
+ */
+export function changesOf(plan: Pick<PhotoPlan, "shots" | "outro">, plates: (photo: number) => Canvas, card: Canvas): Change[] {
+  const shots = plan.shots;
+  const out: Change[] = shots.map((s, k) => {
+    const prev = k > 0 ? shots[k - 1] : null;
+    const room = Math.min(prev ? prev.end - prev.start : Infinity, s.end - s.start) * 0.45;
+    return {
+      at: s.start,
+      // The first photo transitions out of itself: a fade from black would only dim it.
+      A: plates(prev ? prev.photo : s.photo),
+      B: plates(s.photo),
+      transition: s.transition,
+      half: Math.min(transitionSeconds(s.transition) / 2, room),
+      opening: k === 0,
+      seed: k + 1,
+    };
+  });
+  const last = shots[shots.length - 1];
+  const into = plan.outro.transition;
+  out.push({
+    at: plan.outro.start,
+    A: plates(last.photo),
+    B: card,
+    transition: into,
+    half: Math.min(transitionSeconds(into) / 2, (last.end - last.start) * 0.45, (plan.outro.end - plan.outro.start) * 0.45),
+    opening: false,
+    seed: shots.length + 1,
+  });
+  return out;
+}
+
+/** The frame at time `t` (frame number `f`): the photo on screen, or the transition under way. */
+export function drawFrame(ctx: SKRSContext2D, kit: Kit, changes: Change[], t: number, f: number) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, kit.W, kit.H);
+
+  for (const c of changes) {
+    if (c.half <= 0) continue;
+    const from = c.opening ? c.at : c.at - c.half;
+    if (t >= from && t < c.at + c.half) {
+      DRAW[c.transition](ctx, kit, c.A, c.B, 0.5 + (t - c.at) / (2 * c.half), c.seed, f);
+      return;
+    }
   }
-  return { plate: p, scale, pan: lerp(shot.motion.panFrom, shot.motion.panTo, u), dx: 0, alpha: 1, smear: 0 };
+  // Nothing under way: the latest change holds the screen.
+  let on = changes[0];
+  for (const c of changes) if (t >= c.at) on = c;
+  draw(ctx, on.B);
 }
 
 export interface PhotoRenderInput {
@@ -307,7 +701,9 @@ export async function renderPhotoReel(input: PhotoRenderInput): Promise<void> {
   for (const s of plan.shots) {
     if (!plates.has(s.photo)) plates.set(s.photo, await plate(input.photos.get(s.photo)!, frame));
   }
-  const outroPlate = await plate(input.lastPage, frame, { solid: true });
+  const card = await plate(input.lastPage, frame, { solid: true });
+  const changes = changesOf(plan, (photo) => plates.get(photo)!, card);
+  const kit = new Kit(frame);
 
   const frames = Math.round(plan.total * FPS);
   const canvas = createCanvas(WIDTH, HEIGHT);
@@ -323,7 +719,7 @@ export async function renderPhotoReel(input: PhotoRenderInput): Promise<void> {
       "-ss", plan.segStart.toFixed(3), "-t", plan.total.toFixed(3), "-i", input.audioFile,
       "-filter_complex", `[1:a]afade=t=in:st=0:d=0.02,afade=t=out:st=${(plan.total - fadeOut).toFixed(3)}:d=${fadeOut.toFixed(3)}[a]`,
       "-map", "0:v", "-map", "[a]",
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", String(FPS),
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-r", String(FPS),
       "-c:a", "aac", "-b:a", "192k",
       "-movflags", "+faststart", "-shortest",
       input.outFile,
@@ -344,79 +740,9 @@ export async function renderPhotoReel(input: PhotoRenderInput): Promise<void> {
   ff.stdin.on("error", () => {});
   input.signal?.addEventListener("abort", () => ff.kill("SIGKILL"));
 
-  const shots = plan.shots;
   for (let f = 0; f < frames; f++) {
     if (input.signal?.aborted) break;
-    const t = f / FPS;
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-    // The shot on screen, and the next one if its entrance has already begun.
-    let m = shots.findIndex((s) => t < s.end);
-    if (m === -1) m = shots.length - 1;
-
-    const drawShotWithEntrance = (k: number) => {
-      const s = shots[k];
-      const layer = shotLayer(s, plates.get(s.photo)!, t);
-      const since = t - s.start;
-      const T = TIMING[s.enter];
-      if (s.enter === "open" && since < T.post) layer.scale *= 1 + 0.06 * (1 - easeOutCubic(since / T.post));
-      if ((s.enter === "punch" || s.enter === "flash") && since >= 0 && since < T.post) {
-        layer.scale *= 1 + 0.1 * (1 - easeOutCubic(since / T.post));
-      }
-      return layer;
-    };
-
-    if (t < plan.outro.start) {
-      const cur = shots[m];
-      const next = shots[m + 1];
-      const nextT = next ? TIMING[next.enter] : null;
-      const nextStarting = next && nextT && t >= next.start - nextT.pre;
-
-      if (nextStarting && next.enter === "fade") {
-        drawLayer(ctx, drawShotWithEntrance(m), frame);
-        const k = drawShotWithEntrance(m + 1);
-        k.alpha = easeInOutSine((t - (next.start - nextT.pre)) / nextT.pre);
-        drawLayer(ctx, k, frame);
-      } else if (nextStarting && next.enter === "whip") {
-        // Out to the left, the next photo in from the right, meeting on the beat.
-        const u = (t - (next.start - nextT.pre)) / nextT.pre;
-        const out = drawShotWithEntrance(m);
-        out.dx = -WIDTH * easeInCubic(u);
-        out.smear = 90 * u;
-        drawLayer(ctx, out, frame);
-        const inc = drawShotWithEntrance(m + 1);
-        inc.dx = WIDTH * (1 - easeInCubic(u));
-        inc.smear = 90 * u;
-        drawLayer(ctx, inc, frame);
-      } else {
-        const layer = drawShotWithEntrance(m);
-        if (cur.enter === "whip") {
-          const since = t - cur.start;
-          if (since < TIMING.whip.post) layer.smear = 60 * (1 - since / TIMING.whip.post);
-        }
-        drawLayer(ctx, layer, frame);
-        if (cur.enter === "flash") {
-          const since = t - cur.start;
-          if (since >= 0 && since < TIMING.flash.post) {
-            ctx.fillStyle = `rgba(255,255,255,${(0.6 * (1 - easeOutCubic(since / TIMING.flash.post))).toFixed(3)})`;
-            ctx.fillRect(0, 0, WIDTH, HEIGHT);
-          }
-        }
-      }
-
-      // The end card rises over the last photo, landing on the bar line.
-      const rise = 0.32;
-      if (t >= plan.outro.start - rise) {
-        const u = easeOutCubic((t - (plan.outro.start - rise)) / rise);
-        drawLayer(ctx, { plate: outroPlate, scale: 1.04, pan: 0, dx: 0, dy: HEIGHT * (1 - u), alpha: 1, smear: 0 }, frame);
-      }
-    } else {
-      // The end card: a slow settle from 1.04 to 1.0 over its hold.
-      const u = easeOutCubic((t - plan.outro.start) / Math.max(0.5, plan.outro.end - plan.outro.start));
-      drawLayer(ctx, { plate: outroPlate, scale: lerp(1.04, 1, u), pan: 0, dx: 0, alpha: 1, smear: 0 }, frame);
-    }
-
+    drawFrame(ctx, kit, changes, f / FPS, f);
     const buf = canvas.data();
     if (!ff.stdin.write(buf)) await new Promise<void>((r) => ff.stdin.once("drain", () => r()));
     if (f % 15 === 0) input.onProgress?.(f / frames);
@@ -425,3 +751,4 @@ export async function renderPhotoReel(input: PhotoRenderInput): Promise<void> {
   await done;
   input.onProgress?.(1);
 }
+

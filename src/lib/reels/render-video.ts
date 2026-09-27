@@ -183,7 +183,7 @@ export async function renderVideoReel(input: {
     `[0:v]trim=end=${E.toFixed(3)},setpts=PTS-STARTPTS,${fitFilter(facts, W, H)},fps=${FPS},format=yuv420p,setsar=1,settb=AVTB[v0];` +
     `[1:v]scale=${W}:${H},fps=${FPS},format=yuv420p,setsar=1,settb=AVTB[v1];` +
     // The card slides up over the footage and is fully in on the beat at E.
-    `[v0][v1]xfade=transition=slideup:duration=${xfade}:offset=${(E - xfade).toFixed(3)}[v];` +
+    `[v0][v1]xfade=transition=fade:duration=${xfade}:offset=${(E - xfade).toFixed(3)}[v];` +
     `[2:a]afade=t=in:st=0:d=0.02,afade=t=out:st=${(plan.total - fadeOut).toFixed(3)}:d=${fadeOut.toFixed(3)}[a]`;
 
   await runFfmpeg(

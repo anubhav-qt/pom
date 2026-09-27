@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -15,14 +15,16 @@ import {
   chooseTrack,
   orderShots,
   photoReelFits,
+  planDirectedReel,
   planPhotoReel,
   planVideoReel,
+  reconcile,
   videoReelFits,
   type PhotoPlan,
   type VideoPlan,
 } from "./plan";
-import { isKeepAll, keepAll, pickPhotos } from "./select";
-import type { PhotoPick, ReelJobView, ReelKind, ReelLayout, ReelSong, ReelStatus } from "./types";
+import { directReel, isKeepAll, keepAll } from "./select";
+import type { PhotoPick, ReelDirection, ReelJobView, ReelKind, ReelLayout, ReelSong, ReelStatus } from "./types";
 
 /**
  * A reel job from upload to finished MP4. The routes in app/api/reels only
@@ -68,13 +70,42 @@ export async function removePhoto(jobId: number, idx: number) {
     .where(and(eq(reelJobFiles.jobId, jobId), inArray(reelJobFiles.kind, ["photo", "thumb"]), eq(reelJobFiles.idx, idx)));
 }
 
-/** The active songs, for the song picker. */
-export async function songLibrary() {
+/**
+ * The songs a reel may use: in the library, and not already in another reel.
+ * Each song makes one reel. The job that used a song keeps it (a remake is the
+ * same reel), and gives it back when it moves on to another song.
+ */
+const usable = (jobId?: number) =>
+  and(
+    eq(reelTracks.active, true),
+    jobId === undefined ? isNull(reelTracks.usedAt) : or(isNull(reelTracks.usedAt), eq(reelTracks.usedByJob, jobId)),
+  );
+
+/** The songs left, for the song picker. */
+export async function songLibrary(jobId?: number) {
   return db
     .select({ id: reelTracks.id, title: reelTracks.title, artist: reelTracks.artist })
     .from(reelTracks)
-    .where(eq(reelTracks.active, true))
+    .where(usable(jobId))
     .orderBy(asc(reelTracks.title));
+}
+
+/** Take a song for this job, unless another reel got to it first. */
+async function claimSong(trackId: number, jobId: number): Promise<boolean> {
+  const rows = await db
+    .update(reelTracks)
+    .set({ usedAt: new Date(), usedByJob: jobId })
+    .where(and(eq(reelTracks.id, trackId), usable(jobId)))
+    .returning({ id: reelTracks.id });
+  return rows.length > 0;
+}
+
+/** Give back every song this job holds except `keep` (the song of its finished reel, if any). */
+async function releaseSongs(jobId: number, keep: number | null) {
+  await db
+    .update(reelTracks)
+    .set({ usedAt: null, usedByJob: null })
+    .where(and(eq(reelTracks.usedByJob, jobId), keep === null ? undefined : ne(reelTracks.id, keep)));
 }
 
 export async function getJob(id: number) {
@@ -115,6 +146,7 @@ export async function jobView(id: number): Promise<ReelJobView | null> {
       error: reelJobs.error,
       aiFailed: reelJobs.aiFailed,
       picks: reelJobs.picks,
+      direction: reelJobs.direction,
       plan: reelJobs.plan,
       version: reelJobs.version,
       updatedAt: reelJobs.updatedAt,
@@ -124,7 +156,7 @@ export async function jobView(id: number): Promise<ReelJobView | null> {
     .limit(1);
   if (!job) return null;
 
-  const library = await songLibrary();
+  const library = await songLibrary(id);
 
   let status = job.status as ReelStatus;
   let error = job.error;
@@ -143,6 +175,17 @@ export async function jobView(id: number): Promise<ReelJobView | null> {
     aiFailed: job.aiFailed,
     picks: (job.picks as PhotoPick[] | null) ?? null,
     order: plan?.kind === "photos" ? plan.shots.map((s) => s.photo) : null,
+    scenes:
+      plan?.kind === "photos"
+        ? plan.shots.map((s) => ({
+            photo: s.photo,
+            seconds: Math.round((s.end - s.start) * 100) / 100,
+            // Reels made before transitions existed.
+            transition: s.transition ?? "cut",
+          }))
+        : null,
+    directed: plan?.kind === "photos" ? (plan.directed ?? false) : false,
+    direction: (job.direction as ReelDirection | null) ?? null,
     song: plan?.song ?? null,
     duration: plan?.total ?? null,
     layout: plan ? (plan.layout ?? "portrait") : null,
@@ -176,6 +219,8 @@ export async function runJob(id: number, opts: RunOptions): Promise<void> {
   };
 
   const tmp = await mkdtemp(path.join(os.tmpdir(), `reel-${id}-`));
+  /** The song of the job's finished reel, which a failed remake must not give back. */
+  let keepSong: number | null = null;
   try {
     // Loaded here, not at the top: the renderers pull in the canvas library's
     // native build, which only the run route ships (see next.config). The
@@ -184,17 +229,26 @@ export async function runJob(id: number, opts: RunOptions): Promise<void> {
     const { analyseVideo, renderVideoReel } = await import("./render-video");
 
     const [job] = await db
-      .select({ kind: reelJobs.kind, picks: reelJobs.picks, triedTracks: reelJobs.triedTracks, trackId: reelJobs.trackId })
+      .select({
+        kind: reelJobs.kind,
+        picks: reelJobs.picks,
+        direction: reelJobs.direction,
+        triedTracks: reelJobs.triedTracks,
+        trackId: reelJobs.trackId,
+      })
       .from(reelJobs)
       .where(eq(reelJobs.id, id))
       .limit(1);
     if (!job) return;
+    keepSong = job.trackId;
 
     const tracks = await db
       .select({
         id: reelTracks.id,
         title: reelTracks.title,
         artist: reelTracks.artist,
+        language: reelTracks.language,
+        tags: reelTracks.tags,
         bpm: reelTracks.bpm,
         windowStart: reelTracks.windowStart,
         analysis: reelTracks.analysis,
@@ -203,23 +257,31 @@ export async function runJob(id: number, opts: RunOptions): Promise<void> {
         createdAt: reelTracks.createdAt,
       })
       .from(reelTracks)
-      .where(eq(reelTracks.active, true));
+      .where(usable(id));
     if (tracks.length === 0) {
-      throw new ReelError("There are no songs in the library yet. Add some first (docs/reels/procedure.md).");
+      throw new ReelError("Every song in the library has made a reel already. Add new songs (docs/reels/procedure.md).");
     }
-    const library = tracks.map((t) => ({ ...t, analysis: t.analysis as TrackAnalysis }));
+    let library = tracks.map((t) => ({ ...t, analysis: t.analysis as TrackAnalysis }));
+    type Track = (typeof library)[number];
     // "Different song" skips every song this job has had; a picked song is
     // exactly that one; a remake with new picks keeps the song it had.
     const tried = opts.track === "next" ? job.triedTracks : [];
-    const requested = typeof opts.track === "number" ? opts.track : opts.track === undefined ? job.trackId : null;
-    const pick = <T extends (typeof library)[number]>(fits: (t: T) => boolean) =>
-      chooseTrack(library as T[], { tried, now: new Date(), requested, fits }) ??
-      chooseTrack(library as T[], { tried, now: new Date(), fits });
+    let requested = typeof opts.track === "number" ? opts.track : opts.track === undefined ? job.trackId : null;
+    /** The song, claimed for this job. Another reel can take a song after the query; then the next best. */
+    const pick = async (fits: (t: Track) => boolean): Promise<Track | null> => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const t =
+          chooseTrack(library, { tried, now: new Date(), requested, fits }) ?? chooseTrack(library, { tried, now: new Date(), fits });
+        if (!t || (await claimSong(t.id, id))) return t;
+        library = library.filter((x) => x.id !== t.id);
+      }
+      return null;
+    };
 
     let plan: PhotoPlan | VideoPlan;
     const out = path.join(tmp, "reel.mp4");
     const audio = path.join(tmp, "song.m4a");
-    let track: (typeof library)[number] | null;
+    let track: Track | null;
     let videoFacts: { endCard: boolean } | null = null;
 
     if (job.kind === "photos") {
@@ -232,10 +294,14 @@ export async function runJob(id: number, opts: RunOptions): Promise<void> {
       const idxs = onFile.map((t) => t.idx);
       if (idxs.length === 0) throw new ReelError("No photos were uploaded.");
       let picks = job.picks as PhotoPick[] | null;
+      let direction = job.direction as ReelDirection | null;
       // Photos added or removed since the last pick, or Gemini asked for after
-      // a run without it: pick again.
+      // a run without it: ask again.
       const changed = picks && (picks.length !== idxs.length || picks.some((p) => !idxs.includes(p.index)));
-      if (changed || opts.repick || (picks && opts.useAi && isKeepAll(picks))) picks = null;
+      if (changed || opts.repick || (picks && opts.useAi && isKeepAll(picks))) {
+        picks = null;
+        direction = null;
+      }
       if (!picks) {
         if (opts.useAi) {
           await setStatus("selecting", 0, true);
@@ -244,8 +310,20 @@ export async function runJob(id: number, opts: RunOptions): Promise<void> {
             .from(reelJobFiles)
             .where(and(eq(reelJobFiles.jobId, id), eq(reelJobFiles.kind, "thumb")))
             .orderBy(asc(reelJobFiles.idx));
-          const { picks: chosen } = await pickPhotos(thumbs.map((t) => t.bytes));
-          picks = chosen.map((p) => ({ ...p, index: idxs[p.index] }));
+          // Gemini sees positions 0..n-1; the job knows photos by upload number.
+          const fixed = typeof opts.track === "number" && library.some((t) => t.id === opts.track) ? opts.track : null;
+          const answer = await directReel(
+            thumbs.map((t) => t.bytes),
+            {
+              songs: library.map((t) => ({ id: t.id, title: t.title, artist: t.artist, language: t.language, bpm: t.bpm, tags: t.tags })),
+              fixedSong: fixed,
+            },
+          );
+          picks = answer.picks.map((p) => ({ ...p, index: idxs[p.index] }));
+          direction = answer.direction && {
+            ...answer.direction,
+            scenes: answer.direction.scenes.map((sc) => ({ ...sc, photo: idxs[sc.photo] })),
+          };
         } else {
           picks = keepAll(idxs.length).map((p, i) => ({ ...p, index: idxs[i] }));
         }
@@ -254,14 +332,20 @@ export async function runJob(id: number, opts: RunOptions): Promise<void> {
         const keep = new Set(opts.keep);
         picks = picks.map((p) => ({ ...p, keep: keep.has(p.index) }));
       }
-      await db.update(reelJobs).set({ picks }).where(eq(reelJobs.id, id));
+      // The person's taps win over the direction: their photos in, the rest out.
+      if (direction) direction = reconcile(direction, picks);
+      await db.update(reelJobs).set({ picks, direction }).where(eq(reelJobs.id, id));
 
-      const order = orderShots(picks);
+      // Directed by Gemini when AI is on and it answered with scenes; else the rules.
+      const directed = opts.useAi && direction && direction.scenes.length > 0 ? direction : null;
+      const order = directed ? directed.scenes.map((sc) => sc.photo) : orderShots(picks);
       if (order.length === 0) throw new ReelError("Keep at least one photo.");
+      // Gemini's song for a first make, unless the person chose one or asked for a different one.
+      if (directed?.song != null && requested === null && opts.track === undefined) requested = directed.song;
       const finalPicks = picks;
-      track = pick((t) => photoReelFits(order, finalPicks, t));
-      if (!track) throw new ReelError("No song in the library is long enough for these photos.");
-      plan = planPhotoReel(order, picks, track)!;
+      track = await pick((t) => photoReelFits(order, finalPicks, t, directed));
+      if (!track) throw new ReelError("No song left in the library is long enough for these photos.");
+      plan = (directed ? planDirectedReel(directed, track) : planPhotoReel(order, picks, track))!;
 
       await setStatus("rendering", 0, true);
       const used = [...new Set(plan.shots.map((s) => s.photo))];
@@ -298,8 +382,8 @@ export async function runJob(id: number, opts: RunOptions): Promise<void> {
       if (facts.contentEnd > 58) {
         throw new ReelError("That video is too long for a reel. Trim it to under a minute and try again.");
       }
-      track = pick((t) => videoReelFits(facts, t));
-      if (!track) throw new ReelError("No song in the library is long enough for this video.");
+      track = await pick((t) => videoReelFits(facts, t));
+      if (!track) throw new ReelError("No song left in the library is long enough for this video.");
       plan = planVideoReel(facts, track)!;
 
       await setStatus("rendering", 0, true);
@@ -349,15 +433,19 @@ export async function runJob(id: number, opts: RunOptions): Promise<void> {
       .update(reelTracks)
       .set({ useCount: sql`${reelTracks.useCount} + 1`, lastUsedAt: new Date() })
       .where(eq(reelTracks.id, track.id));
+    // The reel now has this song: any other it held (the song before "Different song") goes back.
+    await releaseSongs(id, track.id);
   } catch (e) {
     const aiFailed = e instanceof GeminiUnavailableError || e instanceof GeminiRequestError;
     const message =
       e instanceof ReelError
         ? e.message
         : aiFailed
-          ? `Gemini could not pick the photos. ${e.message}`
+          ? `Gemini could not direct the reel. ${e.message}`
           : `Something went wrong while making the reel: ${e instanceof Error ? e.message.slice(0, 300) : String(e)}`;
     console.error(`reel ${id} failed:`, e);
+    // A song claimed for this render goes back; the finished reel keeps its own.
+    await releaseSongs(id, keepSong).catch(() => {});
     await db
       .update(reelJobs)
       .set({ status: "error", error: message, aiFailed, updatedAt: new Date() })

@@ -612,6 +612,13 @@ export const reelTracks = pgTable(
     active: boolean("active").notNull().default(true),
     useCount: integer("use_count").notNull().default(0),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    /**
+     * When the song went into a reel. Each song makes one reel: once used it
+     * leaves the library for good (`npm run songs -- free <id>` puts it back).
+     */
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    /** The job that used it, which keeps it for remakes. No foreign key: jobs are deleted after two days, the song stays used. */
+    usedByJob: integer("used_by_job"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("reel_tracks_title_artist_idx").on(t.title, t.artist)],
@@ -638,6 +645,8 @@ export const reelJobs = pgTable(
     aiFailed: boolean("ai_failed").notNull().default(false),
     /** Gemini's verdict per photo, in upload order. */
     picks: jsonb("picks"),
+    /** Gemini's direction for a photo reel (`ReelDirection`): scenes, seconds, song, transitions. */
+    direction: jsonb("direction"),
     /** The last render's plan: song, cue, shot order and timings. */
     plan: jsonb("plan"),
     trackId: integer("track_id").references(() => reelTracks.id, { onDelete: "set null" }),

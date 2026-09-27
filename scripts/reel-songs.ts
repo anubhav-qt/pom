@@ -7,10 +7,15 @@
  *   npm run songs -- check <file> [--hook 0:47]   analyse only: tempo, beats, hook; nothing saved
  *   npm run songs -- list
  *   npm run songs -- disable <id> | enable <id> | remove <id>
+ *   npm run songs -- free <id>                    put a used song back in the library
  *
  * Adding a song: fetch the audio (yt-dlp, when given a link or a search),
  * measure its beats, keep ~70 s around its hook as AAC, and store both in
- * `reel_tracks`. Adding the same title and artist again replaces the row.
+ * `reel_tracks`. Adding the same title and artist again replaces the row
+ * (a song that has made a reel stays used).
+ *
+ * Each song makes one reel: once a reel is made with it, it leaves the
+ * library (`used` in the list). `free` puts it back.
  *
  * Needs ffmpeg (the one npm installed is used) and, for links, yt-dlp on PATH
  * or as a Python module (`pip install yt-dlp`).
@@ -219,19 +224,31 @@ async function main() {
         language: reelTracks.language,
         bpm: reelTracks.bpm,
         active: reelTracks.active,
-        used: reelTracks.useCount,
-        lastUsed: reelTracks.lastUsedAt,
+        renders: reelTracks.useCount,
+        usedAt: reelTracks.usedAt,
+        reel: reelTracks.usedByJob,
         added: reelTracks.createdAt,
       })
       .from(reelTracks)
       .orderBy(asc(reelTracks.id));
+    const left = rows.filter((r) => r.active && !r.usedAt).length;
     console.table(
       rows.map((r) => ({
         ...r,
-        lastUsed: r.lastUsed ? r.lastUsed.toISOString().slice(0, 10) : "",
+        usedAt: r.usedAt ? r.usedAt.toISOString().slice(0, 10) : "",
+        reel: r.reel ?? "",
         added: r.added.toISOString().slice(0, 10),
       })),
     );
+    console.log(`${left} of ${rows.length} songs left for new reels.`);
+  } else if (command === "free") {
+    const id = Number(pos[0]);
+    if (!Number.isInteger(id)) throw new Error("Usage: npm run songs -- free <id>");
+    const { db } = await import("../src/db");
+    const { reelTracks } = await import("../src/db/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.update(reelTracks).set({ usedAt: null, usedByJob: null }).where(eq(reelTracks.id, id));
+    console.log(`Song #${id} is back in the library.`);
   } else if (command === "disable" || command === "enable" || command === "remove") {
     const id = Number(pos[0]);
     if (!Number.isInteger(id)) throw new Error(`Usage: npm run songs -- ${command} <id>`);
@@ -248,6 +265,7 @@ async function main() {
   check <file | link> [--hook 0:47]
   list
   disable <id> | enable <id> | remove <id>
+  free <id>          put a used song back in the library
 See docs/reels/procedure.md.`);
     process.exit(command ? 1 : 0);
   }

@@ -22,6 +22,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Segmented } from "@/components/segmented";
 import { Spinner } from "@/components/ui";
 import { withBasePath } from "@/lib/base-path";
+import { transitionLabel } from "@/lib/reels/transitions";
 import type { ReelJobView, ReelLayout } from "@/lib/reels/types";
 import { isKept, needsRemake, useReelsStore, type ReelPhoto } from "@/lib/stores/reels-store";
 import { cn } from "@/lib/utils";
@@ -59,7 +60,7 @@ function progressOf(s: Store): { label: string; fraction: number | null } | null
   }
   if (!working) return null;
   if (v.status === "queued") return { label: "Starting…", fraction: 0.2 };
-  if (v.status === "selecting") return { label: "Choosing the best photos…", fraction: null };
+  if (v.status === "selecting") return { label: "AI is directing the reel…", fraction: null };
   if (v.status === "analyzing") return { label: "Reading the video…", fraction: null };
   return { label: `Making the reel · ${Math.round(v.progress * 100)}%`, fraction: 0.25 + 0.75 * v.progress };
 }
@@ -90,6 +91,7 @@ export function Reels() {
     root.classList.add("printer-lock");
     setShare(canShareFiles());
     if (useReelsStore.getState().library.length === 0) void useReelsStore.getState().loadLibrary();
+    void useReelsStore.getState().resume();
     return () => root.classList.remove("printer-lock");
   }, []);
 
@@ -281,7 +283,7 @@ function Dropzone({
           </p>
           {!compact ? (
             <p className="muted mt-1 max-w-sm text-[13px]">
-              Photos: AI keeps the best and cuts them to a song. A video: its sound and end card go, ours and a song come in.
+              Photos: AI directs the reel, from the best shots to the song and transitions. A video: its sound and end card go, ours and a song come in.
             </p>
           ) : null}
         </div>
@@ -469,14 +471,21 @@ function VideoCard({
   const cut = view?.status === "done" ? view.videoCut : null;
   return (
     <section className="panel flex gap-4 p-3">
-      <video
-        src={video.preview}
-        muted
-        playsInline
-        preload="metadata"
-        className="h-36 w-auto max-w-[45%] shrink-0 rounded-xl object-contain"
-        style={{ background: "#0b0f14" }}
-      />
+      {video.preview ? (
+        <video
+          src={video.preview}
+          muted
+          playsInline
+          preload="metadata"
+          className="h-36 w-auto max-w-[45%] shrink-0 rounded-xl object-contain"
+          style={{ background: "#0b0f14" }}
+        />
+      ) : (
+        // Back after a reload: the video is on the server, only the local preview is gone.
+        <span className="flex h-36 w-24 shrink-0 items-center justify-center rounded-xl" style={{ background: "#0b0f14", color: "#7dd3fc" }}>
+          <Film className="h-6 w-6" />
+        </span>
+      )}
       <div className="flex min-w-0 flex-1 flex-col gap-2 py-1">
         <div className="flex items-start gap-2">
           <Film className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--accent)" }} />
@@ -565,6 +574,8 @@ function ResultCard({ view, s, share }: { view: ReelJobView; s: Store; share: bo
         </div>
       ) : null}
 
+      {view.scenes && view.scenes.length > 0 ? <Scenes view={view} photos={s.photos} /> : null}
+
       {song ? (
         <p className="rounded-xl px-3 py-2.5 text-[12.5px] leading-snug" style={{ background: "var(--panel-2)", color: "var(--muted)" }}>
           Posting the copy without music? In Instagram, add <b style={{ color: "var(--text)" }}>{song.title}</b> and start it at{" "}
@@ -574,7 +585,7 @@ function ResultCard({ view, s, share }: { view: ReelJobView; s: Store; share: bo
 
       <div className="grid grid-cols-2 gap-2">
         <button type="button" className="btn btn-primary" disabled={!!s.saving} onClick={() => s.save("music")}>
-          {s.saving === "music" ? <Spinner size="1rem" color="#fff" /> : <Download className="h-4 w-4" />}
+          {s.saving === "music" ? <Spinner size="1rem" color="currentColor" /> : <Download className="h-4 w-4" />}
           Download
         </button>
         <button type="button" className="btn" disabled={!!s.saving} onClick={() => s.save("silent")}>
@@ -594,6 +605,60 @@ function ResultCard({ view, s, share }: { view: ReelJobView; s: Store; share: bo
         Start a new reel
       </button>
     </section>
+  );
+}
+
+/**
+ * The finished reel scene by scene: each photo, how long it holds (on the
+ * beat) and how it comes in. Under it, Gemini's direction as it answered.
+ */
+function Scenes({ view, photos }: { view: ReelJobView; photos: ReelPhoto[] }) {
+  const preview = new Map(photos.map((p) => [p.idx, p.preview]));
+  const scenes = view.scenes ?? [];
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+          {scenes.length} scenes
+        </p>
+        <span className="flex items-center gap-1 truncate text-[11.5px]" style={{ color: "var(--muted)" }}>
+          {view.directed ? <Sparkles className="h-3 w-3 shrink-0" style={{ color: "var(--accent)" }} /> : null}
+          {view.directed ? (view.direction?.mood ? `AI · ${view.direction.mood}` : "Directed by AI") : "Made by the rules"}
+        </span>
+      </div>
+      <ol className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+        {scenes.map((sc, i) => (
+          <li key={`${sc.photo}-${i}`} className="w-[64px] shrink-0">
+            <div className="relative aspect-[3/4] overflow-hidden rounded-lg" style={{ background: "var(--panel-2)" }}>
+              {preview.get(sc.photo) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={preview.get(sc.photo)} alt="" className="h-full w-full object-cover" />
+              ) : null}
+              <span
+                className="absolute left-1 top-1 rounded-full px-1.5 text-[10px] font-semibold tabular-nums text-white"
+                style={{ background: "rgba(15,23,42,0.6)" }}
+              >
+                {i + 1}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] font-medium tabular-nums">{sc.seconds.toFixed(1)} s</p>
+            <p className="truncate text-[10.5px]" style={{ color: "var(--muted)" }} title={transitionLabel(sc.transition)}>
+              {transitionLabel(sc.transition)}
+            </p>
+          </li>
+        ))}
+      </ol>
+      {view.direction ? (
+        <details className="group rounded-xl text-[12px]" style={{ background: "var(--panel-2)" }}>
+          <summary className="cursor-pointer select-none px-3 py-2 font-medium" style={{ color: "var(--muted)" }}>
+            AI&apos;s plan (JSON)
+          </summary>
+          <pre className="max-h-64 overflow-auto px-3 pb-3 text-[11px] leading-snug" style={{ color: "var(--text)" }}>
+            {JSON.stringify(view.direction, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -644,21 +709,26 @@ function OptionsPanel({ s }: { s: Store }) {
           checked={s.useAi}
           onChange={s.setUseAi}
           disabled={s.busy}
-          label="AI picks the photos"
-          hint={s.useAi ? "Keeps the best shots and orders them by outfit." : "Every photo, in the order added."}
+          label="AI directs the reel"
+          hint={s.useAi ? "Picks the shots, their order and timing, the song and the transitions." : "Every photo, in the order added."}
         />
       ) : null}
       <div className="space-y-2">
-        <label htmlFor="reel-song" className="block text-sm font-medium">
-          Song
-        </label>
+        <div className="flex items-baseline justify-between gap-2">
+          <label htmlFor="reel-song" className="block text-sm font-medium">
+            Song
+          </label>
+          <span className="muted text-xs tabular-nums">
+            {s.library.length} left · each makes one reel
+          </span>
+        </div>
         <select
           id="reel-song"
           value={String(s.song)}
           onChange={(e) => s.setSong(e.target.value === "auto" ? "auto" : Number(e.target.value))}
           className="input w-full"
         >
-          <option value="auto">{s.view?.song ? `Keep ${s.view.song.title}` : "Best match"}</option>
+          <option value="auto">{s.view?.song ? `Keep ${s.view.song.title}` : s.useAi && s.kind !== "video" ? "AI's choice" : "Best match"}</option>
           {s.library.map((t) => (
             <option key={t.id} value={t.id}>
               {t.title} · {t.artist}
@@ -733,7 +803,7 @@ function OptionsInline({ s }: { s: Store }) {
             s.useAi,
             <>
               <Sparkles className="h-3.5 w-3.5" />
-              AI picks
+              AI directs
             </>,
             () => s.setUseAi(!s.useAi),
             "ai",
@@ -760,7 +830,7 @@ function PrimaryButton({
   if (s.busy) {
     return (
       <button type="button" className={cn("btn btn-primary", className)} disabled>
-        <Spinner size="1.1rem" color="#fff" />
+        <Spinner size="1.1rem" color="currentColor" />
         Making…
       </button>
     );
@@ -769,7 +839,7 @@ function PrimaryButton({
     // Phones hand the reel straight to WhatsApp or Instagram; desktop saves it.
     return (
       <button type="button" className={cn("btn btn-primary", className)} disabled={!!s.saving} onClick={() => s.save(share ? "share" : "music")}>
-        {s.saving ? <Spinner size="1.1rem" color="#fff" /> : share ? <Share2 className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+        {s.saving ? <Spinner size="1.1rem" color="currentColor" /> : share ? <Share2 className="h-4 w-4" /> : <Download className="h-4 w-4" />}
         {share ? "Share" : "Download reel"}
       </button>
     );
