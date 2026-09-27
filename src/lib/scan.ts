@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+  catalogImages,
   orderFulfilment,
   orderItems,
   orders,
@@ -88,6 +89,8 @@ export type ScanLookup =
 /* -------------------------------------------------------------------------- */
 
 async function itemsFor(orderId: number): Promise<ScanItem[]> {
+  // The catalogue photo stands in for an unlinked SKU, as on the order sheet,
+  // so a returned parcel can still be checked against a picture.
   const rows = await db
     .select({
       sku: orderItems.externalSku,
@@ -95,17 +98,26 @@ async function itemsFor(orderId: number): Promise<ScanItem[]> {
       quantity: orderItems.quantity,
       productId: orderItems.productId,
       imageUrl: products.imageUrl,
+      catalogImageUrl: catalogImages.imageUrl,
       binLocation: products.binLocation,
     })
     .from(orderItems)
+    .innerJoin(orders, eq(orders.id, orderItems.orderId))
     .leftJoin(products, eq(products.id, orderItems.productId))
+    .leftJoin(
+      catalogImages,
+      and(
+        eq(catalogImages.channelAccountId, orders.channelAccountId),
+        eq(catalogImages.asin, orderItems.externalAsin),
+      ),
+    )
     .where(eq(orderItems.orderId, orderId));
 
   return rows.map((r) => ({
     sku: r.sku,
     title: r.title,
     quantity: r.quantity,
-    imageUrl: r.imageUrl,
+    imageUrl: r.imageUrl ?? r.catalogImageUrl,
     binLocation: r.binLocation,
     mapped: r.productId !== null,
   }));
@@ -262,7 +274,7 @@ export async function lookupInbound(code: string): Promise<ScanLookup> {
         inbound: {
           kind: "return",
           recordId: returnRow.id,
-          label: returnRow.kind === "exchange" ? "Exchange" : "Customer return",
+          label: returnRow.kind === "exchange" ? "Exchange" : returnRow.kind === "rto" ? "RTO" : "Customer return",
           alreadyReceived: returnRow.receivedAt !== null,
           receivedAt: returnRow.receivedAt,
         },

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { ChannelTag, Empty, StatusBadge, Spinner } from "@/components/ui";
 import { FEATURES } from "@/config/features";
-import { ImageLightbox } from "@/components/image-lightbox";
+import { ZoomImg } from "@/components/image-lightbox";
 import type { Channel, FulfilmentState, OrderStatus } from "@/db/schema";
 import { withBasePath } from "@/lib/base-path";
 import { cn, dayLabel, money, timeLeft } from "@/lib/utils";
@@ -56,7 +56,6 @@ export function OrderTable({
   const [message, setMessage] = useState<string | null>(null);
   const [cropLabels, setCropLabels] = useState(true);
   const [openOrderId, setOpenOrderId] = useState<number | null>(null);
-  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   // A packed order normally leaves this tab when its label gets scanned at
   // the outbound bench (that scan is what actually calls `createManifest`).
   // Forget to scan one and it sits here forever — nothing else ever flips
@@ -242,7 +241,6 @@ export function OrderTable({
                 selected={selected.has(row.id)}
                 onToggleSelect={() => toggle(row.id)}
                 onOpen={() => setOpenOrderId(row.id)}
-                onOpenImage={(src, alt) => setLightbox({ src, alt })}
               />
             ))}
           </div>
@@ -416,10 +414,6 @@ export function OrderTable({
       {openOrderId !== null ? (
         <OrderDetailModal orderId={openOrderId} onClose={() => setOpenOrderId(null)} />
       ) : null}
-
-      {lightbox ? (
-        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
-      ) : null}
     </div>
   );
 }
@@ -452,14 +446,12 @@ function orderMeta(row: OrderRow) {
 export function OrderCard({
   row,
   onOpen,
-  onOpenImage,
   selectable,
   selected,
   onToggleSelect,
 }: {
   row: OrderRow;
   onOpen: () => void;
-  onOpenImage: (src: string, alt: string) => void;
   /** Packed-tab (or label-printing) bulk selection — a checkbox floats over the card. */
   selectable?: boolean;
   selected?: boolean;
@@ -487,14 +479,7 @@ export function OrderCard({
         className="panel flex w-full gap-3 p-3 text-left active:scale-[0.99]"
         style={{ transition: "transform 0.1s var(--ease-premium)", paddingLeft: selectable ? "2.25rem" : undefined }}
       >
-      <span
-        className="relative w-14 shrink-0"
-        onClick={(e) => {
-          if (!thumbSrc) return;
-          e.stopPropagation();
-          onOpenImage(thumbSrc, thumbAlt);
-        }}
-      >
+      <span className="relative w-14 shrink-0">
         <OrderThumb src={thumbSrc} alt={thumbAlt} size="h-14 w-14" />
         {row.items.length > 1 ? (
           <span
@@ -555,6 +540,7 @@ export function OrderCard({
   );
 }
 
+/** A product photo that opens full screen on a tap, or a box outline when there is none. */
 export function OrderThumb({
   src,
   alt,
@@ -565,9 +551,8 @@ export function OrderThumb({
   size?: string;
 }) {
   if (src) {
-    // eslint-disable-next-line @next/next/no-img-element
     return (
-      <img
+      <ZoomImg
         src={src}
         alt={alt}
         className={cn(size, "rounded-lg border object-cover")}

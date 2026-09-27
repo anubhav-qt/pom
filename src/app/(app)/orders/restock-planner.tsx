@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { Empty, Spinner } from "@/components/ui";
-import { ImageLightbox } from "@/components/image-lightbox";
+import { ZoomImg } from "@/components/image-lightbox";
 import { Modal } from "@/components/modal";
 import { colorSwatch } from "@/lib/variant-title";
 
@@ -77,7 +77,6 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(initialPlan.generatedAt);
-  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   const active =
     plan.products.find((p) => p.baseKey === activeKey) ?? plan.products[0] ?? null;
@@ -237,15 +236,7 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
                     boxShadow: on ? "inset 3px 0 0 var(--accent)" : undefined,
                   }}
                 >
-                  <span
-                    onClick={(e) => {
-                      if (!p.imageUrl) return;
-                      e.stopPropagation();
-                      setLightbox({ src: p.imageUrl, alt: p.label });
-                    }}
-                  >
-                    <Thumb src={p.imageUrl} size={44} />
-                  </span>
+                  <Thumb src={p.imageUrl} alt={p.label} size={44} />
                   <span className="min-w-0 flex-1">
                     <span className="line-clamp-2 text-[12.5px] font-semibold leading-tight">
                       {p.label}
@@ -301,7 +292,6 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
               onHave={setHave}
               onMarkInStock={markInStock}
               onExclude={setExcluded}
-              onOpenImage={(src, alt) => setLightbox({ src, alt })}
               onBack={() => {
                 setSelected(new Set());
                 setMobileScreen("list");
@@ -386,10 +376,6 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
         </div>
       )}
 
-      {lightbox ? (
-        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
-      ) : null}
-
       {confirmingReset ? (
         <Modal title="Reset from latest sync" onClose={() => setConfirmingReset(false)} width="26rem">
           <p className="text-sm" style={{ color: "var(--text)" }}>
@@ -421,7 +407,6 @@ function ProductPanel({
   onHave,
   onMarkInStock,
   onExclude,
-  onOpenImage,
   onBack,
 }: {
   product: PlanProduct;
@@ -430,7 +415,6 @@ function ProductPanel({
   onHave: (ids: number[], have: number) => void;
   onMarkInStock: (ids: number[]) => void;
   onExclude: (ids: number[], excluded: boolean) => void;
-  onOpenImage: (src: string, alt: string) => void;
   /** Mobile only: returns to the product rail's own screen. */
   onBack: () => void;
 }) {
@@ -478,19 +462,12 @@ function ProductPanel({
             <path d="M15 18l-6-6 6-6" />
           </svg>
         </button>
-        <span
-          className="shrink-0"
-          onClick={(e) => {
-            if (!product.imageUrl) return;
-            e.stopPropagation();
-            onOpenImage(product.imageUrl, product.label);
-          }}
-        >
+        <span className="shrink-0">
           <span className="block sm:hidden">
-            <Thumb src={product.imageUrl} size={44} />
+            <Thumb src={product.imageUrl} alt={product.label} size={44} />
           </span>
           <span className="hidden sm:block">
-            <Thumb src={product.imageUrl} size={128} />
+            <Thumb src={product.imageUrl} alt={product.label} size={128} />
           </span>
         </span>
         <div className="min-w-0 flex-1">
@@ -956,14 +933,13 @@ function Swatch({ sw }: { sw: ReturnType<typeof colorSwatch> }) {
   );
 }
 
-function Thumb({ src, size }: { src: string | null; size: number }) {
+function Thumb({ src, alt, size }: { src: string | null; alt: string; size: number }) {
   const s = { width: size, height: size } as const;
   if (src) {
-    // eslint-disable-next-line @next/next/no-img-element
     return (
-      <img
+      <ZoomImg
         src={src}
-        alt=""
+        alt={alt}
         className="shrink-0 rounded-lg border object-cover"
         style={{ ...s, borderColor: "var(--border)", background: "var(--panel-2)" }}
       />

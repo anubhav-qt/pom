@@ -4,7 +4,7 @@ import { CenteredSpinner } from "@/components/ui";
 import { ItemTitle } from "@/components/item-title";
 import { useEffect, useState } from "react";
 
-import { ImageLightbox } from "@/components/image-lightbox";
+import { ZoomImg } from "@/components/image-lightbox";
 import { Modal } from "@/components/modal";
 import { dayLabel, money, timeLeft } from "@/lib/utils";
 
@@ -20,7 +20,6 @@ export function CollectionDetailModal({ row, onClose }: { row: PickRow; onClose:
   const [orders, setOrders] = useState<CollectionOrderRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openOrderId, setOpenOrderId] = useState<number | null>(null);
-  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,17 +37,7 @@ export function CollectionDetailModal({ row, onClose }: { row: PickRow; onClose:
         <div className="space-y-5">
           {/* product header */}
           <div className="flex gap-4">
-            <button
-              type="button"
-              onClick={() => {
-                if (row.imageUrl) setLightbox({ src: row.imageUrl, alt: row.title ?? row.sku });
-              }}
-              className="shrink-0"
-              style={{ cursor: row.imageUrl ? "zoom-in" : "default" }}
-              disabled={!row.imageUrl}
-            >
-              <Thumb src={row.imageUrl} alt={row.title ?? row.sku} />
-            </button>
+            <Thumb src={row.imageUrl} alt={row.title ?? row.sku} />
             <div className="min-w-0 flex-1">
               <ItemTitle title={row.title} empty="Unnamed product" nameClassName="text-[15px] font-semibold leading-snug" />
               <div className="muted mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
@@ -148,10 +137,6 @@ export function CollectionDetailModal({ row, onClose }: { row: PickRow; onClose:
       {openOrderId !== null ? (
         <OrderDetailModal orderId={openOrderId} onClose={() => setOpenOrderId(null)} />
       ) : null}
-
-      {lightbox ? (
-        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
-      ) : null}
     </>
   );
 }
@@ -182,9 +167,8 @@ function Metric({
 
 function Thumb({ src, alt }: { src: string | null; alt: string }) {
   if (src) {
-    // eslint-disable-next-line @next/next/no-img-element
     return (
-      <img
+      <ZoomImg
         src={src}
         alt={alt}
         className="h-24 w-24 shrink-0 rounded-lg border object-cover"
