@@ -151,9 +151,17 @@ export function Reels() {
         style={{ background: "var(--panel)", boxShadow: "0 -6px 20px rgba(15,37,54,0.08)" }}
       >
         <div className="mx-auto flex max-w-2xl items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <OptionsInline s={s} />
-          </div>
+          {/* Once the reel is made, its options give way to starting the next one. */}
+          {done && !remake ? (
+            <button type="button" className="btn min-w-0 flex-1" onClick={s.reset}>
+              <RotateCcw className="h-4 w-4" />
+              Start a new reel
+            </button>
+          ) : (
+            <div className="min-w-0 flex-1">
+              <OptionsInline s={s} />
+            </div>
+          )}
           <PrimaryButton s={s} hasInput={hasInput} remake={remake} share={share} className="shrink-0" />
         </div>
       </div>
