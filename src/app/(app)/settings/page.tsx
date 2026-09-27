@@ -5,6 +5,8 @@ import { channelAccounts, syncRuns } from "@/db/schema";
 import { ENABLED_CHANNELS } from "@/config/features";
 import { requireUser } from "@/lib/auth";
 
+// The version lives in package.json alone; the README's badge and changelog follow it.
+import pkg from "../../../../package.json";
 import { ChannelAccounts, MeeshoImport, SyncLog } from "./settings-client";
 
 export const dynamic = "force-dynamic";
@@ -71,6 +73,8 @@ export default async function SettingsPage() {
           channel: r.channel,
         }))}
       />
+
+      <p className="muted pt-2 text-center text-xs tabular-nums">Paribelle OMS v{pkg.version}</p>
     </div>
   );
 }

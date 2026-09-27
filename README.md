@@ -4,6 +4,7 @@
 
 **Self-Hosted Multi-Channel Order Management & Dispatch System**
 
+[![Version](https://img.shields.io/badge/version-1.0.0-0ea5e9?style=for-the-badge)](#-changelog)
 [![Next.js](https://img.shields.io/badge/Next.js-15%20App%20Router-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19-61dafb?style=for-the-badge&logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
@@ -108,9 +109,12 @@ f:\oms\
 │   │   └── index.ts              # Neon HTTP serverless / TCP node-postgres client
 │   └── lib/
 │       ├── fulfilment.ts         # Bench state machine & queue predicates
+│       ├── profit.ts             # Finance: profit per marketplace, or all of them together
+│       ├── reels/                # Beat-matched reels: AI direction, songs, rendering, feedback
 │       ├── scan.ts               # Universal barcode match engine (order ID, AWB, return ID)
 │       └── stores/               # Zustand client caches for instant tab switching
-└── scripts/                      # DB seeding, reconciliation, and channel validation CLI
+├── docs/                         # Procedures for Claude Code / Antigravity, runbooks
+└── scripts/                      # DB seeding, reconciliation, portal import, songs, reel feedback CLI
 ```
 
 ---
@@ -189,6 +193,12 @@ npm run check:amazon:full                                 # End-to-end token & o
 npm run backfill:amazon -- --from 2026-01-01              # Bulk ingest historical reports
 npm run reconcile:amazon                                  # Repair order statuses against Amazon
 
+# Reels (see docs/reels/procedure.md and docs/reels/feedback.md)
+npm run songs -- known                                    # Every song the database knows, used or not
+npm run songs -- vet songs.json                           # Check a candidate batch before adding it
+npm run songs -- batch songs.json                         # Add songs (audio, beats, hook)
+npm run reels:feedback                                    # "Do you like this reel?" answers, by prompt version
+
 # Verification & Test Suites
 npm run verify:meesho                                     # Test Meesho PDF splitter & parser
 npm run typecheck                                         # Static TypeScript check (tsc --noEmit)
@@ -206,6 +216,9 @@ Marketplaces and features can be activated or parked without code removal in [`s
 | **Amazon SP-API** | ✅ Active | Live API | Full order sync, Easy Ship tracking, and inventory push. |
 | **Flipkart API** | ⏸️ Parked | Live API (v3) | Built and tested. Re-enabled by adding to `ENABLED_CHANNELS`. |
 | **Meesho Ingest** | ⏸️ Parked | File Parser | Excel order sheet and PDF label splitter ready in UI. |
+| **Flipkart & Meesho data** | ✅ Active | Seller-portal procedure | Orders, returns and payments read off the portals in Claude's browser ([`docs/portals/procedure.md`](docs/portals/procedure.md)), counted in Finance and the assistant. Not on the Orders screen. |
+| **Finance** | ✅ Active | Settlement lines | Real profit per order, for one marketplace or all of them (switch at the rail's right end). |
+| **Reels** | ✅ Active | Gemini + ffmpeg | Beat-matched reels from a shoot or a supplier video; "Do you like this reel?" feedback tunes the AI director. |
 | **Outbound Scanner** | ✅ Active | ZXing WebCam / HID | Barcode lookup, stock decrement, and dispatch transition. |
 | **Label Crop Engine** | ⏸️ Parked | PDF-Lib | Crops shipping label from tax invoice to save thermal paper. |
 
@@ -216,6 +229,37 @@ Marketplaces and features can be activated or parked without code removal in [`s
 - **Amazon SP-API Compliance**: Follows data protection rules with strict token rotation, AES encryption of credentials at rest, and zero persistent storage of personally identifiable buyer data beyond order completion.
 - **Role-Based Routing**: Critical administrative functions (inventory resets, channel credentials, sync overrides) are restricted to owners.
 - **Session Security**: Stateless, short-lived JWT sessions stored in HTTP-only, SameSite cookies scoped strictly to the `/pom` base path.
+
+---
+
+## 🧭 Procedures (for Claude Code and Antigravity)
+
+Recurring jobs are written as procedures an agent follows with the owner. Each one records at its end what the next run needs, so runs get quicker.
+
+| Procedure | What it does | Start it with |
+|---|---|---|
+| [`docs/portals/procedure.md`](docs/portals/procedure.md) | The owner logs in to Flipkart Seller Hub and the Meesho Supplier Panel in Claude's browser; Claude reads the orders, returns and payments there and writes them to the database, so Finance covers every marketplace. The first run reads everything; later runs start where the last one stopped. | "Read docs/portals/procedure.md and run it." |
+| [`docs/reels/procedure.md`](docs/reels/procedure.md) | Finds trending songs on YouTube with the owner, after checking every song the database already has or has used, and adds the approved ones to the reel library. | "Read docs/reels/procedure.md and let's find new songs." |
+| [`docs/reels/feedback.md`](docs/reels/feedback.md) | Reads the "Do you like this reel?" answers and proposes changes to the reel director's prompt. | "Read docs/reels/feedback.md and review the reel feedback." |
+
+---
+
+## 📜 Changelog
+
+The version lives in `package.json` and shows at the foot of Settings.
+
+### 1.0.0 (2026-09-27)
+
+- **Every marketplace in Finance.** Flipkart and Meesho orders, returns and payments are read off their seller portals by Claude in its browser (the owner logs in; `docs/portals/procedure.md`) and written in the same shape as Amazon's settlement lines. Finance adds all marketplaces together, with a switch for one at a time; the assistant's sales figures count them all too.
+- **Reel feedback.** Under every finished reel: "Do you like this reel?" The answer is saved with a copy of the reel and the prompt version that directed it; `npm run reels:feedback` and `docs/reels/feedback.md` turn the answers into prompt changes.
+- **Procedures** for the seller portals, finding songs, and tuning the reel director (above).
+- Songs: `npm run songs -- known` and `vet` check every song the database already has, including the older experiment's catalogue, before new ones are suggested.
+- Every product photo opens full screen when tapped, the Orders table's rows, the Returns desk, the Finance ledger and the Reels photos included.
+- The scan bench shows what a scan found: the order and each item's photo, name, size and colour, before asking whether it came back sellable.
+
+### 0.1.0
+
+Everything before: Amazon SP-API sync, the 3-stage dispatch bench, Finance and the Ledger, the Returns desk, the PDF label printer, Reels, and the ThinkPad hosting with the Vercel/Render fallback.
 
 ---
 
