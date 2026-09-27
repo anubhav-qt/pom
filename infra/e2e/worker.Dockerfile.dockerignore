@@ -1,0 +1,7 @@
+*
+!package.json
+!package-lock.json
+!edge.ts
+!failover.ts
+!tsconfig.json
+!wrangler.jsonc

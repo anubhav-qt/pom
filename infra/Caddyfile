@@ -1,0 +1,78 @@
+# The gate: the only way into the ThinkPad's apps. See compose.yml.
+#
+# The tunnel's one public hostname (laptop.paribelle.in) lands here. A request gets
+# through when it carries the edge key (only the Worker has it) and the sync says the
+# ThinkPad has caught up with the cloud. Otherwise the Worker gets an answer it knows
+# means "not here", and sends the request to Vercel or Render instead:
+#   503 + x-paribelle-standby   the sync says wait (catching up, halted, an app restarting)
+#   x-paribelle-gate            the gate turned it away or couldn't reach the app,
+#                               so the app never saw it and any method can be retried
+{
+	admin off
+	auto_https disable_redirects
+	skip_install_trust
+}
+
+# $1: the sync pair the app's data is in; $2: the app; $3…: extra reverse_proxy settings.
+(app) {
+	forward_auth sync:8090 {
+		uri /ready/{args[0]}
+		header_up -Upgrade
+		header_up -Connection
+	}
+	reverse_proxy {args[1]} {
+		# The public address the visitor used, not the tunnel's: Next.js checks server
+		# action origins against it and builds redirects from it.
+		header_up Host {http.request.header.X-Paribelle-Host}
+		header_up X-Forwarded-Host {http.request.header.X-Paribelle-Host}
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-For {http.request.header.X-Paribelle-Client-IP}
+		header_up X-Real-IP {http.request.header.X-Paribelle-Client-IP}
+		{args[2:]}
+		flush_interval -1
+	}
+}
+
+:8080 {
+	@stranger not header X-Paribelle-Edge-Key {$EDGE_KEY}
+	handle @stranger {
+		header x-paribelle-gate forbidden
+		respond "forbidden" 403
+	}
+
+	# api.paribelle.in. The key stays on: with it, the API trusts X-Paribelle-Client-IP
+	# for its per-visitor rate limit.
+	@api header X-Paribelle-Host {$API_HOST}
+	handle @api {
+		import app shop api:3001
+	}
+
+	# www.paribelle.in/pom: the OMS.
+	@oms path /pom /pom/*
+	handle @oms {
+		import app oms oms:3000 header_up -X-Paribelle-Edge-Key
+	}
+
+	# The rest of www.paribelle.in: the storefront.
+	handle {
+		import app shop web:3000 header_up -X-Paribelle-Edge-Key
+	}
+
+	handle_errors {
+		# The app (or the sync) wasn't there to take the request at all.
+		@unreachable expression `{err.status_code} == 502 && {err.message}.contains("dial")`
+		header @unreachable x-paribelle-gate unreachable
+		respond "{err.status_code} {err.status_text}"
+	}
+}
+
+# The storefront's own server-side calls to the API, from inside this network (the
+# gate answers to the API's public name here). Straight through: they come from the
+# storefront, not a visitor.
+{$API_HOST}:443 {
+	tls internal
+	reverse_proxy api:3001 {
+		header_up -X-Paribelle-Edge-Key
+		header_up -X-Paribelle-Client-IP
+	}
+}

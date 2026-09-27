@@ -1,0 +1,40 @@
+# Stand-ins for the sync's tests: `local` is the ThinkPad's Postgres (a superuser,
+# as in infra/compose.yml), `cloud` plays Supabase (a plain owner role, not a
+# superuser, like Supabase's `postgres`), `s3` plays R2.
+#   docker compose -f test/compose.yml run --rm --build test
+name: paribelle-sync-test
+
+services:
+  local:
+    image: postgres:17
+    environment: { POSTGRES_USER: paribelle, POSTGRES_PASSWORD: local, POSTGRES_DB: shop }
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "paribelle"], interval: 2s, retries: 30 }
+    tmpfs: ["/var/lib/postgresql/data"]
+
+  cloud:
+    image: postgres:17
+    environment: { POSTGRES_USER: supabase_admin, POSTGRES_PASSWORD: admin, POSTGRES_DB: postgres }
+    command: ["postgres", "-c", "max_connections=200"]
+    volumes: ["./cloud-init.sql:/docker-entrypoint-initdb.d/init.sql:ro"]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "supabase_admin"], interval: 2s, retries: 30 }
+    tmpfs: ["/var/lib/postgresql/data"]
+
+  s3:
+    image: rustfs/rustfs:latest
+    environment: { RUSTFS_ADDRESS: ":9000", RUSTFS_ACCESS_KEY: test-access, RUSTFS_SECRET_KEY: test-secret-key }
+    tmpfs: ["/data"]
+
+  test:
+    build: { context: .., target: test }
+    environment:
+      LOCAL_URL: postgres://paribelle:local@local:5432/shop
+      LOCAL_ADMIN_URL: postgres://paribelle:local@local:5432/postgres
+      CLOUD_URL: postgres://postgres:cloud@cloud:5432/cloud
+      CLOUD_ADMIN_URL: postgres://supabase_admin:admin@cloud:5432/postgres
+      S3_ENDPOINT: http://s3:9000
+      S3_ACCESS_KEY_ID: test-access
+      S3_SECRET_ACCESS_KEY: test-secret-key
+    depends_on:
+      local: { condition: service_healthy }
+      cloud: { condition: service_healthy }
+      s3: { condition: service_started }

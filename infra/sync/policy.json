@@ -1,0 +1,23 @@
+{
+  "shop": {
+    "exclude": ["migrations", "typeorm_metadata"],
+    "localOnly": [],
+    "prune": [
+      { "table": "notifications", "column": "created_at", "keepDays": 90 }
+    ]
+  },
+  "oms": {
+    "exclude": [],
+    "localOnly": [],
+    "prune": [
+      { "table": "reel_job_files", "all": true },
+      { "table": "reel_jobs", "all": true },
+      { "table": "label_print_runs", "column": "created_at", "keepDays": 30 },
+      { "table": "sync_runs", "column": "started_at", "keepDays": 30 },
+      { "table": "parcel_scans", "column": "scanned_at", "keepDays": 180 },
+      { "table": "inventory_ledger", "column": "created_at", "keepDays": 365 },
+      { "table": "finance_transactions", "column": "posted_at", "keepDays": 400 },
+      { "table": "orders", "column": "ordered_at", "keepDays": 400 }
+    ]
+  }
+}

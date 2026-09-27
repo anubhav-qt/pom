@@ -1,0 +1,82 @@
+# End-to-end test of the OMS on the ThinkPad and its fallback, on any machine with Docker:
+#   the ThinkPad: Postgres, the sync (with its order-sync job), the OMS image as 4 processes,
+#                 the gate (this folder's parent)
+#   the fallback: a stand-in for Supabase, and for Vercel (the same OMS image on it)
+#   in front:     the edge Worker under wrangler dev
+#   docker compose -f infra/e2e/compose.yml build && (cd infra/e2e && bash test.sh)
+name: paribelle-e2e
+
+x-oms: &oms
+  build: { context: ../.., target: runtime, args: { RELEASE: e2e } }
+
+services:
+  local:
+    image: postgres:17
+    environment: { POSTGRES_USER: paribelle, POSTGRES_PASSWORD: local, POSTGRES_DB: postgres }
+    volumes: ["../db-init:/docker-entrypoint-initdb.d:ro"]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "paribelle"], interval: 2s, retries: 30 }
+    tmpfs: ["/var/lib/postgresql/data"]
+
+  cloud:
+    image: postgres:17
+    environment: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: cloud, POSTGRES_DB: oms }
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "postgres"], interval: 2s, retries: 30 }
+    tmpfs: ["/var/lib/postgresql/data"]
+
+  # The OMS schema into the "Supabase" copy, and an owner.
+  schema:
+    build: { context: ../.., target: tools }
+    environment: { DATABASE_URL: "postgres://postgres:cloud@cloud:5432/oms" }
+    command:
+      - sh
+      - -c
+      - >
+        npx drizzle-kit push --force &&
+        node -e "const pg=require('pg'),b=require('bcryptjs');const c=new pg.Client(process.env.DATABASE_URL);c.connect().then(()=>c.query(\"insert into users (email,name,password_hash,role) values ('owner@example.com','Owner',\$$1,'owner')\",[b.hashSync('right-password',10)])).then(()=>c.end())"
+    depends_on: { cloud: { condition: service_healthy } }
+
+  sync:
+    build: { context: ../sync, target: runtime }
+    environment:
+      SYNC_PAIRS: oms
+      OMS_LOCAL_URL: postgres://paribelle:local@local:5432/oms
+      OMS_CLOUD_URL: postgres://postgres:cloud@cloud:5432/oms
+      OMS_APP_HEALTH: http://oms:3000/pom/api/health
+      JOB_OMS_ORDERS_URL: http://oms:3000/pom/api/cron/sync
+      JOB_OMS_ORDERS_EVERY: 15s
+      JOB_OMS_ORDERS_TOKEN: e2e-cron-secret
+      JOB_OMS_ORDERS_WHEN: oms
+    volumes: ["backups:/data/backups"]
+    depends_on:
+      local: { condition: service_healthy }
+      cloud: { condition: service_healthy }
+
+  oms:
+    <<: *oms
+    command: ["node", "/cluster.cjs", "server.js"]
+    environment:
+      PROCESSES: "4"
+      AUTH_SECRET: e2e-auth-secret-e2e-auth-secret-0123456789
+      CRON_SECRET: e2e-cron-secret
+      DATABASE_URL: postgres://paribelle:local@local:5432/oms
+    volumes: ["../cluster.cjs:/cluster.cjs:ro"]
+
+  # Vercel: the same app on the cloud database, one process.
+  vercel:
+    <<: *oms
+    environment:
+      RELEASE: vercel
+      AUTH_SECRET: e2e-auth-secret-e2e-auth-secret-0123456789
+      DATABASE_URL: postgres://postgres:cloud@cloud:5432/oms
+
+  gate:
+    image: caddy:2
+    environment: { EDGE_KEY: e2e-edge-key, API_HOST: api.paribelle.in }
+    volumes: ["../Caddyfile:/etc/caddy/Caddyfile:ro"]
+
+  worker:
+    build: { context: ../edge, dockerfile: ../e2e/worker.Dockerfile }
+    ports: ["18787:8787"]
+
+volumes:
+  backups: {}

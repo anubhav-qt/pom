@@ -1,0 +1,23 @@
+// paribelle-edge (edge.ts): the ThinkPad first, Vercel or Render when it can't answer.
+// Deployed by .github/workflows/deploy.yml when the CLOUDFLARE_API_TOKEN secret is set.
+// Its one secret, EDGE_KEY, is set in the dashboard (infra/README.md); until then it
+// passes every request straight to Vercel and Render.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "paribelle-edge",
+  "main": "edge.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "routes": [
+    // www's DNS record (Vercel, proxied) stays: it's where requests go when the ThinkPad can't take them.
+    { "pattern": "www.paribelle.in/*", "zone_name": "paribelle.in" },
+    // No record needed: Cloudflare makes one for the Worker.
+    { "pattern": "api.paribelle.in", "custom_domain": true }
+  ],
+  "vars": {
+    "THINKPAD_ORIGIN": "https://laptop.paribelle.in",
+    "RENDER_ORIGIN": "https://paribelle-backend.onrender.com",
+    "API_HOST": "api.paribelle.in"
+  },
+  "observability": { "enabled": true }
+}
