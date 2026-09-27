@@ -1,7 +1,7 @@
 #!/bin/sh
 # The first start on a ThinkPad, after infra/.env is in place:
 #   infra/first-start.sh
-# Logs in to GitHub's registry, pulls the images, copies both Supabase databases in (once),
+# Pulls the images (logging in first if .env has a GHCR_TOKEN), copies both Supabase databases in (once),
 # starts everything and installs the 5-minute updater. Safe to run again: what's done is skipped.
 set -eu
 cd "$(dirname "$0")"

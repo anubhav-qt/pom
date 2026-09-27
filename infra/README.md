@@ -81,10 +81,9 @@ In this order. Nothing changes for visitors until the last step of 2.
 - **paribelle-web**: nothing. Every push to `main` publishes the storefront's image.
 - **paribelle-backend**: nothing. Every push to `main` publishes the API's image (Render keeps
   building `main` itself, as now).
-- Run each repository's workflow once (Actions › *deploy* / *image* › Run workflow) so the
-  images exist. They're private, which is right: keep them that way.
-- A token for the ThinkPad to pull them: Settings › Developer settings › Personal access
-  tokens › Tokens (classic), only `read:packages`, no expiry → `GHCR_TOKEN`.
+- The images are public, like breader's: they hold the repositories' code (public anyway)
+  and no settings, so the ThinkPad pulls them without logging in. (Were you to make them
+  private, `GHCR_TOKEN` in `.env` is a classic token with `read:packages`.)
 
 ### 2. Cloudflare (the account breader is on)
 
@@ -134,7 +133,7 @@ nano .env          # paste the whole settings file in, save
 ./first-start.sh
 ```
 
-`first-start.sh` logs in to GitHub's registry, pulls the images, copies both Supabase
+`first-start.sh` pulls the images, copies both Supabase
 databases in (the `bootstrap`: it installs the sync's change log in each Supabase database,
 copies it, and records where to continue from), starts everything and installs the updater.
 It ends with each app's state, and `403` from `https://laptop.paribelle.in` (the gate is up

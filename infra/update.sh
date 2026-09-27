@@ -68,7 +68,7 @@ if [ "${1:-}" != --pulled ] && git rev-parse --git-dir >/dev/null 2>&1; then
   [ "$(git rev-parse HEAD)" = "$before" ] || exec /bin/sh "$DIR/update.sh" --pulled
 fi
 
-# The images are private: log in with the token from .env (it may have been replaced).
+# Private images (not the default): log in with GHCR_TOKEN from .env, if it's there.
 setting() { sed -n "s/^$1=//p" .env | tail -n 1 | tr -d "\r\"'"; }
 token=$(setting GHCR_TOKEN)
 [ -z "$token" ] || printf '%s' "$token" |
