@@ -66,7 +66,7 @@ export function DropdownMenu({
           role="menu"
           className={`panel absolute z-20 max-h-[min(70vh,26rem)] w-52 overflow-y-auto p-1.5 ${side === "up" ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`}
           style={{
-            animation: "rise-in 0.15s var(--ease-premium)",
+            animation: "rise-in 0.28s var(--ease-apple)",
             ...(align === "right" ? { right: 0 } : { left: 0 }),
           }}
         >

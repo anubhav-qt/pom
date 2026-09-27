@@ -106,6 +106,22 @@ function ScreenBody({ children }: { children: React.ReactNode }) {
   // real route together instead of one showing new tabs over old content.
   const resolved = resolveScreen(routePath, override);
 
+  // A screen the top switch swaps in fades in (`.screen-in`).
+  // Keyed on the swapped-in screen, or "route" for whatever Next rendered, so
+  // a real navigation between routes never remounts anything it did not
+  // before. The first screen after a load just appears: a fade would only
+  // delay it.
+  const fadeKey = override !== null && resolved === override ? override : "route";
+  const lastKey = useRef<string | null>(null);
+  const fadedKey = useRef<string | null>(null);
+  if (lastKey.current !== null && lastKey.current !== fadeKey) fadedKey.current = fadeKey;
+  lastKey.current = fadeKey;
+  const fade = (node: React.ReactNode) => (
+    <div key={fadeKey} className={fadedKey.current === fadeKey ? "screen-in" : undefined}>
+      {node}
+    </div>
+  );
+
   // An override the cache couldn't back up is dead weight — left alone, it
   // would spring back to life the moment something populates that cache
   // entry later, swapping the screen out from under whoever is reading it.
@@ -123,21 +139,21 @@ function ScreenBody({ children }: { children: React.ReactNode }) {
   if (override === "orders" && resolved === "orders") {
     const params = useOrdersNav.getState().params;
     const data = useOrdersCache.getState().peek(ordersViewKey(params));
-    if (data) return <OrdersWorkspace initialParams={params} initialData={data} />;
+    if (data) return fade(<OrdersWorkspace initialParams={params} initialData={data} />);
   }
 
   if (override === "dashboard" && resolved === "dashboard") {
     const view = peekCurrentDashboard();
-    if (view) return <DashboardWorkspace initialView={view} />;
+    if (view) return fade(<DashboardWorkspace initialView={view} />);
   }
 
   if (override === "returns" && resolved === "returns") {
     const view = peekCurrentReturns();
-    if (view) return <ReturnsDesk initialView={view} initialTab={useReturnsNav.getState().tab} />;
+    if (view) return fade(<ReturnsDesk initialView={view} initialTab={useReturnsNav.getState().tab} />);
   }
 
-  if (override === "pdf-printer" && resolved === "pdf-printer") return <PdfPrinter />;
-  if (override === "reels" && resolved === "reels") return <Reels />;
+  if (override === "pdf-printer" && resolved === "pdf-printer") return fade(<PdfPrinter />);
+  if (override === "reels" && resolved === "reels") return fade(<Reels />);
 
-  return <>{children}</>;
+  return fade(children);
 }

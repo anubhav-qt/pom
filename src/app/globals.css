@@ -21,6 +21,11 @@
   --accent-2: #22d3ee;
   --accent-soft: rgba(14, 165, 233, 0.1);
   --accent-ring: rgba(14, 165, 233, 0.25);
+  /* The accent as text: the sky blue itself is too light to read on white. */
+  --accent-ink: #0b7fb0;
+  /* The soft wash an unfilled control gets under the pointer, and under a press. */
+  --tint-hover: color-mix(in srgb, var(--accent) 8%, transparent);
+  --tint-press: color-mix(in srgb, var(--accent) 14%, transparent);
 
   --danger: #e0455a;
   --danger-soft: rgba(224, 69, 90, 0.1);
@@ -39,6 +44,10 @@
   --panel-highlight: rgba(255, 255, 255, 0.7);
 
   --ease-premium: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Apple's sheet curve: quick to start, long soft landing. For things that move. */
+  --ease-apple: cubic-bezier(0.32, 0.72, 0, 1);
+  /* A small overshoot, so a pressed button springs back instead of just returning. */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /*
@@ -116,54 +125,50 @@ body {
   }
 
   /* -------------------------------------------------------------- buttons -- */
+  /* Unfilled, like the nav icons: no fill and no border at rest, a soft wash
+     that fades in under the pointer, and a press that sinks and springs back.
+     The main action (.btn-primary) stands out by colour, never by a fill.
+     The border stays (transparent) so every button keeps its old size. */
   .btn {
     @apply inline-flex items-center justify-center gap-1.5 rounded-xl border px-3.5 py-2 text-sm font-medium;
-    background: var(--panel);
-    border-color: var(--border);
+    background: transparent;
+    border-color: transparent;
     color: var(--text);
-    box-shadow: var(--shadow-xs);
+    -webkit-user-select: none;
+    user-select: none;
     transition:
-      transform 0.15s var(--ease-premium),
-      box-shadow 0.15s var(--ease-premium),
-      border-color 0.15s ease,
-      background 0.15s ease,
-      opacity 0.15s ease;
+      transform 0.5s var(--ease-spring),
+      background-color 0.3s var(--ease-apple),
+      color 0.2s ease,
+      box-shadow 0.3s var(--ease-apple),
+      opacity 0.2s ease;
   }
   .btn:hover:not(:disabled) {
-    border-color: var(--border-strong);
-    box-shadow: var(--shadow-sm);
-    transform: translateY(-1px);
+    background: var(--tint-hover);
   }
   .btn:active:not(:disabled) {
-    transform: translateY(0);
+    background: var(--tint-press);
+    transform: scale(0.96);
+    transition-duration: 0.1s;
+    transition-timing-function: ease-out;
   }
   .btn:disabled {
-    @apply cursor-not-allowed opacity-45;
+    @apply cursor-not-allowed opacity-40;
   }
   .btn:focus-visible {
     outline: none;
-    box-shadow:
-      var(--shadow-xs),
-      0 0 0 3px var(--accent-ring);
+    box-shadow: 0 0 0 3px var(--accent-ring);
   }
 
   .btn-primary {
-    @apply text-white border-transparent;
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    box-shadow:
-      var(--shadow-xs),
-      0 6px 16px -6px color-mix(in srgb, var(--accent) 55%, transparent);
+    color: var(--accent-ink);
+    font-weight: 600;
   }
   .btn-primary:hover:not(:disabled) {
-    filter: brightness(1.06);
-    box-shadow:
-      var(--shadow-sm),
-      0 10px 22px -8px color-mix(in srgb, var(--accent) 60%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
   }
-  .btn-primary:focus-visible {
-    box-shadow:
-      var(--shadow-xs),
-      0 0 0 3px var(--accent-ring);
+  .btn-primary:active:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 17%, transparent);
   }
 
   /* --------------------------------------------------------------- inputs -- */
@@ -173,9 +178,9 @@ body {
     border-color: var(--border);
     color: var(--text);
     transition:
-      border-color 0.15s ease,
-      box-shadow 0.15s ease,
-      background 0.15s ease;
+      border-color 0.2s ease,
+      box-shadow 0.35s var(--ease-apple),
+      background 0.2s ease;
   }
   .input::placeholder {
     color: var(--muted-2);
@@ -261,11 +266,80 @@ body {
     box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--accent) 55%, transparent);
   }
   .nav-icon-btn {
-    @apply relative flex h-9 w-9 items-center justify-center rounded-full transition-colors;
+    @apply relative flex h-9 w-9 items-center justify-center rounded-full;
     color: var(--text);
+    transition:
+      transform 0.5s var(--ease-spring),
+      background-color 0.3s var(--ease-apple);
   }
   .nav-icon-btn:hover {
     background: var(--accent-soft);
+  }
+  .nav-icon-btn:active {
+    transform: scale(0.92);
+    transition-duration: 0.1s;
+  }
+
+  /* ------------------------------------------------------ sliding thumb -- */
+  /* The raised pill behind the chosen item of a toggle (Segmented, the
+     header's screen switch). It glides to the new choice, the way iOS
+     segmented controls move, instead of blinking across. */
+  .seg-thumb {
+    position: absolute;
+    left: 0;
+    top: 0;
+    border-radius: 7px;
+    background: var(--panel);
+    box-shadow:
+      0 1px 2px rgba(13, 60, 82, 0.08),
+      0 3px 8px -2px rgba(13, 60, 82, 0.12);
+    pointer-events: none;
+    transition:
+      transform 0.45s var(--ease-apple),
+      width 0.45s var(--ease-apple),
+      height 0.45s var(--ease-apple);
+  }
+  .seg-item {
+    position: relative;
+    z-index: 1;
+    transition:
+      color 0.25s ease,
+      transform 0.5s var(--ease-spring);
+  }
+  .seg-item:active {
+    transform: scale(0.95);
+    transition-duration: 0.1s;
+  }
+
+  /* A screen swapped in from the top switch fades in. Opacity
+     only, and not kept once finished: a transform left behind would become
+     the frame for every fixed bar and sheet inside the screen. */
+  .screen-in {
+    animation: screen-in 0.32s var(--ease-apple) backwards;
+  }
+}
+
+@keyframes screen-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Motion off when the device asks: no press spring, no glide, no fade. */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .nav-icon-btn,
+  .seg-item,
+  .seg-thumb {
+    transition-duration: 0.01ms !important;
+  }
+  .btn:active:not(:disabled),
+  .nav-icon-btn:active,
+  .seg-item:active {
+    transform: none;
+  }
+  .screen-in {
+    animation: none;
   }
 }
 
@@ -497,7 +571,7 @@ input[type="checkbox"]:disabled {
 @keyframes rise-in {
   from {
     opacity: 0;
-    transform: translateY(6px) scale(0.98);
+    transform: translateY(8px) scale(0.97);
   }
   to {
     opacity: 1;

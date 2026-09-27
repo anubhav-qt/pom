@@ -59,7 +59,7 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
         className="panel relative flex h-full w-full flex-col overflow-hidden rounded-none sm:h-auto sm:rounded-2xl"
-        style={{ maxWidth: width, animation: "rise-in 0.18s var(--ease-premium)" }}
+        style={{ maxWidth: width, animation: "rise-in 0.28s var(--ease-apple)" }}
       >
         <div
           className={`shrink-0 items-center justify-between border-b px-5 py-4 ${headerOnDesktopOnly ? "hidden sm:flex" : "flex"}`}
