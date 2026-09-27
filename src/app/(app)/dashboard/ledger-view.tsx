@@ -12,6 +12,7 @@ import { ledgerKey, useLedgerCache, useLedgerNav } from "@/lib/stores/ledger-cac
 import { useOrdersCache } from "@/lib/stores/orders-cache";
 
 import { OrderThumb } from "../orders/order-table";
+import { CHANNEL_LABEL, payerWord, type FinanceChannel } from "./channels";
 import { getLedger, saveOrderNote, setProductCost, type LedgerData } from "./ledger-actions";
 import type { Basis } from "./range";
 
@@ -19,7 +20,7 @@ import type { Basis } from "./range";
  * The ledger. Two views of the same money:
  *
  *  - Products: one row per product (every size and colour together) with its
- *    picture, what Amazon paid for it, and the one cost price we enter. It costs
+ *    picture, what the marketplace paid for it, and the one cost price we enter. It costs
  *    orders that have no cost yet; orders already costed keep theirs.
  *  - Orders: one row per order, read-only apart from a note, with cost and
  *    profit worked out from those product cost prices.
@@ -80,14 +81,14 @@ function StatusPill({ status }: { status: LedgerStatus }) {
   );
 }
 
-export function LedgerView({ basis }: { basis: Basis }) {
+export function LedgerView({ basis, channel }: { basis: Basis; channel: FinanceChannel }) {
   const from = useLedgerNav((s) => s.from);
   const to = useLedgerNav((s) => s.to);
   const view = useLedgerNav((s) => s.view);
   const setNav = useLedgerNav((s) => s.set);
   const syncStamp = useOrdersCache((s) => s.syncStamp);
 
-  const [data, setData] = useState<LedgerData | null>(() => useLedgerCache.getState().peek(ledgerKey(from, to, basis)));
+  const [data, setData] = useState<LedgerData | null>(() => useLedgerCache.getState().peek(ledgerKey(from, to, basis, channel)));
   const [loading, setLoading] = useState(data === null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useKept<"all" | LedgerStatus>("ledger:filter", "all");
@@ -95,7 +96,9 @@ export function LedgerView({ basis }: { basis: Basis }) {
   const [details, setDetails] = useKept("ledger:details", false);
   const [exporting, setExporting] = useState<null | "csv" | "xlsx">(null);
 
-  const key = ledgerKey(from, to, basis);
+  const key = ledgerKey(from, to, basis, channel);
+  /** "Amazon net", or "Marketplace net" with every marketplace counted. */
+  const payer = payerWord(channel);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,7 +109,7 @@ export function LedgerView({ basis }: { basis: Basis }) {
 
     cache
       .load(key, async () => {
-        const res = await getLedger({ from, to, basis });
+        const res = await getLedger({ from, to, basis, channel });
         if (!res.ok) throw new Error(res.error);
         return { products: res.products, orders: res.orders };
       })
@@ -134,7 +137,7 @@ export function LedgerView({ basis }: { basis: Basis }) {
   async function refetch() {
     useLedgerCache.getState().clear();
     useDashboardCache.getState().clear();
-    const res = await getLedger({ from, to, basis });
+    const res = await getLedger({ from, to, basis, channel });
     if (res.ok) {
       const fresh = { products: res.products, orders: res.orders };
       useLedgerCache.getState().put(key, fresh);
@@ -205,11 +208,12 @@ export function LedgerView({ basis }: { basis: Basis }) {
     try {
       const byProduct = view === "products";
       const header = byProduct
-        ? ["Product", "SKUs", "Units", "Amazon net", "Cost per unit", "Profit"]
-        : ["Order ID", "Order date", "Item", "Status", "Fees", "Postage", "Refunded", "Amazon net", "Cost", "Profit", "Note"];
+        ? ["Product", "SKUs", "Units", `${payer} net`, "Cost per unit", "Profit"]
+        : ["Marketplace", "Order ID", "Order date", "Item", "Status", "Fees", "Postage", "Refunded", `${payer} net`, "Cost", "Profit", "Note"];
       const body = byProduct
         ? shownProducts.map((p) => [p.name, p.skus.join(" "), p.units, p.net, p.cost ?? "", p.profit ?? ""])
         : shownOrders.map((r) => [
+            CHANNEL_LABEL[r.channel],
             r.externalOrderId,
             r.orderedAt.slice(0, 10),
             r.item,
@@ -222,7 +226,7 @@ export function LedgerView({ basis }: { basis: Basis }) {
             r.profit ?? "",
             r.note,
           ]);
-      const name = `paribelle-${byProduct ? "products" : "orders"}-${from}_to_${to}`;
+      const name = `paribelle-${channel === "all" ? "" : `${channel}-`}${byProduct ? "products" : "orders"}-${from}_to_${to}`;
       if (kind === "csv") {
         const esc = (v: unknown) => {
           const s = String(v ?? "");
@@ -329,13 +333,15 @@ export function LedgerView({ basis }: { basis: Basis }) {
           <Empty title={view === "products" ? "No products found" : "No orders in this range"} />
         </div>
       ) : view === "products" ? (
-        <ProductsTable rows={shownProducts} totals={productTotals} onSaved={refetch} />
+        <ProductsTable rows={shownProducts} totals={productTotals} onSaved={refetch} payer={payer} />
       ) : (
         <OrdersTable
           rows={shownOrders}
           totals={orderTotals}
           details={details}
           onNote={patchNote}
+          payer={payer}
+          showChannel={channel === "all" && new Set(orders.map((r) => r.channel)).size > 1}
         />
       )}
     </div>
@@ -381,10 +387,13 @@ function ProductsTable({
   rows,
   totals,
   onSaved,
+  payer,
 }: {
   rows: ProductLedgerRow[];
   totals: Totals;
   onSaved: () => Promise<void>;
+  /** Whose net: "Amazon", or "Marketplace" for all of them. */
+  payer: string;
 }) {
   return (
     <>
@@ -394,7 +403,7 @@ function ProductsTable({
             <tr>
               <th>Product</th>
               <th className="text-right">Units</th>
-              <th className="text-right">Amazon net</th>
+              <th className="text-right">{payer} net</th>
               <th className="text-right">Cost per unit</th>
               <th className="text-right">Profit</th>
             </tr>
@@ -440,7 +449,7 @@ function ProductsTable({
             <ProductInfo p={p} />
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div>
-                <div className="muted text-[10px] uppercase tracking-wider">Amazon net</div>
+                <div className="muted text-[10px] uppercase tracking-wider">{payer} net</div>
                 <div className="font-semibold tabular-nums" style={{ color: amountColor(p.net) }}>
                   {rupees(p.net)}
                 </div>
@@ -490,11 +499,16 @@ function OrdersTable({
   totals,
   details,
   onNote,
+  payer,
+  showChannel,
 }: {
   rows: LedgerRow[];
   totals: Totals;
   details: boolean;
   onNote: (orderId: number, note: string) => void;
+  payer: string;
+  /** Name each order's marketplace (all of them are counted, and more than one is here). */
+  showChannel: boolean;
 }) {
   const colSpan = details ? 6 : 3;
   return (
@@ -513,7 +527,7 @@ function OrdersTable({
                   <th className="text-right">Refunded</th>
                 </>
               ) : null}
-              <th className="text-right">Amazon net</th>
+              <th className="text-right">{payer} net</th>
               <th className="text-right">Cost</th>
               <th className="text-right">Profit</th>
               <th>Note</th>
@@ -527,7 +541,8 @@ function OrdersTable({
                 </td>
                 <td className="max-w-[18rem]">
                   <ItemCell title={r.item} count={r.itemCount} />
-                  <div className="muted font-mono text-[10px]" title="Amazon order ID">
+                  <div className="muted font-mono text-[10px]" title={`${CHANNEL_LABEL[r.channel]} order ID`}>
+                    {showChannel ? <span className="font-sans font-medium">{CHANNEL_LABEL[r.channel]} · </span> : null}
                     {r.externalOrderId}
                   </div>
                 </td>
@@ -580,13 +595,14 @@ function OrdersTable({
                 <ItemCell title={r.item} count={r.itemCount} />
                 <div className="muted mt-0.5 text-[11px]">
                   {new Date(r.orderedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                  {showChannel ? ` · ${CHANNEL_LABEL[r.channel]}` : ""}
                 </div>
               </div>
               <StatusPill status={r.status} />
             </div>
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div>
-                <div className="muted text-[10px] uppercase tracking-wider">Amazon net</div>
+                <div className="muted text-[10px] uppercase tracking-wider">{payer} net</div>
                 <div className="font-semibold tabular-nums" style={{ color: amountColor(r.net) }}>{rupees(r.net)}</div>
                 {r.held !== 0 ? <div className="muted text-[10px]">{rupees(r.held)} held</div> : null}
               </div>

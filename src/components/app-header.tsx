@@ -182,10 +182,10 @@ export function AppHeader({
 /* Band 1 — Dashboard / Orders switch                                         */
 /* -------------------------------------------------------------------------- */
 
-/** `/dashboard` with only the non-default range, basis and tab in the query, matching page.tsx. */
+/** `/dashboard` with only the non-default range, basis, tab and channel in the query, matching page.tsx. */
 function dashboardHref(): string {
-  const { range, basis, tab } = useDashboardNav.getState();
-  return dashboardUrl(range, basis, tab);
+  const { range, basis, tab, channel } = useDashboardNav.getState();
+  return dashboardUrl(range, basis, tab, channel);
 }
 
 function ordersHref(): string {

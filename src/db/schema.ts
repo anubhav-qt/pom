@@ -679,6 +679,42 @@ export const reelJobFiles = pgTable(
   (t) => [uniqueIndex("reel_job_files_slot_idx").on(t.jobId, t.kind, t.idx)],
 );
 
+/**
+ * "Do you like this reel?", one answer per finished render. Jobs are deleted
+ * after two days, so each answer keeps its own copy of what the reel was: the
+ * song, the scenes, Gemini's direction and picks, and which model and prompt
+ * version directed it. That is what docs/reels/feedback.md reads to improve
+ * the prompt in src/lib/reels/select.ts.
+ */
+export const reelFeedback = pgTable(
+  "reel_feedback",
+  {
+    id: serial("id").primaryKey(),
+    /** No foreign keys to the job or the song: both can go, the answer stays. */
+    jobId: integer("job_id").notNull(),
+    /** The render the answer is about: a remake is a new version, and gets its own answer. */
+    version: integer("version").notNull(),
+    liked: boolean("liked").notNull(),
+    /** photos | video */
+    kind: text("kind").notNull(),
+    /** Gemini directed it (else the rules did). */
+    directed: boolean("directed").notNull().default(false),
+    /** `PROMPT_VERSION` in select.ts when Gemini directed it. */
+    promptVersion: text("prompt_version"),
+    model: text("model"),
+    trackId: integer("track_id"),
+    /** What the reel was (`ReelFeedbackSnapshot` in src/lib/reels/feedback.ts). */
+    reel: jsonb("reel").notNull(),
+    createdBy: integer("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("reel_feedback_job_version_idx").on(t.jobId, t.version),
+    index("reel_feedback_created_idx").on(t.createdAt),
+  ],
+);
+
 /* -------------------------------------------------------------------------- */
 /* Sync bookkeeping                                                           */
 /* -------------------------------------------------------------------------- */

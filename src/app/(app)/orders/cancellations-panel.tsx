@@ -4,7 +4,6 @@ import { ItemTitle } from "@/components/item-title";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { ImageLightbox } from "@/components/image-lightbox";
 import { ChannelTag, StatusBadge, Spinner } from "@/components/ui";
 import { Empty } from "@/components/ui";
 import type { OrderStatus } from "@/db/schema";
@@ -38,7 +37,6 @@ export function CancellationsPanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   function act(eventId: number, fn: () => Promise<{ ok: boolean; error?: string }>) {
     setBusyId(eventId);
@@ -85,7 +83,6 @@ export function CancellationsPanel({
                 onReceived={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: true }))}
                 onNotReturning={() => act(r.eventId, () => checkInCancellation(r.eventId, { itemBack: false }))}
                 onReopen={() => act(r.eventId, () => reopenCancellation(r.eventId))}
-                onOpenImage={(src, alt) => setLightbox({ src, alt })}
               />
             ))}
           </div>
@@ -111,15 +108,7 @@ export function CancellationsPanel({
                 <tr key={r.eventId}>
                   <td>
                     <div className="relative w-11">
-                      <span
-                        onClick={(e) => {
-                          if (!thumbSrc) return;
-                          e.stopPropagation();
-                          setLightbox({ src: thumbSrc, alt: thumbAlt });
-                        }}
-                      >
-                        <OrderThumb src={thumbSrc} alt={thumbAlt} />
-                      </span>
+                      <OrderThumb src={thumbSrc} alt={thumbAlt} />
                       {r.items.length > 1 ? (
                         <span
                           className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
@@ -199,10 +188,6 @@ export function CancellationsPanel({
           </div>
         </>
       )}
-
-      {lightbox ? (
-        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
-      ) : null}
     </div>
   );
 }
@@ -218,7 +203,6 @@ export function CancellationCard({
   onReceived,
   onNotReturning,
   onReopen,
-  onOpenImage,
   onPick,
 }: {
   record: CancellationRecord;
@@ -227,7 +211,6 @@ export function CancellationCard({
   onReceived?: () => void;
   onNotReturning?: () => void;
   onReopen?: () => void;
-  onOpenImage: (src: string, alt: string) => void;
   /**
    * Picker mode: this card is a row in the goods-in "no match" picker, not
    * the Cancellations tab itself. Tapping it selects the record instead of
@@ -240,14 +223,7 @@ export function CancellationCard({
 
   return (
     <div className="panel flex gap-3 p-3">
-      <span
-        className="relative w-14 shrink-0"
-        onClick={(e) => {
-          if (!thumbSrc) return;
-          e.stopPropagation();
-          onOpenImage(thumbSrc, thumbAlt);
-        }}
-      >
+      <span className="relative w-14 shrink-0">
         <OrderThumb src={thumbSrc} alt={thumbAlt} size="h-14 w-14" />
         {record.items.length > 1 ? (
           <span

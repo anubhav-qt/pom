@@ -2,12 +2,14 @@ import "server-only";
 
 import { sql, type SQL } from "drizzle-orm";
 
+import { marketplacesOf, payerWord, type FinanceChannel, type Marketplace } from "@/app/(app)/dashboard/channels";
 import { db } from "@/db";
 import { friendlyItem } from "@/lib/friendly-item";
 import { productFamilyKey } from "@/lib/finance-queries";
 
 /**
- * The Finance overview's numbers: real profit on Amazon orders.
+ * The Finance overview's numbers: real profit on marketplace orders, for one
+ * marketplace or all of them together (`FinanceChannel`).
  *
  * Every order counts in the range it was placed in, with everything that later
  * happened to it (sale, fees, refund, RTO), so a short range never looks good
@@ -16,6 +18,11 @@ import { productFamilyKey } from "@/lib/finance-queries";
  *
  *   Amazon net = every line Amazon posted, paid or still held
  *   Profit     = Amazon net - cost of the goods customers kept
+ *
+ * Flipkart's and Meesho's payments are written into the same lines, typed and
+ * signed the way Amazon's are (docs/portals/procedure.md), so
+ * everything below reads them the same way; "Amazon net" is then that
+ * marketplace's net, or the marketplaces' together.
  *
  * Returned goods count as back on the shelf at cost. Most returns are never
  * checked in, so `returns.worst` is the profit if none of those came back.
@@ -118,6 +125,8 @@ export interface ProductRow {
 }
 
 export interface ProfitView {
+  /** Whose net and fees these are: "Amazon", or "Marketplace" with every marketplace counted. */
+  payer: string;
   /** Orders placed in the range and what happened to them. */
   orders: {
     placed: number;
@@ -174,8 +183,10 @@ export interface ProfitData {
   money: MoneyToday;
   /** Months with orders, newest first, for the range picker. */
   months: string[];
-  /** Rows in finance_transactions: zero means the first sync has not run. */
+  /** Rows in finance_transactions for these marketplaces: zero means no money has come in yet. */
   lineCount: number;
+  /** Marketplaces with any orders or money at all, for the channel switch. */
+  channels: Marketplace[];
 }
 
 const n = (v: unknown) => (v == null ? 0 : Number(v));
@@ -193,8 +204,14 @@ function readBuckets(row: Record<string, unknown>, prefix: string): Buckets {
   return Object.fromEntries(BUCKETS.map((b) => [b, n(row[`${prefix}_${b}`])])) as Buckets;
 }
 
-async function load(): Promise<{ orders: OrderRec[]; loose: LooseLine[]; transfers: LooseLine[]; lineCount: number }> {
-  const [orderRows, itemRows, looseRows, countRows] = await Promise.all([
+async function load(
+  marketplaces: Marketplace[],
+): Promise<{ orders: OrderRec[]; loose: LooseLine[]; transfers: LooseLine[]; lineCount: number; channels: Marketplace[] }> {
+  const these = sql.join(
+    marketplaces.map((c) => sql`${c}`),
+    sql`, `,
+  );
+  const [orderRows, itemRows, looseRows, countRows, channelRows] = await Promise.all([
     db.execute(sql`
       SELECT o.id, o.status, o.ordered_at,
         to_char(o.ordered_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') AS month,
@@ -215,29 +232,40 @@ async function load(): Promise<{ orders: OrderRec[]; loose: LooseLine[]; transfe
       LEFT JOIN finance_transactions t
         ON t.external_order_id = o.external_order_id AND t.channel_account_id = o.channel_account_id
        AND t.status <> 'DEFERRED_RELEASED' AND t.type <> 'Transfer'
-      WHERE o.channel = 'amazon'
+      WHERE o.channel IN (${these})
       GROUP BY o.id
     `),
     db.execute(sql`
       SELECT oi.order_id, oi.quantity, oi.unit_price, oi.product_id,
         COALESCE(p.name, NULLIF(oi.title, ''), oi.external_sku) AS name, p.cost_price
       FROM order_items oi
-      JOIN orders o ON o.id = oi.order_id AND o.channel = 'amazon'
+      JOIN orders o ON o.id = oi.order_id AND o.channel IN (${these})
       LEFT JOIN products p ON p.id = oi.product_id
       WHERE oi.cancelled = false
     `),
     // Lines that belong to no order: ads, account fees, tax withheld, payouts.
+    // An account is one marketplace's, so matching the account matches the channel.
     db.execute(sql`
       SELECT t.type, COALESCE(t.description, '') AS description, t.status, t.total, t.tax, t.posted_at,
         to_char(t.posted_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') AS month
       FROM finance_transactions t
+      JOIN channel_accounts ca ON ca.id = t.channel_account_id AND ca.channel IN (${these})
       WHERE t.status <> 'DEFERRED_RELEASED'
         AND NOT EXISTS (
           SELECT 1 FROM orders o
-          WHERE o.channel = 'amazon' AND o.external_order_id = t.external_order_id AND o.channel_account_id = t.channel_account_id
+          WHERE o.external_order_id = t.external_order_id AND o.channel_account_id = t.channel_account_id
         )
     `),
-    db.execute(sql`SELECT COUNT(*)::int AS n FROM finance_transactions`),
+    db.execute(sql`
+      SELECT COUNT(*)::int AS n FROM finance_transactions t
+      JOIN channel_accounts ca ON ca.id = t.channel_account_id AND ca.channel IN (${these})
+    `),
+    db.execute(sql`
+      SELECT ca.channel FROM channel_accounts ca
+      WHERE EXISTS (SELECT 1 FROM orders o WHERE o.channel_account_id = ca.id)
+         OR EXISTS (SELECT 1 FROM finance_transactions t WHERE t.channel_account_id = ca.id)
+      GROUP BY ca.channel
+    `),
   ]);
 
   const items = new Map<number, OrderRec["items"]>();
@@ -332,6 +360,7 @@ async function load(): Promise<{ orders: OrderRec[]; loose: LooseLine[]; transfe
     loose: all.filter((t) => t.type !== "Transfer"),
     transfers: all.filter((t) => t.type === "Transfer"),
     lineCount: n(countRows.rows[0]?.n),
+    channels: channelRows.rows.map((r) => String(r.channel) as Marketplace),
   };
 }
 
@@ -350,7 +379,7 @@ function returnSwing(orders: OrderRec[]): number {
 function compute(
   rows: OrderRec[],
   loose: LooseLine[],
-  ctx: { usualRate: number | null; swing: number; windowStart: number },
+  ctx: { usualRate: number | null; swing: number; windowStart: number; payer: string },
 ): ProfitView {
   const count = (f: Fate) => rows.filter((r) => r.fate === f).length;
   const out = rows.filter((r) => GOODS_OUT.has(r.fate));
@@ -436,7 +465,7 @@ function compute(
     perOrder = {
       rows: [
         { key: "sale", label: "Customer paid, with GST", value: per(parts.sale) },
-        { key: "amazon", label: "Amazon fees and postage", value: per(parts.amazon) },
+        { key: "amazon", label: `${ctx.payer} fees and postage`, value: per(parts.amazon) },
         { key: "cost", label: "Cost of the goods", value: per(parts.cost) },
         { key: "returns", label: "Returns", value: per(parts.returns) },
         { key: "ads", label: "Ads", value: per(parts.ads) },
@@ -559,12 +588,13 @@ function compute(
     { key: "refunds", label: "Refunds", value: W.refunds, note: `${(returned + rto).toLocaleString("en-IN")} returns and RTOs` },
     { key: "postage", label: "Postage", value: W.postage + W.undeliverable },
     { key: "ads", label: "Ads", value: W.ads },
-    { key: "fees", label: "Amazon fees", value: W.fees + W.refundCommission + W.accountFees },
+    { key: "fees", label: `${ctx.payer} fees`, value: W.fees + W.refundCommission + W.accountFees },
     { key: "tcs", label: "TCS and TDS", value: W.tcs, note: "claimable" },
     { key: "promo", label: "Promotions", value: W.promo },
   ];
 
   return {
+    payer: ctx.payer,
     orders: {
       placed,
       cancelled,
@@ -621,8 +651,8 @@ function compute(
   };
 }
 
-export async function getProfitData(from: Date, to: Date): Promise<ProfitData> {
-  const { orders, loose, transfers, lineCount } = await load();
+export async function getProfitData(from: Date, to: Date, channel: FinanceChannel = "all"): Promise<ProfitData> {
+  const { orders, loose, transfers, lineCount, channels } = await load(marketplacesOf(channel));
   const windowStart = Date.now() - RETURN_WINDOW_DAYS * 86_400_000;
 
   // The usual return rate, from orders old enough to have finished returning.
@@ -636,10 +666,10 @@ export async function getProfitData(from: Date, to: Date): Promise<ProfitData> {
   const view = compute(
     orders.filter((r) => r.orderedAt >= f && r.orderedAt < t),
     loose.filter((l) => l.postedAt >= f && l.postedAt < t),
-    { usualRate, swing: returnSwing(orders), windowStart },
+    { usualRate, swing: returnSwing(orders), windowStart, payer: payerWord(channel) },
   );
 
-  /* ------------------------------------------------- money with Amazon, today */
+  /* ------------------------------------- money with the marketplace(s), today */
   const paid = sum(transfers, (x) => x.total);
   const held = sum(orders, (r) => r.held) + sum(loose.filter((l) => l.status === "DEFERRED"), (l) => l.total);
   const netAll = sum(orders, (r) => r.net) + sum(loose, (l) => l.total);
@@ -664,5 +694,6 @@ export async function getProfitData(from: Date, to: Date): Promise<ProfitData> {
     },
     months: [...new Set(orders.map((r) => r.month))].sort().reverse(),
     lineCount,
+    channels,
   };
 }

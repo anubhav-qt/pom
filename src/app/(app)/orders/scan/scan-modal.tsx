@@ -1,12 +1,14 @@
 "use client";
 
-import { CenteredSpinner, Spinner } from "@/components/ui";
+import { CenteredSpinner, ChannelTag, Spinner } from "@/components/ui";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
-import { ImageLightbox } from "@/components/image-lightbox";
+import { ItemTitle } from "@/components/item-title";
 import { Modal } from "@/components/modal";
+import type { Channel } from "@/db/schema";
 
 import { CancellationCard } from "../cancellations-panel";
+import { OrderThumb } from "../order-table";
 import {
   scanCheckIn,
   scanListAwaitingCheckIn,
@@ -46,6 +48,11 @@ interface CheckInTarget {
   externalOrderId: string;
   kind: "cancellation" | "return";
   recordId: number;
+  channel: Channel;
+  /** RTO, Cancelled, Customer return or Exchange. */
+  label: string;
+  /** What should be in the parcel, so it can be checked against what is in hand. */
+  items: { sku: string; title: string | null; quantity: number; imageUrl: string | null }[];
 }
 
 /** A mouse-and-keyboard device, where a bench scanner types into the box. */
@@ -69,7 +76,6 @@ export function ScanModal({
   const [unmapped, setUnmapped] = useState<string | null>(null);
   /** Set once a pending cancellation/RTO/return is confirmed, ready for the sellable question. */
   const [checkInTarget, setCheckInTarget] = useState<CheckInTarget | null>(null);
-  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const nextId = useRef(1);
@@ -129,6 +135,9 @@ export function ScanModal({
               externalOrderId: res.order.externalOrderId,
               kind: res.inbound.kind,
               recordId: res.inbound.recordId,
+              channel: res.order.channel,
+              label: res.inbound.label,
+              items: res.order.items,
             });
           }
         } catch (err) {
@@ -283,7 +292,6 @@ export function ScanModal({
           <CheckInPicker
             code={unmapped}
             busy={busy}
-            onOpenImage={(src, alt) => setLightbox({ src, alt })}
             onPicked={(target) => {
               push(target.externalOrderId, "Matched", "ok");
               setUnmapped(null);
@@ -294,6 +302,7 @@ export function ScanModal({
 
         {checkInTarget ? (
           <div className="flex flex-col gap-2.5">
+            <FoundOrder target={checkInTarget} />
             <span className="text-[13px] font-medium">Did the goods come back sellable?</span>
             <div className="flex flex-col gap-2 sm:flex-row">
               <button
@@ -325,10 +334,6 @@ export function ScanModal({
 
         {log.length > 0 ? <SessionLog log={log} /> : null}
       </div>
-
-      {lightbox ? (
-        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
-      ) : null}
     </Modal>
   );
 }
@@ -347,12 +352,10 @@ type AwaitingRecord = Awaited<ReturnType<typeof scanListAwaitingCheckIn>>[number
 function CheckInPicker({
   code,
   busy,
-  onOpenImage,
   onPicked,
 }: {
   code: string;
   busy: boolean;
-  onOpenImage: (src: string, alt: string) => void;
   onPicked: (target: CheckInTarget) => void;
 }) {
   const [records, setRecords] = useState<AwaitingRecord[] | null>(null);
@@ -387,6 +390,9 @@ function CheckInPicker({
         externalOrderId: record.externalOrderId,
         kind: "cancellation",
         recordId: record.eventId,
+        channel: record.channel as Channel,
+        label: record.toStatus === "rto" ? "RTO" : "Cancelled",
+        items: record.items,
       });
     } finally {
       setPicking(null);
@@ -428,7 +434,6 @@ function CheckInPicker({
                   record={r}
                   resolved={false}
                   busy={locked}
-                  onOpenImage={onOpenImage}
                   onPick={locked ? undefined : () => pick(r)}
                 />
               ))
@@ -436,6 +441,45 @@ function CheckInPicker({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * What the scan matched: the order and every item that should be in the
+ * parcel, with its photo (tap for full screen), name, size and colour, so
+ * whoever is holding it can check it is the right thing before answering.
+ */
+function FoundOrder({ target }: { target: CheckInTarget }) {
+  return (
+    <div
+      className="flex flex-col gap-3 rounded-xl px-4 py-3"
+      style={{ border: "1px solid rgba(16,185,129,0.4)", background: "var(--ok-soft)" }}
+      role="status"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="var(--ok)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+        <span className="text-[13.5px] font-semibold">Order found</span>
+        <span className="muted text-xs">· {target.label}</span>
+        <span className="ml-auto flex items-center gap-2">
+          <ChannelTag channel={target.channel} />
+          <span className="font-mono text-xs">{target.externalOrderId}</span>
+        </span>
+      </div>
+
+      {target.items.map((it, i) => (
+        <div key={i} className="flex gap-3">
+          <OrderThumb src={it.imageUrl} alt={it.title ?? it.sku} size="h-16 w-16 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <ItemTitle title={it.title} />
+            <div className="muted mt-0.5 text-[11px]">
+              <span className="tabular-nums">{it.quantity}×</span> <span className="font-mono">{it.sku}</span>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

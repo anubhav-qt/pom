@@ -13,6 +13,7 @@ import {
 } from "@/lib/finance-queries";
 import { inArray } from "drizzle-orm";
 
+import { DEFAULT_CHANNEL, isFinanceChannel, marketplacesOf, type FinanceChannel } from "./channels";
 import { DEFAULT_BASIS, isBasis, type Basis } from "./range";
 
 export interface LedgerData {
@@ -23,14 +24,15 @@ export interface LedgerData {
 }
 
 /**
- * The ledger for a date range. `from` and `to` are calendar days (YYYY-MM-DD)
- * and `to` is inclusive; the range is read in India time so a day on the sheet
- * is a day on the wall.
+ * The ledger for a date range and marketplace (or all of them). `from` and
+ * `to` are calendar days (YYYY-MM-DD) and `to` is inclusive; the range is read
+ * in India time so a day on the sheet is a day on the wall.
  */
 export async function getLedger(input: {
   from: string;
   to: string;
   basis?: string;
+  channel?: string;
 }): Promise<({ ok: true } & LedgerData) | { ok: false; error: string }> {
   await requireUser();
 
@@ -45,10 +47,11 @@ export async function getLedger(input: {
   }
 
   const basis: Basis = isBasis(input.basis) ? input.basis : DEFAULT_BASIS;
+  const channel: FinanceChannel = isFinanceChannel(input.channel) ? input.channel : DEFAULT_CHANNEL;
   const to = new Date(toDay.getTime() + 86_400_000);
   const [productRows, orders] = await Promise.all([
-    getProductLedger(from, to, basis),
-    getLedgerRows(from, to, basis),
+    getProductLedger(from, to, basis, marketplacesOf(channel)),
+    getLedgerRows(from, to, basis, marketplacesOf(channel)),
   ]);
   return { ok: true, products: productRows, orders };
 }

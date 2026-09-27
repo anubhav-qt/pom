@@ -4,7 +4,7 @@ import { ItemTitle } from "@/components/item-title";
 import { useEffect, useState } from "react";
 
 import { ChannelTag, StatusBadge, CenteredSpinner } from "@/components/ui";
-import { ImageLightbox } from "@/components/image-lightbox";
+import { ZoomImg } from "@/components/image-lightbox";
 import { Modal } from "@/components/modal";
 import type { Channel, OrderStatus } from "@/db/schema";
 import { money } from "@/lib/utils";
@@ -41,7 +41,6 @@ export function OrderDetailModal({ orderId, onClose }: { orderId: number; onClos
     useOrderDetailCache.getState().peek(orderId),
   );
   const [error, setError] = useState<string | null>(null);
-  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,12 +110,7 @@ export function OrderDetailModal({ orderId, onClose }: { orderId: number; onClos
             </h3>
             <div className="space-y-2.5">
               {detail.items.map((item, i) => (
-                <ItemCard
-                  key={i}
-                  item={item}
-                  channel={detail.channel}
-                  onOpenImage={(src, alt) => setLightbox({ src, alt })}
-                />
+                <ItemCard key={i} item={item} channel={detail.channel} />
               ))}
             </div>
           </div>
@@ -153,43 +147,20 @@ export function OrderDetailModal({ orderId, onClose }: { orderId: number; onClos
 
         </div>
       )}
-
-      {lightbox ? (
-        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
-      ) : null}
     </Modal>
   );
 }
 
 const AMAZON_ASIN_URL = (asin: string) => `https://www.amazon.in/dp/${asin}`;
 
-function ItemCard({
-  item,
-  channel,
-  onOpenImage,
-}: {
-  item: OrderDetail["items"][number];
-  channel: string;
-  onOpenImage: (src: string, alt: string) => void;
-}) {
+function ItemCard({ item, channel }: { item: OrderDetail["items"][number]; channel: string }) {
   const alt = item.title ?? item.sku;
   return (
     <div
       className="flex gap-3.5 rounded-xl border p-3"
       style={{ background: "var(--panel-2)", borderColor: "var(--border)" }}
     >
-      <button
-        type="button"
-        onClick={() => {
-          if (item.imageUrl) onOpenImage(item.imageUrl, alt);
-        }}
-        className="shrink-0"
-        style={{ cursor: item.imageUrl ? "zoom-in" : "default" }}
-        aria-label={item.imageUrl ? "Enlarge image" : undefined}
-        disabled={!item.imageUrl}
-      >
-        <ItemImage src={item.imageUrl} alt={alt} />
-      </button>
+      <ItemImage src={item.imageUrl} alt={alt} />
 
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <ItemTitle title={item.title} />
@@ -259,9 +230,8 @@ function ItemCard({
 
 function ItemImage({ src, alt }: { src: string | null; alt: string }) {
   if (src) {
-    // eslint-disable-next-line @next/next/no-img-element
     return (
-      <img
+      <ZoomImg
         src={src}
         alt={alt}
         className="h-28 w-28 shrink-0 rounded-lg border object-cover"

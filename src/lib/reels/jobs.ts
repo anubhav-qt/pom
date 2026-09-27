@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { db } from "@/db";
-import { reelJobFiles, reelJobs, reelTracks } from "@/db/schema";
+import { reelFeedback, reelJobFiles, reelJobs, reelTracks } from "@/db/schema";
 import { GeminiRequestError, GeminiUnavailableError } from "@/lib/gemini-pool";
 
 import type { TrackAnalysis } from "./beats";
@@ -156,7 +156,14 @@ export async function jobView(id: number): Promise<ReelJobView | null> {
     .limit(1);
   if (!job) return null;
 
-  const library = await songLibrary(id);
+  const [library, [answer]] = await Promise.all([
+    songLibrary(id),
+    db
+      .select({ liked: reelFeedback.liked })
+      .from(reelFeedback)
+      .where(and(eq(reelFeedback.jobId, id), eq(reelFeedback.version, job.version)))
+      .limit(1),
+  ]);
 
   let status = job.status as ReelStatus;
   let error = job.error;
@@ -192,6 +199,7 @@ export async function jobView(id: number): Promise<ReelJobView | null> {
     videoCut: plan?.kind === "video" ? { at: plan.contentEnd, endCard: plan.endCard ?? false } : null,
     version: job.version,
     library,
+    feedback: answer?.liked ?? null,
   };
 }
 

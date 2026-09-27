@@ -7,6 +7,7 @@ import {
   Download,
   Film,
   ImagePlus,
+  Maximize2,
   Music2,
   RectangleHorizontal,
   RectangleVertical,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { ImageLightbox, ZoomImg } from "@/components/image-lightbox";
 import { Segmented } from "@/components/segmented";
 import { Spinner } from "@/components/ui";
 import { withBasePath } from "@/lib/base-path";
@@ -97,6 +99,8 @@ export function Reels() {
 
   const hasInput = s.kind === "photos" ? s.photos.some((p) => p.state !== "failed") : !!s.video && s.video.state !== "failed";
   const done = s.view?.status === "done";
+  /** A reel has been made from these uploads: from then on the upload box gives way to feedback. */
+  const rendered = (s.view?.version ?? 0) > 0;
   const remake = needsRemake(s);
   const progress = progressOf(s);
   const failed = s.view?.status === "error" && !s.busy ? s.view : null;
@@ -123,9 +127,12 @@ export function Reels() {
               </div>
             )}
           </Presence>
-          <div className={cn("pb-3 lg:pb-[7px]", !s.kind && "flex flex-1 flex-col lg:h-full lg:pb-0")}>
-            <Dropzone onFiles={s.add} disabled={s.busy} compact={!!s.kind} kind={s.kind} />
-          </div>
+          {rendered ? null : (
+            <div className={cn("pb-3 lg:pb-[7px]", !s.kind && "flex flex-1 flex-col lg:h-full lg:pb-0")}>
+              <Dropzone onFiles={s.add} disabled={s.busy} compact={!!s.kind} kind={s.kind} />
+            </div>
+          )}
+          <Presence value={done && !progress && s.view}>{(v) => <FeedbackCard view={v} onAnswer={s.answer} />}</Presence>
           <Presence value={s.kind === "photos" && s.photos.length > 0}>{() => <PhotoGrid s={s} />}</Presence>
           <Presence value={s.kind === "video" && s.video}>{(v) => <VideoCard video={v} view={s.view} onClear={s.reset} busy={s.busy} />}</Presence>
         </div>
@@ -389,6 +396,9 @@ function PhotoTile({
   onRemove: () => void;
 }) {
   const out = tappable && !kept;
+  // A tap on a pickable photo puts it in or takes it out, so the full-screen
+  // view gets its own corner button there; otherwise the tap itself opens it.
+  const [zoomed, setZoomed] = useState(false);
   return (
     <li className="relative">
       <button
@@ -404,7 +414,7 @@ function PhotoTile({
         aria-pressed={tappable ? kept : undefined}
         aria-label={tappable ? `${kept ? "Take out" : "Put in"} ${photo.name}` : photo.name}
       >
-        {photo.preview ? (
+        {photo.preview && tappable ? (
           // Object URLs of local files: nothing for next/image to optimise.
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -413,6 +423,8 @@ function PhotoTile({
             className="h-full w-full object-cover transition-[filter,opacity] duration-300"
             style={out ? { filter: "grayscale(1)", opacity: 0.45 } : undefined}
           />
+        ) : photo.preview ? (
+          <ZoomImg src={photo.preview} alt={photo.name} className="h-full w-full object-cover" />
         ) : null}
         {photo.state === "sending" ? (
           <span className="absolute inset-0 flex items-center justify-center" style={{ background: "rgba(255,255,255,0.45)" }}>
@@ -439,13 +451,27 @@ function PhotoTile({
         ) : null}
         {tappable && (label || (out && reason)) ? (
           <span
-            className="absolute inset-x-0 bottom-0 truncate px-2 pb-1.5 pt-4 text-left text-[11px] font-medium text-white"
+            className="absolute inset-x-0 bottom-0 truncate pb-1.5 pl-2 pr-8 pt-4 text-left text-[11px] font-medium text-white"
             style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.6))" }}
           >
             {out && reason ? reason : label}
           </span>
         ) : null}
       </button>
+      {tappable && photo.preview ? (
+        <button
+          type="button"
+          onClick={() => setZoomed(true)}
+          aria-label={`Enlarge ${photo.name}`}
+          className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-full text-white opacity-90 transition-opacity hover:opacity-100"
+          style={{ background: "rgba(15,23,42,0.55)" }}
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
+      {zoomed && photo.preview ? (
+        <ImageLightbox src={photo.preview} alt={photo.name} onClose={() => setZoomed(false)} />
+      ) : null}
       {!busy ? (
         <button
           type="button"
@@ -617,6 +643,49 @@ function ResultCard({ view, s, share }: { view: ReelJobView; s: Store; share: bo
 }
 
 /**
+ * "Do you like this reel?" under the finished reel. The answer is saved with
+ * a copy of the reel, and the answers are what the directing prompt is tuned
+ * on (docs/reels/feedback.md). Tapping the other answer changes it.
+ */
+function FeedbackCard({ view, onAnswer }: { view: ReelJobView; onAnswer: (liked: boolean) => void }) {
+  const answer = view.feedback;
+  return (
+    <section className="panel flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4">
+      <div className="min-w-0 text-center sm:text-left">
+        <p className="text-sm font-semibold">Do you like this reel?</p>
+        <p className="muted mt-0.5 text-[12.5px]">
+          {answer === null
+            ? "Your answer helps the next reels come out better."
+            : answer
+              ? "Thanks! Noted that you like it."
+              : "Thanks. Noted, so the next ones come out better."}
+        </p>
+      </div>
+      <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex">
+        <button
+          type="button"
+          className={cn("btn btn-blue sm:min-w-[92px]", answer === false && "opacity-60")}
+          aria-pressed={answer === true}
+          onClick={() => onAnswer(true)}
+        >
+          {answer === true ? <Check className="h-4 w-4" /> : null}
+          Yes
+        </button>
+        <button
+          type="button"
+          className={cn("btn btn-white sm:min-w-[92px]", answer === true && "opacity-60")}
+          aria-pressed={answer === false}
+          onClick={() => onAnswer(false)}
+        >
+          {answer === false ? <Check className="h-4 w-4" /> : null}
+          No
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/**
  * The finished reel scene by scene: each photo, how long it holds (on the
  * beat) and how it comes in. Under it, Gemini's direction as it answered.
  */
@@ -639,8 +708,7 @@ function Scenes({ view, photos }: { view: ReelJobView; photos: ReelPhoto[] }) {
           <li key={`${sc.photo}-${i}`} className="w-[64px] shrink-0">
             <div className="relative aspect-[3/4] overflow-hidden rounded-lg" style={{ background: "var(--panel-2)" }}>
               {preview.get(sc.photo) ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={preview.get(sc.photo)} alt="" className="h-full w-full object-cover" />
+                <ZoomImg src={preview.get(sc.photo)!} alt={`Scene ${i + 1}`} className="h-full w-full object-cover" />
               ) : null}
               <span
                 className="absolute left-1 top-1 rounded-full px-1.5 text-[10px] font-semibold tabular-nums text-white"

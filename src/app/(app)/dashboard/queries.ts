@@ -5,7 +5,20 @@ import { sql } from "drizzle-orm";
 import { ENABLED_CHANNELS } from "@/config/features";
 import { db } from "@/db";
 
+import { MARKETPLACES } from "./channels";
+
+/**
+ * Sales figures count every marketplace we sell on: Amazon's orders come from
+ * its API, Flipkart's and Meesho's from their seller portals' reports
+ * (docs/portals/procedure.md).
+ */
 const channelsSql = sql.join(
+  MARKETPLACES.map((c) => sql`${c}`),
+  sql`, `,
+);
+
+/** "Late" is about the dispatch bench, which ships only the channels this app runs (ENABLED_CHANNELS). */
+const benchChannelsSql = sql.join(
   [...ENABLED_CHANNELS].map((c) => sql`${c}`),
   sql`, `,
 );
@@ -70,7 +83,7 @@ export async function getPeriodStats(from: Date): Promise<PeriodStats> {
     await db.execute(sql`
       SELECT COUNT(*) AS n FROM orders o
       LEFT JOIN order_fulfilment f ON f.order_id = o.id
-      WHERE o.channel IN (${channelsSql})
+      WHERE o.channel IN (${benchChannelsSql})
         AND o.status IN ('new','ready_to_pack','packed')
         AND COALESCE(f.state, 'to_pack') = 'to_pack'
         AND o.dispatch_by < now()

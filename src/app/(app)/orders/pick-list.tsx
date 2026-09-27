@@ -4,7 +4,7 @@ import { ItemTitle } from "@/components/item-title";
 import { useState } from "react";
 
 import { Empty, STATUS_TONE } from "@/components/ui";
-import { ImageLightbox } from "@/components/image-lightbox";
+import { ZoomImg } from "@/components/image-lightbox";
 import type { OrderStatus } from "@/db/schema";
 import { useOrdersNav } from "@/lib/stores/orders-cache";
 import { cn, timeLeft } from "@/lib/utils";
@@ -62,7 +62,6 @@ const CATEGORY_COPY: Record<
  */
 export function PickList({ rows, category }: { rows: PickRow[]; category: CollectionCategory }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const copy = CATEGORY_COPY[category];
 
   if (rows.length === 0) {
@@ -92,16 +91,11 @@ export function PickList({ rows, category }: { rows: PickRow[]; category: Collec
             row={r}
             category={category}
             onOpen={() => setOpenKey(r.key)}
-            onOpenImage={(src, alt) => setLightbox({ src, alt })}
           />
         ))}
       </div>
 
       {openRow ? <CollectionDetailModal row={openRow} onClose={() => setOpenKey(null)} /> : null}
-
-      {lightbox ? (
-        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />
-      ) : null}
     </div>
   );
 }
@@ -166,12 +160,10 @@ function PickCard({
   row,
   category,
   onOpen,
-  onOpenImage,
 }: {
   row: PickRow;
   category: CollectionCategory;
   onOpen: () => void;
-  onOpenImage: (src: string, alt: string) => void;
 }) {
   const copy = CATEGORY_COPY[category];
   const deadline = copy.showDeadline
@@ -192,15 +184,7 @@ function PickCard({
       className="panel flex flex-col gap-3 p-3.5 text-left transition-colors hover:bg-[var(--accent-soft)]"
     >
       <div className="flex gap-3.5">
-        <span
-          onClick={(e) => {
-            if (!row.imageUrl) return;
-            e.stopPropagation();
-            onOpenImage(row.imageUrl, alt);
-          }}
-        >
-          <Thumb src={row.imageUrl} alt={alt} />
-        </span>
+        <Thumb src={row.imageUrl} alt={alt} />
         <div className="flex min-w-0 flex-1 flex-col">
           {/* NAME is the headline. */}
           <ItemTitle title={row.title} empty="Unnamed product" nameClassName="text-[13.5px] font-semibold leading-snug" />
@@ -265,9 +249,8 @@ function PickCard({
 
 function Thumb({ src, alt }: { src: string | null; alt: string }) {
   if (src) {
-    // eslint-disable-next-line @next/next/no-img-element
     return (
-      <img
+      <ZoomImg
         src={src}
         alt={alt}
         className="h-[72px] w-[72px] shrink-0 rounded-lg border object-cover"
