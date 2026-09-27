@@ -1,7 +1,6 @@
 -- Reels: each song makes one reel, and Gemini directs photo reels.
 -- Additive only (nullable columns), so the fallback can run the old code meanwhile.
--- Apply to both sides, the ThinkPad first, before pushing the code that uses it:
---   infra/oms-schema.sh drizzle/0006_reels_direction.sql
+-- Applied by scripts/migrate.mjs on each side (Vercel's build, the ThinkPad's oms-migrate).
 --
 -- `used_at`/`used_by_job`: the reel a song went into. A used song leaves the library for
 -- good; the job keeps it for remakes, and gives it back if it moves on to another song.

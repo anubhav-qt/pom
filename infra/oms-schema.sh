@@ -1,4 +1,7 @@
 #!/bin/sh
+# Normally not needed: each side applies new drizzle files itself (scripts/migrate.mjs, from
+# Vercel's build and the ThinkPad's oms-migrate). This is for a one-off by hand.
+#
 # Applies one drizzle SQL file to the OMS database on both sides, in one transaction each:
 # the ThinkPad's first (the source of truth), then the cloud's (what the fallback uses).
 #   infra/oms-schema.sh drizzle/0006_something.sql

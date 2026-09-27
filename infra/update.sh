@@ -1,13 +1,14 @@
 #!/bin/sh
-# Keeps the ThinkPad on the latest images and settings, checking every 5 minutes (a systemd
-# user timer).
-#   infra/update.sh --install     start checking
-#   infra/update.sh --uninstall   stop checking
+# Keeps the ThinkPad on the latest images and settings. It runs as soon as CI says a new
+# image is up (each repo's workflow calls the deploy hook, hook.mjs, whose note a systemd
+# path unit watches), and every 5 minutes anyway (a systemd timer), in case a call was missed.
+#   infra/update.sh --install     start updating (both; re-running it is harmless)
+#   infra/update.sh --uninstall   stop
 #   infra/update.sh               check once now
 # It pulls this checkout (compose.yml, the Caddyfile, …) and the images, and restarts only
 # what changed, and only while the stack is running, so a stack you stopped yourself stays
-# stopped. The API's migrations run first (api-migrate); if they fail, the old API keeps
-# running and the next check tries again.
+# stopped. The API's and the OMS's migrations run first (api-migrate, oms-migrate); if one
+# fails, the old app keeps running and the next check tries again.
 set -eu
 cd "$(dirname "$0")"
 DIR=$(pwd)
@@ -15,9 +16,14 @@ UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT=paribelle-update
 APPS="api web oms sync"
 
-case "${1:-}" in
-  --install)
-    mkdir -p "$UNITS"
+# The note the deploy hook leaves (./.deploy is mounted into it), as it was when this run
+# began: a new one arriving mid-run means another pass at the end.
+NOTE="$DIR/.deploy/requested"
+SEEN=${SEEN-$(cat "$NOTE" 2>/dev/null || true)}
+export SEEN
+
+install_units() {
+    mkdir -p "$UNITS" "$DIR/.deploy"
     cat > "$UNITS/$UNIT.service" <<EOF
 [Unit]
 Description=Update the Paribelle stack to the latest images
@@ -40,20 +46,40 @@ OnUnitActiveSec=5min
 [Install]
 WantedBy=timers.target
 EOF
+    cat > "$UNITS/$UNIT.path" <<EOF
+[Unit]
+Description=Update the Paribelle stack as soon as CI publishes a new image
+
+[Path]
+PathChanged=$NOTE
+Unit=$UNIT.service
+
+[Install]
+WantedBy=paths.target
+EOF
     systemctl --user daemon-reload
-    systemctl --user enable --now "$UNIT.timer"
+    systemctl --user enable --now "$UNIT.timer" "$UNIT.path"
     # Without lingering, a user's timers only run while they're logged in.
     loginctl enable-linger "$(id -un)" 2>/dev/null ||
       echo "Also run: sudo loginctl enable-linger $(id -un)   (so checks run before you log in)"
-    echo "Checking for new images every 5 minutes. Log: $DIR/update.log"
+    echo "Updating when CI publishes, and checking every 5 minutes. Log: $DIR/update.log"
+}
+
+case "${1:-}" in
+  --install)
+    install_units
     exit 0 ;;
   --uninstall)
-    systemctl --user disable --now "$UNIT.timer" 2>/dev/null || true
-    rm -f "$UNITS/$UNIT.service" "$UNITS/$UNIT.timer"
+    systemctl --user disable --now "$UNIT.timer" "$UNIT.path" 2>/dev/null || true
+    rm -f "${UNITS:?}/${UNIT:?}.service" "${UNITS:?}/${UNIT:?}.timer" "${UNITS:?}/${UNIT:?}.path"
     systemctl --user daemon-reload
     echo "Stopped checking for new images."
     exit 0 ;;
 esac
+
+# A ThinkPad set up before the deploy hook has only the timer: add the path unit once.
+[ -f "$UNITS/$UNIT.path" ] || ! command -v systemctl >/dev/null 2>&1 || install_units >/dev/null 2>&1 ||
+  echo "$(date '+%F %T') could not add the path unit; run infra/update.sh --install"
 
 compose() { docker compose -f compose.yml "$@"; }
 docker info >/dev/null 2>&1 || exit 0 # Docker isn't running yet
@@ -75,7 +101,7 @@ token=$(setting GHCR_TOKEN)
   docker login ghcr.io -u "$(setting GHCR_USER)" --password-stdin >/dev/null 2>&1 ||
   echo "$(date '+%F %T') ghcr.io refused GHCR_TOKEN: is it expired?"
 
-compose pull --quiet $APPS api-migrate
+compose pull --quiet $APPS api-migrate oms-migrate
 stale=""
 replaced=""
 [ "${1:-}" = --pulled ] && stale=" settings"
@@ -93,4 +119,9 @@ if [ -n "$stale" ]; then
   compose up -d --remove-orphans
   # Only the images this update replaced: other projects on this machine (breader) keep theirs.
   [ -z "$replaced" ] || docker image rm $replaced >/dev/null 2>&1 || true
+fi
+
+# CI called again while this ran (another repo's image, say): go round once more.
+if [ "$(cat "$NOTE" 2>/dev/null || true)" != "$SEEN" ]; then
+  SEEN=$(cat "$NOTE" 2>/dev/null || true) exec /bin/sh "$DIR/update.sh"
 fi
