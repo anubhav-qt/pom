@@ -34,7 +34,7 @@ export function ImageLightbox({
   return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-6"
-      style={{ background: "rgba(8, 20, 28, 0.85)", animation: "rise-in 0.15s var(--ease-premium)" }}
+      style={{ background: "rgba(8, 20, 28, 0.85)", animation: "rise-in 0.28s var(--ease-apple)" }}
       onClick={onClose}
       role="dialog"
       aria-modal="true"

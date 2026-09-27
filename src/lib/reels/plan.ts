@@ -1,33 +1,26 @@
 import { isDownbeat, type TrackAnalysis } from "./beats";
-import type { PhotoPick, Shot } from "./types";
+import type { TransitionId } from "./transitions";
+import type { PhotoPick, ReelDirection, ReelScene, Shot } from "./types";
 
 /**
  * Everything between "these photos, this song" and a frame-exact timeline.
- * No model and no randomness: the same inputs give the same reel, and every
- * choice below is a rule that can be read and changed.
+ * No randomness: the same inputs give the same reel.
+ *
+ * A photo reel is planned one of two ways. With AI on, Gemini directs it
+ * (select.ts): the order, how long each photo holds, the song and the
+ * transitions; this file only fits that onto the song's beats. Without AI,
+ * every choice is a rule below that can be read and changed.
  *
  * Time 0 of a reel is `segStart` seconds into the song's stored stretch, and
  * that is always a beat, so every cut can sit exactly on one.
  */
 
-export type Enter = "open" | "cut" | "punch" | "flash" | "whip" | "fade";
-
-/** A shot's slow move: scale from/to, and a vertical drift from/to (-1..1 of the spare room). */
-export interface Motion {
-  from: number;
-  to: number;
-  panFrom: number;
-  panTo: number;
-}
-
 export interface PlannedShot {
   photo: number;
   start: number;
   end: number;
-  enter: Enter;
-  motion: Motion;
-  /** Strong beats inside the shot, where the picture gives a small bump. */
-  pulses: number[];
+  /** How this photo comes in, centred on its first beat (for the first photo: out of the transition). */
+  transition: TransitionId;
 }
 
 export interface PhotoPlan {
@@ -35,9 +28,10 @@ export interface PhotoPlan {
   trackId: number;
   segStart: number;
   total: number;
-  beatsPerShot: number;
+  /** Gemini's direction was followed (else the rules were). */
+  directed: boolean;
   shots: PlannedShot[];
-  outro: { start: number; end: number };
+  outro: { start: number; end: number; transition: TransitionId };
 }
 
 export interface VideoPlan {
@@ -62,6 +56,7 @@ export interface PlanTrack {
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : 0);
 const round3 = (x: number) => Math.round(x * 1000) / 1000;
+const clampTo = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 
 /** The time of beat `i`, extrapolated past the end of the stretch at the song's tempo. */
 function beatAt(a: TrackAnalysis, i: number): number {
@@ -167,6 +162,11 @@ export function chooseTrack<T extends PlanTrack>(
 /* Photo reel                                                                 */
 /* -------------------------------------------------------------------------- */
 
+/** At most this many seconds of photos: past that a reel loses people. */
+const MAX_CONTENT = 21;
+/** A directed reel may run a little longer, when Gemini asks for it. */
+const MAX_DIRECTED = 24;
+
 /**
  * Beats per photo: the whole number of beats closest to ~1.25 s, which reads
  * as a confident pace for outfit shots. Even counts are preferred because they
@@ -195,37 +195,28 @@ function scoreStart(a: TrackAnalysis, i: number, span: number, content: number):
   );
 }
 
+/** The end card starts a bar: spread the missing beats over the last shots. */
+function padToBar(lengths: number[]): number[] {
+  const out = [...lengths];
+  let pad = (4 - (out.reduce((s, v) => s + v, 0) % 4)) % 4;
+  for (let k = out.length - 1; pad > 0; k = k > 0 ? k - 1 : out.length - 1, pad--) out[k] += 1;
+  return out;
+}
+
 /**
- * Lay the photos (already in playing order) on the song. Returns null when the
- * song's stored stretch is too short for this many photos.
+ * Lay photos of the given lengths (in beats) on the song, starting at its
+ * best downbeat. `transition` picks each photo's way in once its beat is
+ * known. Null when the song's stored stretch is too short.
  */
-export function planPhotoReel(order: number[], picks: PhotoPick[], track: PlanTrack): PhotoPlan | null {
+function layOnSong(
+  track: PlanTrack,
+  photos: number[],
+  lengths: number[],
+  transition: (k: number, startBeat: number) => TransitionId,
+  outroTransition: TransitionId,
+  directed: boolean,
+): PhotoPlan | null {
   const a = track.analysis;
-  const P = 60 / a.bpm;
-  const quality = new Map(picks.map((p) => [p.index, p.quality]));
-  const shotOf = new Map(picks.map((p) => [p.index, p.shot]));
-
-  let b = beatsPerShot(P);
-  const photos = [...order];
-  if (photos.length === 0) return null;
-  const heroLen = () => (b * P < 1.6 ? 2 * b : b);
-  const contentBeats = () => heroLen() + (photos.length - 1) * b;
-
-  // At most ~21 s of photos: past that a reel loses people. Drop the weakest.
-  while (contentBeats() * P > 21 && photos.length > 4) {
-    let worst = photos.length - 1;
-    for (let k = photos.length - 1; k >= 1; k--) {
-      if ((quality.get(photos[k]) ?? 5) < (quality.get(photos[worst]) ?? 5)) worst = k;
-    }
-    photos.splice(worst, 1);
-  }
-  // At least ~7 s: with only a few photos, hold each one longer.
-  while (contentBeats() * P < 7 && b < 4) b *= 2;
-
-  const lengths = [heroLen(), ...Array.from({ length: photos.length - 1 }, () => b)];
-  // The end card starts a bar: spread the missing beats over the last shots.
-  let pad = (4 - (lengths.reduce((s, v) => s + v, 0) % 4)) % 4;
-  for (let k = lengths.length - 1; pad > 0; k = k > 0 ? k - 1 : lengths.length - 1, pad--) lengths[k] += 1;
   const content = lengths.reduce((s, v) => s + v, 0);
   const outro = outroBeats(a.bpm);
   const span = content + outro;
@@ -247,50 +238,16 @@ export function planPhotoReel(order: number[], picks: PhotoPick[], track: PlanTr
   const s0 = a.beats[best];
   const shots: PlannedShot[] = [];
   let j = best;
-  let flashAt = -Infinity;
-  let whips = 0;
-  let zoomIn = true;
-  let drift = 1;
   for (const [k, photo] of photos.entries()) {
     const startBeat = j;
     j += lengths[k];
-    const start = beatAt(a, startBeat) - s0;
-    const end = beatAt(a, j) - s0;
-
-    // How the shot comes in, from how hard the music hits at the cut.
-    let enter: Enter = "cut";
-    const prev = shots[k - 1]?.enter;
-    if (k === 0) enter = "open";
-    else if ((a.lifts.includes(startBeat) || (a.phrases.includes(startBeat) && a.strength[startBeat] >= 0.6)) && startBeat - flashAt >= 16) {
-      enter = "flash";
-      flashAt = startBeat;
-    } else if (mean(a.energy.slice(Math.max(0, startBeat - 2), startBeat + 2)) < 0.35) enter = "fade";
-    else if (isDownbeat(a, startBeat) && a.strength[startBeat] >= 0.65 && prev !== "punch") enter = "punch";
-    else if (isDownbeat(a, startBeat) && prev !== "whip" && whips < 2 && k % 3 === 2) {
-      enter = "whip";
-      whips++;
-    }
-
-    // The slow move inside the shot: bigger for longer shots, never enough to notice as a zoom.
-    const dur = end - start;
-    const dz = Math.min(0.09, 0.05 * dur);
-    let motion: Motion;
-    if (k === 0) motion = { from: 1, to: 1 + dz * 1.2, panFrom: 0, panTo: 0 };
-    else if (shotOf.get(photo) === "detail") {
-      motion = { from: 1.04, to: 1.04 + dz / 2, panFrom: -0.5 * drift, panTo: 0.5 * drift };
-      drift = -drift;
-    } else {
-      motion = zoomIn ? { from: 1, to: 1 + dz, panFrom: 0, panTo: 0 } : { from: 1 + dz, to: 1, panFrom: 0, panTo: 0 };
-      zoomIn = !zoomIn;
-    }
-
-    const pulses: number[] = [];
-    for (let q = startBeat + 1; q < j && q < a.beats.length; q++) {
-      if (a.strength[q] >= 0.75) pulses.push(round3(a.beats[q] - s0));
-    }
-    shots.push({ photo, start: round3(start), end: round3(end), enter, motion, pulses });
+    shots.push({
+      photo,
+      start: round3(beatAt(a, startBeat) - s0),
+      end: round3(beatAt(a, j) - s0),
+      transition: transition(k, startBeat),
+    });
   }
-
   const outroStart = beatAt(a, j) - s0;
   const outroEnd = beatAt(a, j + outro) - s0;
   return {
@@ -298,15 +255,156 @@ export function planPhotoReel(order: number[], picks: PhotoPick[], track: PlanTr
     trackId: track.id,
     segStart: round3(s0),
     total: round3(outroEnd),
-    beatsPerShot: b,
+    directed,
     shots,
-    outro: { start: round3(outroStart), end: round3(outroEnd) },
+    outro: { start: round3(outroStart), end: round3(outroEnd), transition: outroTransition },
   };
 }
 
-/** Enough song for these photos at all? Used to skip songs before planning in earnest. */
-export const photoReelFits = (order: number[], picks: PhotoPick[], track: PlanTrack) =>
-  planPhotoReel(order, picks, track) !== null;
+/**
+ * The rules' transitions, when Gemini is not directing. Mostly clean cuts on
+ * the beat; the music and the photos earn the rest:
+ *
+ *  - the reel fades up out of black;
+ *  - where the music lifts (a drop, a chorus), a light leak, then a glow the next time;
+ *  - a new outfit gets a dip to black when the music is quiet, a silk wipe when it is not;
+ *  - into a close-up, a focus pull (three at most);
+ *  - a hard downbeat, now and then, a chroma split;
+ *  - quiet music, a dissolve;
+ *  - and never the same one twice running, but for cuts.
+ */
+function ruleTransitions(a: TrackAnalysis, photos: number[], picks: PhotoPick[]) {
+  const pickOf = new Map(picks.map((p) => [p.index, p]));
+  let accentAt = -Infinity;
+  let accents = 0;
+  let chromaAt = -Infinity;
+  let chromas = 0;
+  let focuses = 0;
+  let last: TransitionId = "cut";
+  const choose = (k: number, startBeat: number): TransitionId => {
+    if (k === 0) return "dip_black";
+    const here = pickOf.get(photos[k]);
+    const prev = pickOf.get(photos[k - 1]);
+    const energy = mean(a.energy.slice(Math.max(0, startBeat - 2), startBeat + 2));
+    const strength = a.strength[startBeat] ?? 0;
+    const lifts = a.lifts.includes(startBeat) || (a.phrases.includes(startBeat) && strength >= 0.6);
+    if (lifts && startBeat - accentAt >= 16) {
+      accentAt = startBeat;
+      return accents++ % 2 === 0 ? "light_leak" : "glow";
+    }
+    if (here && prev && here.look !== prev.look) return energy < 0.45 ? "dip_black" : "silk_wipe";
+    if (here?.shot === "detail" && prev && prev.shot !== "detail" && focuses < 3) {
+      focuses++;
+      return "focus";
+    }
+    if (energy < 0.35) return "dissolve";
+    if (isDownbeat(a, startBeat) && strength >= 0.7 && chromas < 2 && startBeat - chromaAt >= 8) {
+      chromaAt = startBeat;
+      chromas++;
+      return "chroma";
+    }
+    return "cut";
+  };
+  return (k: number, startBeat: number): TransitionId => {
+    const t = choose(k, startBeat);
+    last = t !== "cut" && t === last ? "cut" : t;
+    return last;
+  };
+}
+
+/**
+ * The rules' reel: photos (already in playing order) on the song, a steady
+ * number of beats each. Null when the song's stored stretch is too short.
+ */
+export function planPhotoReel(order: number[], picks: PhotoPick[], track: PlanTrack): PhotoPlan | null {
+  const a = track.analysis;
+  const P = 60 / a.bpm;
+  const quality = new Map(picks.map((p) => [p.index, p.quality]));
+
+  let b = beatsPerShot(P);
+  const photos = [...order];
+  if (photos.length === 0) return null;
+  const heroLen = () => (b * P < 1.6 ? 2 * b : b);
+  const contentBeats = () => heroLen() + (photos.length - 1) * b;
+
+  // Too long: drop the weakest photos (never the first).
+  while (contentBeats() * P > MAX_CONTENT && photos.length > 4) {
+    let worst = photos.length - 1;
+    for (let k = photos.length - 1; k >= 1; k--) {
+      if ((quality.get(photos[k]) ?? 5) < (quality.get(photos[worst]) ?? 5)) worst = k;
+    }
+    photos.splice(worst, 1);
+  }
+  // At least ~7 s: with only a few photos, hold each one longer.
+  while (contentBeats() * P < 7 && b < 4) b *= 2;
+
+  const lengths = padToBar([heroLen(), ...Array.from({ length: photos.length - 1 }, () => b)]);
+  return layOnSong(track, photos, lengths, ruleTransitions(a, photos, picks), "dissolve", false);
+}
+
+/**
+ * Gemini's direction on the song: each scene held for the whole number of
+ * beats nearest the seconds it asked for (at least one), scaled so the photos
+ * add up to its total, with its transitions. Null when the song is too short.
+ */
+export function planDirectedReel(direction: ReelDirection, track: PlanTrack): PhotoPlan | null {
+  const scenes = direction.scenes;
+  if (scenes.length === 0) return null;
+  const P = 60 / track.analysis.bpm;
+  const asked = scenes.reduce((s, x) => s + x.seconds, 0);
+  // Its total and its scenes should agree; when they don't, the total wins, within reason.
+  const scale = direction.total > 0 && asked > 0 ? Math.max(0.67, Math.min(1.5, direction.total / asked)) : 1;
+  const lengths = scenes.map((s) => Math.max(1, Math.round((s.seconds * scale) / P)));
+  // Never past the ceiling: shorten the longest scenes a beat at a time.
+  while (lengths.reduce((s, v) => s + v, 0) * P > MAX_DIRECTED) {
+    const k = lengths.indexOf(Math.max(...lengths));
+    if (lengths[k] <= 1) break;
+    lengths[k]--;
+  }
+  return layOnSong(
+    track,
+    scenes.map((s) => s.photo),
+    padToBar(lengths),
+    (k) => scenes[k].transition,
+    direction.outro,
+    true,
+  );
+}
+
+/**
+ * Make a direction's scenes match the kept photos: scenes of photos no longer
+ * kept go (the person took them out), and a kept photo with no scene goes in
+ * after the last scene of its outfit (the person put it in), held as long as
+ * its kind of shot usually is. The total moves with the scenes. No transition
+ * but cut plays twice in a row.
+ */
+export function reconcile(direction: ReelDirection, picks: PhotoPick[]): ReelDirection {
+  const byIndex = new Map(picks.map((p) => [p.index, p]));
+  const before = direction.scenes.reduce((s, x) => s + x.seconds, 0);
+  const scenes = direction.scenes.filter((s) => byIndex.get(s.photo)?.keep).map((s) => ({ ...s }));
+  const seen = new Set(scenes.map((s) => s.photo));
+  for (const p of picks) {
+    if (!p.keep || seen.has(p.index)) continue;
+    let at = -1;
+    scenes.forEach((s, k) => {
+      if (byIndex.get(s.photo)?.look === p.look) at = k;
+    });
+    const scene: ReelScene = { photo: p.index, seconds: p.shot === "detail" ? 0.8 : 1.2, transition: "cut" };
+    if (at < 0) scenes.push(scene);
+    else scenes.splice(at + 1, 0, scene);
+    seen.add(p.index);
+  }
+  for (let k = 1; k < scenes.length; k++) {
+    if (scenes[k].transition !== "cut" && scenes[k].transition === scenes[k - 1].transition) scenes[k].transition = "cut";
+  }
+  const after = scenes.reduce((s, x) => s + x.seconds, 0);
+  const total = before > 0 ? Math.round(clampTo((direction.total * after) / before, 4, 24) * 100) / 100 : direction.total;
+  return { ...direction, scenes, total };
+}
+
+/** Enough song for this reel at all? Used to skip songs before planning in earnest. */
+export const photoReelFits = (order: number[], picks: PhotoPick[], track: PlanTrack, direction?: ReelDirection | null) =>
+  (direction ? planDirectedReel(direction, track) : planPhotoReel(order, picks, track)) !== null;
 
 /* -------------------------------------------------------------------------- */
 /* Supplier video                                                             */

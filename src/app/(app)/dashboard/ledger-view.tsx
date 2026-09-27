@@ -7,6 +7,7 @@ import { CenteredSpinner, Empty, Spinner } from "@/components/ui";
 import { friendlyItem } from "@/lib/friendly-item";
 import type { LedgerRow, LedgerStatus, ProductLedgerRow } from "@/lib/finance-queries";
 import { useDashboardCache } from "@/lib/stores/dashboard-cache";
+import { useKept } from "@/lib/stores/keep";
 import { ledgerKey, useLedgerCache, useLedgerNav } from "@/lib/stores/ledger-cache";
 import { useOrdersCache } from "@/lib/stores/orders-cache";
 
@@ -89,9 +90,9 @@ export function LedgerView({ basis }: { basis: Basis }) {
   const [data, setData] = useState<LedgerData | null>(() => useLedgerCache.getState().peek(ledgerKey(from, to, basis)));
   const [loading, setLoading] = useState(data === null);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | LedgerStatus>("all");
-  const [query, setQuery] = useState("");
-  const [details, setDetails] = useState(false);
+  const [filter, setFilter] = useKept<"all" | LedgerStatus>("ledger:filter", "all");
+  const [query, setQuery] = useKept("ledger:query", "");
+  const [details, setDetails] = useKept("ledger:details", false);
   const [exporting, setExporting] = useState<null | "csv" | "xlsx">(null);
 
   const key = ledgerKey(from, to, basis);

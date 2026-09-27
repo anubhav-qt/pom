@@ -1,7 +1,9 @@
 /**
- * Shapes shared by the reel routes and the Reels screen. No imports, so a
- * client component can use them without pulling server code into the bundle.
+ * Shapes shared by the reel routes and the Reels screen. Nothing server-side
+ * is imported, so a client component can use them without pulling server code
+ * into the bundle.
  */
+import type { TransitionId } from "./transitions";
 
 export type ReelKind = "photos" | "video";
 
@@ -27,6 +29,29 @@ export interface PhotoPick {
   reason: string;
 }
 
+/** One photo in a directed reel: which, for how long, and how it comes in. */
+export interface ReelScene {
+  photo: number;
+  seconds: number;
+  /** A `TransitionId` from transitions.ts. */
+  transition: TransitionId;
+}
+
+/**
+ * Gemini's direction for a photo reel, as it answered (checked and cleaned):
+ * the song from the library, the total length of the photos, each scene, and
+ * the transition into the end card. The code fits it onto the song's beats.
+ */
+export interface ReelDirection {
+  song: number | null;
+  /** Seconds of photos, before the end card. */
+  total: number;
+  scenes: ReelScene[];
+  outro: TransitionId;
+  /** A few words on the feel Gemini went for. */
+  mood: string;
+}
+
 export interface ReelSong {
   id: number;
   title: string;
@@ -49,6 +74,12 @@ export interface ReelJobView {
   picks: PhotoPick[] | null;
   /** Upload indices in the order they appear in the reel. */
   order: number[] | null;
+  /** The finished reel's scenes, as rendered: seconds on the beat, and each transition. */
+  scenes: ReelScene[] | null;
+  /** Gemini directed the finished reel (else the rules did). */
+  directed: boolean;
+  /** Gemini's direction as it answered, before it was fitted to the beat. */
+  direction: ReelDirection | null;
   song: ReelSong | null;
   duration: number | null;
   /** The shape of the finished reel. */
@@ -57,6 +88,7 @@ export interface ReelJobView {
   videoCut: { at: number; endCard: boolean } | null;
   /** Bumped on every finished render; part of the video URL so nothing stale is shown. */
   version: number;
+  /** The songs this reel can still use: each song makes one reel, then leaves the library. */
   library: { id: number; title: string; artist: string }[];
 }
 

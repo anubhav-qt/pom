@@ -98,10 +98,13 @@ export function ChatWidget() {
       <button
         onClick={() => setOpen(!open)}
         aria-label={open ? "Close assistant" : "Ask the assistant"}
-        className="no-print fixed bottom-5 right-5 z-40 hidden h-14 w-14 items-center justify-center rounded-full text-white transition-transform hover:scale-105 active:scale-95 sm:flex"
+        className="nav-icon-btn no-print fixed bottom-5 right-5 z-40 hidden h-14 w-14 backdrop-blur-xl sm:flex"
         style={{
-          background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
-          boxShadow: "0 10px 30px -8px color-mix(in srgb, var(--accent) 60%, transparent)",
+          // Floats over the page, so it keeps a frosted surface, but no colour fill.
+          background: "color-mix(in srgb, var(--panel) 80%, transparent)",
+          border: "1px solid var(--border)",
+          color: "var(--accent-ink)",
+          boxShadow: "var(--shadow-md)",
         }}
       >
         {open ? <X className="h-6 w-6" /> : <Sparkles className="h-6 w-6" />}
@@ -110,7 +113,7 @@ export function ChatWidget() {
       {open ? (
         <div
           className="panel no-print fixed inset-x-3 bottom-[calc(3.25rem+env(safe-area-inset-bottom))] z-40 flex flex-col overflow-hidden sm:inset-x-auto sm:bottom-24 sm:right-5 sm:w-[min(24rem,calc(100vw-2.5rem))]"
-          style={{ height: "min(32rem, calc(100vh - 10rem))", animation: "rise-in 0.18s var(--ease-premium)" }}
+          style={{ height: "min(32rem, calc(100vh - 10rem))", animation: "rise-in 0.28s var(--ease-apple)" }}
         >
           <div
             className="flex items-center gap-2 border-b px-4 py-3"

@@ -3,6 +3,7 @@
 import { create } from "zustand";
 
 import { withBasePath } from "@/lib/base-path";
+import { blobs, kept } from "@/lib/stores/keep";
 import {
   MAX_PHOTOS,
   MAX_VIDEO_BYTES,
@@ -69,6 +70,8 @@ interface ReelsState {
   setSong: (song: number | "auto") => void;
   make: (opts?: { track?: number | "next"; useAi?: boolean }) => Promise<void>;
   loadLibrary: () => Promise<void>;
+  /** After a reload: bring back the reel in progress from what was kept, and pick up its render. */
+  resume: () => Promise<void>;
   save: (what: "music" | "silent" | "share") => Promise<void>;
   reset: () => void;
 }
@@ -147,6 +150,9 @@ const waiting: (() => void)[] = [];
 let nextIdx = 0;
 let polling = false;
 let generation = 0;
+let resumed = false;
+/** Set once `resume` has looked at what was kept: until then nothing is written over it. */
+let restored = false;
 
 /** At most three uploads at a time; the rest queue. */
 async function slot<T>(work: () => Promise<T>): Promise<T> {
@@ -254,6 +260,7 @@ export const useReelsStore = create<ReelsState>((set, get) => {
         if (gen !== generation) return;
         const { photo: full, thumb } = await resize(file);
         mark({ preview: URL.createObjectURL(thumb) });
+        void blobs.put(`reels:thumb:${idx}`, thumb);
         const id = await job("photos");
         await put(id, "thumb", idx, file.name, thumb);
         await put(id, "photo", idx, file.name, full);
@@ -438,6 +445,52 @@ export const useReelsStore = create<ReelsState>((set, get) => {
       }
     },
 
+    resume: async () => {
+      if (resumed) return;
+      resumed = true;
+      const snap = kept.get<Snapshot>(KEPT);
+      let view: ReelJobView | null = null;
+      if (snap && snap.jobId !== null && get().kind === null) {
+        view = await api<ReelJobView>(`/api/reels/${snap.jobId}`, { cache: "no-store" }).catch(() => null);
+      }
+      // From here on the store's changes are kept (and an empty store forgets the snapshot).
+      restored = true;
+      // No job to come back to (none kept, older than two days, or something was added meanwhile).
+      if (!snap || snap.jobId === null || !view || get().kind !== null) {
+        if (!get().kind) kept.drop(KEPT);
+        return;
+      }
+      const photos: ReelPhoto[] = await Promise.all(
+        snap.photos.map(async (p) => {
+          const thumb = await blobs.get(`reels:thumb:${p.idx}`);
+          return { idx: p.idx, name: p.name, preview: thumb ? URL.createObjectURL(thumb) : "", state: "ready" as const };
+        }),
+      );
+      nextIdx = Math.max(nextIdx, ...snap.photos.map((p) => p.idx + 1), 0);
+      const working = ["queued", "selecting", "analyzing", "rendering"].includes(view.status);
+      set({
+        kind: snap.kind,
+        jobId: snap.jobId,
+        photos,
+        video: snap.video ? { ...snap.video, preview: "", sent: snap.video.size, state: "ready" } : null,
+        layout: snap.layout,
+        useAi: snap.useAi,
+        song: snap.song,
+        keep: snap.keep,
+        made: snap.made,
+        view,
+        library: view.library,
+        busy: working,
+        notice: snap.unsent
+          ? `${snap.unsent} photo${snap.unsent === 1 ? " was" : "s were"} still uploading when the page closed. Add ${snap.unsent === 1 ? "it" : "them"} again.`
+          : null,
+      });
+      if (working) {
+        await poll(snap.jobId);
+        if (get().view?.status === "done") set({ keep: {} });
+      }
+    },
+
     reset: () => {
       generation++;
       const s = get();
@@ -446,9 +499,64 @@ export const useReelsStore = create<ReelsState>((set, get) => {
       uploads = Promise.resolve();
       creating = null;
       set(fresh());
+      kept.drop(KEPT);
+      void blobs.dropAll("reels:");
+      // The song the finished reel used has left the library.
+      void get().loadLibrary();
     },
   };
 });
+
+/* -------------------------------------------------------------------------- */
+/* Kept across reloads                                                        */
+/* -------------------------------------------------------------------------- */
+
+const KEPT = "reels";
+/** The server keeps a job's uploads and reel for two days; a little less here. */
+const KEPT_MS = 47 * 3600_000;
+
+/** What comes back after a reload: the job, the uploaded photos, the options and the last view. */
+interface Snapshot {
+  kind: ReelKind;
+  jobId: number | null;
+  photos: { idx: number; name: string }[];
+  video: { name: string; size: number } | null;
+  /** Photos still uploading: they did not make it, and are asked for again. */
+  unsent: number;
+  layout: ReelLayout;
+  useAi: boolean;
+  song: number | "auto";
+  keep: Record<number, boolean>;
+  made: Made | null;
+}
+
+if (typeof window !== "undefined") {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  useReelsStore.subscribe((s) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (!restored) return;
+      if (!s.kind) {
+        kept.drop(KEPT);
+        return;
+      }
+      if (s.jobId === null) return;
+      const snap: Snapshot = {
+        kind: s.kind,
+        jobId: s.jobId,
+        photos: s.photos.filter((p) => p.state === "ready").map((p) => ({ idx: p.idx, name: p.name })),
+        video: s.video?.state === "ready" ? { name: s.video.name, size: s.video.size } : null,
+        unsent: s.photos.filter((p) => p.state === "sending").length,
+        layout: s.layout,
+        useAi: s.useAi,
+        song: s.song,
+        keep: s.keep,
+        made: s.made,
+      };
+      kept.set(KEPT, snap, KEPT_MS);
+    }, 250);
+  });
+}
 
 /** Whether what is on screen differs from what the finished reel was made from. */
 export function needsRemake(s: Pick<ReelsState, "made" | "layout" | "photos" | "keep" | "view" | "useAi" | "song">): boolean {

@@ -494,7 +494,7 @@ function PrimaryButton({
   }
   return (
     <button type="button" className={cn("btn btn-primary", className)} disabled={!canBuild} onClick={onBuild}>
-      {phase === "processing" ? <Spinner size="1.1rem" color="#fff" /> : <Layers className="h-4 w-4" />}
+      {phase === "processing" ? <Spinner size="1.1rem" color="currentColor" /> : <Layers className="h-4 w-4" />}
       {phase === "processing" ? "Building…" : "Build label sheet"}
     </button>
   );

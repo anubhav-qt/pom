@@ -85,16 +85,39 @@ phrases and the hook without saving anything.
 ## Looking after the library
 
 ```bash
-npm run songs -- list              # every song, with use counts and last use
+npm run songs -- list              # every song, which reel used it, and how many are left
 npm run songs -- disable 3         # out of rotation, kept in the database
 npm run songs -- enable 3
+npm run songs -- free 3            # a used song back in the library
 npm run songs -- remove 3          # gone for good
 ```
 
+**Each song makes one reel.** Once a reel is made with a song, it leaves the
+library, so no two reels share a song; keep adding songs. The reel keeps its
+song for remakes; "Different song" gives the old one back and takes the next.
+The screen shows how many songs are left.
+
 Disable a song once its trend has passed. New songs are favoured on their own:
-the picker prefers songs added recently and songs not used lately, so a fresh
-batch starts showing up straight away. "Different song" on the screen walks
-through the rest, and the song picker there can choose any active song.
+the rules prefer songs added recently, so a fresh batch shows up straight away.
+
+## How a photo reel is made
+
+With **AI** on, Gemini directs the reel. It sees the shoot, the songs left and
+the transitions, and answers in JSON (shown on the screen under the reel):
+which photos to keep, the scenes in order with the seconds each holds and the
+transition into it, the song, the total length, and the transition into the
+end card. The code fits that onto the song: each scene becomes the whole
+number of beats nearest its seconds, the reel starts on the song's best
+downbeat, and every cut lands on a beat. Taps on the photos (in or out) change
+the scenes without asking Gemini again.
+
+With AI off, the rules in `plan.ts` do the same job: every photo in upload
+order, a steady number of beats each, transitions from the music.
+
+The photos never move in the frame. The transitions (`transitions.ts`) happen
+on the picture, centred on the beat: cut, dissolve, dip to black, dip to
+ivory, light leak, chroma split, film grain, ripple, focus pull, silk wipe and
+glow.
 
 ## Prompt for Claude Code or Antigravity
 
@@ -122,7 +145,9 @@ through the rest, and the song picker there can choose any active song.
 - `scripts/reel-songs.ts`: this command.
 - `src/lib/reels/beats.ts`: the beat analysis (tempo, beats, bars, phrases,
   lifts, hook).
-- `src/lib/reels/plan.ts`: song choice and the cut plan.
+- `src/lib/reels/select.ts`: Gemini's direction (the prompt and the checks on its answer).
+- `src/lib/reels/plan.ts`: song choice and the cut plan, directed or by the rules.
+- `src/lib/reels/transitions.ts`: the transitions, and `render-photos.ts` draws them.
 - Environment: `GEMINI_API_KEYS` (comma-separated keys, tried in turn; falls
   back to `GEMINI_API_KEY`), optional `GEMINI_REEL_MODELS` (the model ladder,
   default `gemini-3.6-flash,gemini-3.7-flash,gemini-3.8-flash`) and

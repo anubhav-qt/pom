@@ -1,16 +1,20 @@
 "use client";
 
+import { useEffect } from "react";
+
 import { usePrinterStore } from "@/lib/stores/printer-store";
 
 import { PrinterView } from "./printer-view";
 
 /**
  * The live PDF printer. Its state lives in `usePrinterStore`, so leaving the
- * screen and coming back finds the files and the last result where they were.
+ * screen and coming back finds the files and the last result where they were,
+ * and a reload brings them back from what the browser kept (see `resume`).
  * All markup is `PrinterView`.
  */
 export function PdfPrinter() {
   const s = usePrinterStore();
+  useEffect(() => void usePrinterStore.getState().resume(), []);
 
   return (
     <PrinterView

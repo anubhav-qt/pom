@@ -330,15 +330,13 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
           </div>
           <div className="flex items-center gap-1.5">
             <button
-              className="h-[38px] flex-1 rounded-[9px] text-[11.5px] font-bold text-white"
-              style={{ background: "rgba(255,255,255,0.15)" }}
+              className="h-[38px] flex-1 rounded-[9px] text-[11.5px] font-bold text-white transition-[transform,background-color] duration-300 active:scale-95 active:bg-white/10"
               onClick={() => markInStock(selIdsForActive)}
             >
               Mark in stock
             </button>
             <button
-              className="h-[38px] flex-1 rounded-[9px] text-[11.5px] font-bold text-white"
-              style={{ background: "rgba(255,255,255,0.15)" }}
+              className="h-[38px] flex-1 rounded-[9px] text-[11.5px] font-bold text-white transition-[transform,background-color] duration-300 active:scale-95 active:bg-white/10"
               onClick={() => {
                 const v = window.prompt("Set have to:", "0");
                 if (v == null) return;
@@ -348,8 +346,8 @@ export function RestockPlanner({ initialPlan }: { initialPlan: RestockPlan }) {
               Set have
             </button>
             <button
-              className="h-[38px] flex-1 rounded-[9px] text-[11.5px] font-bold text-white"
-              style={{ background: "rgba(224,69,90,0.85)" }}
+              className="h-[38px] flex-1 rounded-[9px] text-[11.5px] font-bold transition-[transform,background-color] duration-300 active:scale-95 active:bg-white/10"
+              style={{ color: "#ff8a98" }}
               onClick={() => setExcluded(selIdsForActive, true)}
             >
               Exclude
@@ -534,7 +532,7 @@ function ProductPanel({
           style={{ background: "#0f2536" }}
         >
           <b className="tabular-nums">{selIds.length}</b> selected
-          <button className="rounded-md bg-white/15 px-2 py-1 text-[11.5px] font-medium" onClick={() => onMarkInStock(selIds)}>
+          <button className="rounded-md px-2 py-1 text-[11.5px] font-medium transition-[transform,background-color] duration-300 hover:bg-white/10 active:scale-95" onClick={() => onMarkInStock(selIds)}>
             Mark in stock
           </button>
           <span className="flex items-center gap-1 rounded-md bg-white/15 px-2 py-1 text-[11.5px]">
@@ -549,7 +547,11 @@ function ProductPanel({
               }}
             />
           </span>
-          <button className="rounded-md bg-white/15 px-2 py-1 text-[11.5px] font-medium" onClick={() => onExclude(selIds, true)}>
+          <button
+            className="rounded-md px-2 py-1 text-[11.5px] font-medium transition-[transform,background-color] duration-300 hover:bg-white/10 active:scale-95"
+            style={{ color: "#ff8a98" }}
+            onClick={() => onExclude(selIds, true)}
+          >
             Exclude
           </button>
           <button className="ml-auto text-[11.5px] opacity-70" onClick={() => setSelected(new Set())}>

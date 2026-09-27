@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ScanBarcodeButton } from "@/app/(app)/orders/scan/scan-button";
 import { DropdownMenu } from "@/components/dropdown-menu";
+import { useSlidingThumb } from "@/components/segmented";
 import {
   ordersViewKey,
   paramsToQuery,
@@ -182,10 +183,10 @@ export function AppHeader({
 /* Band 1 — Dashboard / Orders switch                                         */
 /* -------------------------------------------------------------------------- */
 
-/** `/dashboard` with only the non-default range and basis in the query, matching page.tsx. */
+/** `/dashboard` with only the non-default range, basis and tab in the query, matching page.tsx. */
 function dashboardHref(): string {
-  const { range, basis } = useDashboardNav.getState();
-  return dashboardUrl(range, basis);
+  const { range, basis, tab } = useDashboardNav.getState();
+  return dashboardUrl(range, basis, tab);
 }
 
 function ordersHref(): string {
@@ -251,8 +252,8 @@ function MobileScreenMenu({
     <DropdownMenu
       trigger={
         <span
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-white"
-          style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
+          className="flex h-7 w-7 items-center justify-center rounded-lg"
+          style={{ color: "var(--accent-ink)" }}
           aria-hidden
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -322,11 +323,15 @@ function AppSwitch({
     useScreenNav.getState().setOverride(null);
   }
 
+  const { ref, thumb, ready } = useSlidingThumb(effectiveScreen);
+
   return (
     <div
-      className="inline-flex rounded-[9px] p-[3px]"
+      ref={ref}
+      className="relative inline-flex rounded-[9px] p-[3px]"
       style={{ background: "var(--panel-2)", border: "1px solid var(--border)" }}
     >
+      {thumb}
       {items.map((item) => {
         const active = effectiveScreen === item.screen;
         return (
@@ -334,17 +339,18 @@ function AppSwitch({
             key={item.screen}
             href={screenHref(item.screen)}
             onClick={(e) => onNav(e, item.screen)}
+            data-active={active}
             className={cn(
-              "rounded-[7px] px-3.5 py-1.5 text-[13px] font-medium transition-colors",
+              "seg-item rounded-[7px] px-3.5 py-1.5 text-[13px] font-medium",
               !active && "muted hover:text-[var(--text)]",
             )}
             style={
               active
                 ? {
-                    background: "var(--panel)",
                     color: "var(--text)",
                     fontWeight: 600,
-                    boxShadow: "var(--shadow-xs)",
+                    // Until the sliding thumb has measured, the chosen tab paints its own.
+                    ...(ready ? {} : { background: "var(--panel)", boxShadow: "var(--shadow-xs)" }),
                   }
                 : undefined
             }
@@ -510,15 +516,10 @@ function SyncNowButton({
     <button
       onClick={start}
       disabled={state === "syncing"}
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-[10px] px-3 py-2 text-[12.5px] font-medium text-white transition-[filter] hover:brightness-105 disabled:opacity-70"
-      style={{
-        background:
-          state === "error"
-            ? "var(--danger)"
-            : "linear-gradient(135deg, var(--accent), var(--accent-2))",
-      }}
+      className="btn btn-primary shrink-0 rounded-[10px] px-3 text-[12.5px]"
+      style={state === "error" ? { color: "var(--danger)" } : undefined}
     >
-      {state === "syncing" ? <Spinner size="0.9rem" color="#fff" /> : <RefreshCw className="h-3.5 w-3.5" />}
+      {state === "syncing" ? <Spinner size="0.9rem" color="currentColor" /> : <RefreshCw className="h-3.5 w-3.5" />}
       <span className="hidden sm:inline">
         {state === "syncing" ? "Syncing…" : state === "error" ? "Sync failed" : "Sync now"}
       </span>
@@ -558,8 +559,8 @@ function AvatarMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white transition-transform hover:scale-105"
-        style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
+        className="nav-icon-btn h-8 w-8 text-xs font-semibold"
+        style={{ color: "var(--accent-ink)", boxShadow: "inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 35%, transparent)" }}
       >
         {initial}
       </button>
@@ -568,7 +569,7 @@ function AvatarMenu({
         <div
           role="menu"
           className="panel absolute right-0 top-full z-20 mt-2 w-56 origin-top-right p-1.5"
-          style={{ animation: "rise-in 0.15s var(--ease-premium)" }}
+          style={{ animation: "rise-in 0.28s var(--ease-apple)" }}
         >
           <p className="truncate px-3 py-2 text-xs" style={{ color: "var(--muted)" }}>
             Signed in as{" "}

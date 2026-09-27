@@ -88,6 +88,8 @@ export const useDashboardCache = create<DashboardCacheState>((set, get) => ({
 interface DashboardNavState {
   range: DashRange;
   basis: Basis;
+  /** Overview or Ledger, kept here so leaving Finance and coming back opens the same one. */
+  tab: "overview" | "ledger";
   go: (next: { range?: DashRange; basis?: Basis }, opts?: { replace?: boolean }) => void;
   adopt: (next: { range: DashRange; basis: Basis }) => void;
 }
@@ -105,6 +107,7 @@ export function dashboardUrl(range: DashRange, basis: Basis, tab?: string): stri
 export const useDashboardNav = create<DashboardNavState>((set, get) => ({
   range: DEFAULT_RANGE,
   basis: "paid",
+  tab: "overview",
 
   go: (next, opts) => {
     const range = next.range ?? get().range;
