@@ -2,6 +2,7 @@ import "server-only";
 
 import { geminiJson } from "@/lib/gemini-pool";
 
+import { LESSONS, PROMPT_VERSION } from "./lessons";
 import { reconcile } from "./plan";
 import { TRANSITIONS, TRANSITION_IDS, isTransition, type TransitionId } from "./transitions";
 import type { PhotoPick, ReelDirection, ReelScene, Shot } from "./types";
@@ -16,6 +17,9 @@ import type { PhotoPick, ReelDirection, ReelScene, Shot } from "./types";
  */
 
 const SHOTS: Shot[] = ["full_front", "full_back", "full_side", "half", "detail", "other"];
+
+// PROMPT_VERSION and the LESSONS from feedback live in lessons.ts: bump the
+// version there whenever SYSTEM or prompt() below change too.
 
 const SYSTEM = `You are the editor of short vertical Instagram reels for Paribelle, an Indian women's ethnic wear brand (kurtis, kurta sets, co-ord sets, suits with dupatta). A reel shows one product shoot, photo after photo, cut to a song, and ends on the brand's card. The look is classy and premium, like a fashion label's edit, never amateur: the photos stand still in the frame (nothing zooms or pans) and the transitions are chosen with restraint.`;
 
@@ -65,7 +69,14 @@ ${songLines}
 ${transitionLines}
   Taste rules: cut is the backbone, use it for about half the scenes or more. Save light_leak, glow, dip_black and dip_ivory for moments (a new outfit, the opening, the last look): three at most in a reel. Never use the same transition other than cut twice in a row. grain at most once, and only if the looks suit a textured, analogue feel. focus suits going into or out of a close-up. The first scene's transition is how the reel opens: dip_black, glow, light_leak or dissolve.
 - outro_transition: into the brand's end card: dissolve, dip_ivory, dip_black or glow.
-- mood: 2 to 5 words on the feel of the edit.`;
+- mood: 2 to 5 words on the feel of the edit.${
+    LESSONS.length
+      ? `
+
+3. House rules, learned from the owner's feedback on earlier reels. Where they disagree with anything above, they win:
+${LESSONS.map((l) => `- ${l}`).join("\n")}`
+      : ""
+  }`;
 }
 
 const SCHEMA = {
@@ -160,7 +171,7 @@ export async function directReel(
 
   const picks = normalisePicks(data.photos ?? [], n);
   const direction = normaliseDirection(data.reel, picks, opts.songs, fixedSong);
-  return { picks, direction, model };
+  return { picks, direction: direction && { ...direction, model, prompt: PROMPT_VERSION }, model };
 }
 
 /** One entry per photo, whatever the model skipped or repeated, with at least three kept. */

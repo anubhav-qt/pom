@@ -73,6 +73,8 @@ interface ReelsState {
   /** After a reload: bring back the reel in progress from what was kept, and pick up its render. */
   resume: () => Promise<void>;
   save: (what: "music" | "silent" | "share") => Promise<void>;
+  /** "Do you like this reel?" for the render on screen. Tapping the other answer changes it. */
+  answer: (liked: boolean) => Promise<void>;
   reset: () => void;
 }
 
@@ -442,6 +444,27 @@ export const useReelsStore = create<ReelsState>((set, get) => {
         set({ notice: e instanceof Error ? e.message : "Could not download the reel." });
       } finally {
         set({ saving: null });
+      }
+    },
+
+    answer: async (liked) => {
+      const { jobId, view } = get();
+      if (jobId === null || !view || view.status !== "done" || view.feedback === liked) return;
+      const before = view.feedback;
+      const version = view.version;
+      // Shown at once; put back if the server says no.
+      const mark = (feedback: boolean | null) =>
+        set((s) => (s.view && s.jobId === jobId && s.view.version === version ? { view: { ...s.view, feedback } } : {}));
+      mark(liked);
+      try {
+        await api(`/api/reels/${jobId}/feedback`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ version, liked }),
+        });
+      } catch (e) {
+        mark(before);
+        set({ notice: e instanceof Error ? e.message : "Could not save your answer." });
       }
     },
 

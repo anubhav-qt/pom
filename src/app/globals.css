@@ -171,6 +171,34 @@ body {
     background: color-mix(in srgb, var(--accent) 17%, transparent);
   }
 
+  /* A filled pair for a plain yes/no question (the Reels feedback card):
+     blue for yes, white for no, so the two read as answers, not actions. */
+  .btn-blue {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .btn-blue:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 88%, #000);
+  }
+  .btn-blue:active:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 80%, #000);
+  }
+  .btn-white {
+    background: #fff;
+    border-color: var(--border-strong);
+    color: var(--text);
+    box-shadow: var(--shadow-xs);
+  }
+  .btn-white:hover:not(:disabled) {
+    background: #fff;
+    border-color: color-mix(in srgb, var(--text) 30%, transparent);
+  }
+  .btn-white:active:not(:disabled) {
+    background: var(--panel-2);
+  }
+
   /* --------------------------------------------------------------- inputs -- */
   .input {
     @apply w-full rounded-xl border px-3.5 py-2 text-sm outline-none;

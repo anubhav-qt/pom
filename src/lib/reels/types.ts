@@ -50,6 +50,9 @@ export interface ReelDirection {
   outro: TransitionId;
   /** A few words on the feel Gemini went for. */
   mood: string;
+  /** The Gemini model that answered, and the prompt's `PROMPT_VERSION`: kept with feedback. */
+  model?: string;
+  prompt?: string;
 }
 
 export interface ReelSong {
@@ -90,6 +93,8 @@ export interface ReelJobView {
   version: number;
   /** The songs this reel can still use: each song makes one reel, then leaves the library. */
   library: { id: number; title: string; artist: string }[];
+  /** "Do you like this reel?" for the finished render (`version`): true, false, or not answered. */
+  feedback: boolean | null;
 }
 
 /** Photos are resized in the browser before upload, to fit under Vercel's 4.5 MB body limit. */
