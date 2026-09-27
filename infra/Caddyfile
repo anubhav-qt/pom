@@ -7,6 +7,9 @@
 #   503 + x-paribelle-standby   the sync says wait (catching up, halted, an app restarting)
 #   x-paribelle-gate            the gate turned it away or couldn't reach the app,
 #                               so the app never saw it and any method can be retried
+#
+# One exception to the edge key: CI's "new images are up" call, which comes straight to
+# this hostname, not through the Worker, and carries its own key (the hook checks it).
 {
 	admin off
 	auto_https disable_redirects
@@ -34,6 +37,12 @@
 }
 
 :8080 {
+	# First, so the edge-key check below never sees it (see hook.mjs).
+	@deploy path /_paribelle/deploy
+	handle @deploy {
+		reverse_proxy hook:8091
+	}
+
 	@stranger not header X-Paribelle-Edge-Key {$EDGE_KEY}
 	handle @stranger {
 		header x-paribelle-gate forbidden

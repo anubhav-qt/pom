@@ -118,6 +118,18 @@ services:
       retries: 6
     restart: unless-stopped
 
+  # The OMS's schema changes (drizzle/*.sql, scripts/migrate.mjs), against the ThinkPad's
+  # `oms`, before a new OMS starts; if they fail, the old OMS keeps running. (Vercel
+  # migrates the Supabase copy itself when it deploys, as Render does for the API.)
+  oms-migrate:
+    image: ${OMS_IMAGE:-ghcr.io/anubhav-qt/pom:latest}
+    command: ["node", "scripts/migrate.mjs"]
+    environment:
+      DATABASE_URL: "postgres://paribelle:${DB_PASSWORD}@db:5432/oms"
+    depends_on:
+      sync: { condition: service_healthy }
+    restart: "no"
+
   # The API's TypeORM migrations, against the ThinkPad's `shop`, before a new API starts.
   # (Render migrates Supabase's copy itself when it deploys.)
   api-migrate:
@@ -177,7 +189,7 @@ services:
       GEMINI_REEL_MODELS: "${GEMINI_REEL_MODELS:-}"
     volumes: ["./cluster.cjs:/cluster.cjs:ro"]
     depends_on:
-      sync: { condition: service_healthy }
+      oms-migrate: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/pom/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 15s
@@ -203,6 +215,18 @@ services:
       test: ["CMD", "test", "-f", "/data/caddy/pki/authorities/local/root.crt"]
       interval: 5s
       retries: 30
+    restart: unless-stopped
+
+  # CI's "new images are up" call, through the gate (hook.mjs). It only leaves a note in
+  # ./.deploy; update.sh's path unit sees it and updates right away.
+  hook:
+    image: node:24-alpine
+    command: ["node", "/hook.mjs"]
+    environment:
+      EDGE_KEY: "${EDGE_KEY}"
+      DEPLOY_KEY: "${DEPLOY_KEY:-}"
+    volumes: ["./hook.mjs:/hook.mjs:ro", "./.deploy:/deploy"]
+    read_only: true
     restart: unless-stopped
 
   # Caddy keeps its CA where only root can read it; the storefront runs as a normal user.

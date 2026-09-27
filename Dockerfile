@@ -52,6 +52,10 @@ ENV RELEASE=$RELEASE
 # imports. Static assets are left out of it by design and copied separately.
 COPY --from=build --chown=oms:oms /app/.next/standalone ./
 COPY --from=build --chown=oms:oms /app/.next/static ./.next/static
+# The schema changes and their runner, for the ThinkPad's oms-migrate (infra/compose.yml).
+# It needs only `pg`, which the standalone node_modules already has for the app.
+COPY --from=build --chown=oms:oms /app/drizzle/*.sql ./drizzle/
+COPY --from=build --chown=oms:oms /app/scripts/migrate.mjs ./scripts/migrate.mjs
 
 USER oms
 EXPOSE 3000

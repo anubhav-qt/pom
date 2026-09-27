@@ -1,3 +1,5 @@
 # Filled-in settings and the update log stay on the ThinkPad.
 .env
 update.log
+# The deploy hook's note for update.sh's path unit (hook.mjs).
+.deploy/

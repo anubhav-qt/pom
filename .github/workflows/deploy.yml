@@ -2,11 +2,13 @@
 #   sync   test the sync against its stand-ins, publish ghcr.io/<owner>/paribelle-sync
 #   edge   test the edge Worker, deploy it (paribelle-edge: www.paribelle.in, api.paribelle.in)
 #   oms    publish the OMS's image, ghcr.io/<owner>/pom
-# The ThinkPad picks up new images itself within 5 minutes (infra/update.sh). Vercel builds
-# the OMS from the same push, as before, for the fallback.
+#   thinkpad  tell the ThinkPad the images are up, so it updates now (infra/hook.mjs);
+#          without the call it still does within 5 minutes (infra/update.sh)
+# Vercel builds the OMS from the same push, as before, for the fallback, and migrates the
+# cloud database first (vercel.json); the ThinkPad migrates its own (oms-migrate).
 #
-# Secrets: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID. Without them the Worker isn't
-# deployed. See infra/README.md.
+# Secrets: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (without them the Worker isn't
+# deployed), THINKPAD_DEPLOY_KEY (infra/deploy-key.sh). See infra/README.md.
 name: deploy
 
 on:
@@ -102,3 +104,19 @@ jobs:
           push: true
           cache-from: type=gha,scope=oms
           cache-to: type=gha,mode=max,scope=oms
+
+  thinkpad:
+    needs: [sync, oms]
+    # Whatever did publish is worth picking up, even if the other image failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Tell the ThinkPad
+        env: { KEY: "${{ secrets.THINKPAD_DEPLOY_KEY }}" }
+        run: |
+          [ -n "$KEY" ] || { echo "No THINKPAD_DEPLOY_KEY secret: the ThinkPad updates at its next 5-minute check."; exit 0; }
+          curl -fsS --max-time 20 --retry 3 --retry-all-errors -X POST \
+            -H "Authorization: Bearer $KEY" -H "X-Paribelle-Repo: $GITHUB_REPOSITORY" \
+            https://laptop.paribelle.in/_paribelle/deploy ||
+            echo "::warning::The ThinkPad didn't answer; it updates at its next 5-minute check."

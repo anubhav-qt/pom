@@ -164,16 +164,36 @@ docker compose logs -f --tail=100 sync api web oms
 ```
 
 Pushing deploys everything by itself: CI publishes the images and the Worker, Vercel and
-Render build as before, and within 5 minutes the ThinkPad pulls this folder and the new images
-and restarts what changed. The stock images (Postgres, Caddy, cloudflared) aren't updated that
-way; now and then: `docker compose pull db gate tunnel && docker compose up -d`.
+Render build as before, and each repo's workflow then calls the ThinkPad's deploy hook, which
+pulls this folder and the new images and restarts what changed straight away. A 5-minute
+check catches anything a call missed. The stock images (Postgres, Caddy, cloudflared) aren't
+updated that way; now and then: `docker compose pull db gate tunnel && docker compose up -d`.
+
+### The deploy hook
+
+CI calls `POST https://laptop.paribelle.in/_paribelle/deploy` with its key. The gate lets that
+one path through without the edge key, to `hook.mjs`, which checks the key and leaves a note
+in `.deploy/`; a systemd path unit (`update.sh --install`, added by itself on a ThinkPad set
+up before the hook) sees the note and runs `update.sh` at once.
+
+The key is derived from `EDGE_KEY`, so the ThinkPad needs nothing new. Once, and again after
+changing `EDGE_KEY`, give it to the three repos' CI from any machine where `gh` is signed in:
+
+```sh
+infra/deploy-key.sh /path/to/infra/.env    # sets THINKPAD_DEPLOY_KEY; prints only its length
+```
+
+Without that secret CI skips the call, and updates wait for the 5-minute check as before.
 
 ### Schema changes
 
 - **The API** (TypeORM migrations): pushing to `main` makes Render migrate Supabase as it
   deploys, and the ThinkPad migrate its own copy (`api-migrate`) before starting the new API.
-- **The OMS** (drizzle SQL): `./oms-schema.sh ../drizzle/00xx_name.sql` applies it to both,
-  the ThinkPad first, **before** pushing the code that needs it.
+- **The OMS** (drizzle SQL, `drizzle/NNNN_name.sql`): the same way. Vercel's production build
+  migrates the Supabase copy before its new code goes live (`scripts/migrate.mjs`, run from
+  `vercel.json`), and the ThinkPad migrates its own (`oms-migrate`) before starting the new
+  OMS. Each side records what it ran in `oms_meta.migrations`, which the sync leaves alone.
+  Nothing to run by hand; `oms-schema.sh` is still there for a one-off.
 
 Keep migrations additive (new tables, new nullable or defaulted columns): for a few minutes
 one side runs the new schema while the other doesn't. The sync copies the columns both sides
@@ -239,10 +259,12 @@ When a Supabase database passes `PRUNE_AT_MB` (400), the sync deletes its oldest
 | `compose.yml` | the stack |
 | `.env.example` | every setting; filled in, it's `.env` (never committed) |
 | `first-start.sh` | the first start on a ThinkPad |
-| `update.sh` | the 5-minute updater (`--install`, `--uninstall`) |
+| `update.sh` | the updater: on CI's call and every 5 minutes (`--install`, `--uninstall`) |
+| `hook.mjs` | the deploy hook CI calls |
+| `deploy-key.sh` | gives the three repos' CI the hook's key |
 | `cluster.cjs` | one process per core, for the storefront and the OMS |
 | `Caddyfile` | the gate |
-| `oms-schema.sh` | an OMS schema change on both sides |
+| `oms-schema.sh` | an OMS schema change on both sides, by hand (normally automatic) |
 | `sync/` | the sync and the timed jobs (tests: `docker compose -f sync/test/compose.yml run --rm --build test`) |
 | `edge/` | the Worker (tests: `npm test`) |
 | `e2e/` | the whole OMS path end to end (`docker compose -f e2e/compose.yml build && (cd e2e && bash test.sh)`) |
