@@ -542,6 +542,17 @@ input[type="checkbox"]:disabled {
 .search-mic:hover {
   background-color: var(--accent-soft);
 }
+/* The phone header's version: the height of the icons beside it, and tighter. */
+.search-box-compact {
+  height: 34px;
+}
+.search-box-compact .search-label {
+  padding: 0 6px 0 10px;
+}
+.search-box-compact .search-mic {
+  height: 34px;
+  padding: 0 10px 0 9px;
+}
 
 /* An indeterminate sweep for progress bars whose total isn't known yet. */
 @keyframes sync-sweep {

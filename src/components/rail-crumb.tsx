@@ -134,7 +134,7 @@ export function RailCrumb({
                 <div className="flex-1" />
                 {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
                 {search ? (
-                  <div className="hidden md:block">
+                  <div className="hidden sm:block">
                     <HeaderSearch />
                   </div>
                 ) : null}

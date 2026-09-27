@@ -55,7 +55,7 @@ interface AutoSyncResult {
 /**
  * The app's header: a single merged top bar, replacing the old floating pill.
  *
- *  Band 1 — brand · Dashboard/Orders switch · sync status · Sync now · avatar.
+ *  Band 1 — brand · screen switch · sync status · Scan · Sync now · settings.
  *           Shown on every screen.
  *  Band 2 — the Orders status tabs. Shown only on /orders.
  *
@@ -112,15 +112,16 @@ export function AppHeader({
       style={{ background: "var(--panel)", borderBottom: "1px solid var(--border)" }}
     >
       {/* ---------------------------------------------------------- band 1 -- */}
-      <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 sm:gap-5 sm:px-6">
-        {/* Desktop: the PariBelle wordmark (same face and colours as the
-            storefront navbar), and the Dashboard/Orders switch sits beside it. Below `sm` there's no room for both a switch and a
-            usable search box, so the switch collapses into the brand mark
-            itself — same corner square, hamburger glyph instead of "P",
-            opening the same dropdown the Orders breadcrumb uses. */}
+      <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-4 sm:gap-5 sm:px-6">
+        {/* From `md`: the PariBelle wordmark (same face and colours as the
+            storefront navbar), with the screen switch beside it; between `sm`
+            and `md` the switch alone, as the wordmark doesn't fit beside it.
+            Below `sm` there's no room for both a switch and a usable search
+            box, so the switch collapses into a hamburger opening the same
+            dropdown the Orders breadcrumb uses. */}
         <Link
           href="/orders"
-          className="hidden shrink-0 text-[26px] leading-none tracking-wide transition-colors hover:text-[#c0607a] sm:block"
+          className="hidden shrink-0 text-[26px] leading-none tracking-wide transition-colors hover:text-[#c0607a] md:block"
           style={{ fontFamily: "var(--font-logo)", color: "#3a2a30" }}
         >
           PariBelle
@@ -139,34 +140,32 @@ export function AppHeader({
           <AppSwitch effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
         </div>
 
-        <div className="hidden flex-1 sm:block" />
-
-        {/* Band 2's own search only ever shows from `md` up (see `OrdersTabs`)
-            — mobile has no search at all otherwise, so it gets this stand-in
-            here, right before Sync/avatar, filling the width the switch
-            would otherwise take. Gone again from `md` so the two never both
-            show at once. */}
+        {/* Band 3 carries the search from `sm` up (see `RailCrumb`). Phones
+            have no band 3, so they get this compact stand-in, filling whatever
+            the menu, Sync and settings leave, and shrinking with the screen. */}
         {hasSearch ? (
-          <div className="flex-1 md:hidden">
+          <div className="min-w-0 flex-1 sm:hidden">
             <HeaderSearch compact />
           </div>
-        ) : (
-          <div className="flex-1 sm:hidden" />
-        )}
-
-        <SyncStatus lastSyncAt={lastSyncAt} />
-
-        <HeaderScan />
-
-        {primaryAccountId !== null ? (
-          <SyncNowButton
-            accountId={primaryAccountId}
-            onSyncNow={onSyncNow}
-            onAutoSync={onAutoSync}
-          />
         ) : null}
 
-        <AvatarMenu userName={userName} onSignOut={onSignOut} />
+        {/* Pinned right. Scan and Sync are icons until `lg`, where their
+            labels fit. */}
+        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-5">
+          <SyncStatus lastSyncAt={lastSyncAt} />
+
+          <HeaderScan />
+
+          {primaryAccountId !== null ? (
+            <SyncNowButton
+              accountId={primaryAccountId}
+              onSyncNow={onSyncNow}
+              onAutoSync={onAutoSync}
+            />
+          ) : null}
+
+          <SettingsMenu userName={userName} onSignOut={onSignOut} />
+        </div>
       </div>
 
       {/* ---------------------------------------------------------- band 2 -- */}
@@ -341,7 +340,9 @@ function AppSwitch({
             onClick={(e) => onNav(e, item.screen)}
             data-active={active}
             className={cn(
-              "seg-item rounded-[7px] px-3.5 py-1.5 text-[13px] font-medium",
+              "seg-item rounded-[7px] py-1.5 text-[13px] font-medium",
+              // The phone version shares its row with Sync and settings, down to 320px wide.
+              hideTools ? "px-2 min-[360px]:px-2.5" : "px-3.5",
               !active && "muted hover:text-[var(--text)]",
             )}
             style={
@@ -372,7 +373,8 @@ function HeaderScan() {
   const router = useRouter();
   return (
     <ScanBarcodeButton
-      className="btn hidden shrink-0 sm:inline-flex"
+      className="btn hidden h-8 w-8 shrink-0 rounded-full p-0 sm:inline-flex lg:h-auto lg:w-auto lg:rounded-xl lg:px-3.5 lg:py-2"
+      labelClassName="sr-only lg:not-sr-only"
       onDone={() => {
         useOrdersCache.getState().bumpSync();
         router.refresh();
@@ -408,7 +410,7 @@ function SyncStatus({ lastSyncAt }: { lastSyncAt: string | null }) {
 
   const stalled = label === "Not synced yet";
   return (
-    <span className="hidden items-center gap-2 text-xs md:inline-flex" style={{ color: "var(--muted)" }}>
+    <span className="hidden items-center gap-2 text-xs lg:inline-flex" style={{ color: "var(--muted)" }}>
       <span
         className="h-[7px] w-[7px] rounded-full"
         style={{
@@ -516,11 +518,16 @@ function SyncNowButton({
     <button
       onClick={start}
       disabled={state === "syncing"}
-      className="btn btn-primary shrink-0 rounded-[10px] px-3 text-[12.5px]"
+      // A round icon like settings beside it until `lg`, where the label fits.
+      className="btn btn-primary h-8 w-8 shrink-0 rounded-full p-0 text-[12.5px] lg:h-auto lg:w-auto lg:rounded-[10px] lg:px-3 lg:py-2"
       style={state === "error" ? { color: "var(--danger)" } : undefined}
     >
-      {state === "syncing" ? <Spinner size="0.9rem" color="currentColor" /> : <RefreshCw className="h-3.5 w-3.5" />}
-      <span className="hidden sm:inline">
+      {state === "syncing" ? (
+        <Spinner size="0.9rem" color="currentColor" />
+      ) : (
+        <RefreshCw className="h-4 w-4 lg:h-3.5 lg:w-3.5" />
+      )}
+      <span className="sr-only lg:not-sr-only">
         {state === "syncing" ? "Syncing…" : state === "error" ? "Sync failed" : "Sync now"}
       </span>
     </button>
@@ -528,10 +535,11 @@ function SyncNowButton({
 }
 
 /* -------------------------------------------------------------------------- */
-/* Band 1 — avatar menu                                                       */
+/* Band 1 — settings menu                                                     */
 /* -------------------------------------------------------------------------- */
 
-function AvatarMenu({
+/** A plain gear, like the other nav icons, opening the account menu. */
+function SettingsMenu({
   userName,
   onSignOut,
 }: {
@@ -541,7 +549,6 @@ function AvatarMenu({
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const initial = userName.trim().charAt(0).toUpperCase() || "U";
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -559,10 +566,15 @@ function AvatarMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="nav-icon-btn h-8 w-8 text-xs font-semibold"
-        style={{ color: "var(--accent-ink)", boxShadow: "inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 35%, transparent)" }}
+        aria-label="Settings and account"
+        className="nav-icon-btn h-8 w-8"
       >
-        {initial}
+        <SettingsIcon
+          className="h-[18px] w-[18px] transition-transform duration-500 [transition-timing-function:var(--ease-spring)]"
+          style={open ? { transform: "rotate(45deg)" } : undefined}
+          strokeWidth={1.75}
+          aria-hidden
+        />
       </button>
 
       {open ? (
@@ -687,8 +699,8 @@ export function HeaderSearch({ compact }: { compact?: boolean }) {
       <div
         className={cn(
           "search-box",
-          // Fills its flex-1 wrapper for the compact mobile version.
-          compact ? "w-full" : "w-56",
+          // The compact phone version is shorter and fills its flex-1 wrapper.
+          compact ? "search-box-compact w-full" : "w-56",
         )}
       >
         <label htmlFor="header-search" className="search-label">
