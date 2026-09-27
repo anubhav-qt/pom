@@ -50,9 +50,10 @@ x-next: &next
 
 services:
   # Both databases: `shop` (the API's) and `oms`. Tuned for a 24 GB laptop; parallel query
-  # workers follow the core count.
+  # workers follow the core count. Postgres 17 with pgvector: the OMS picks reel songs
+  # by their embeddings (reel_songs), as its Supabase copy does.
   db:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: paribelle
       POSTGRES_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in infra/.env}"

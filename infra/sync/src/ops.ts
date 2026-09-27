@@ -368,6 +368,22 @@ async function restoreList(file: string, dir: string): Promise<string> {
   return list;
 }
 
+/**
+ * A dump of `public` leaves out the extensions installed there (pgvector for the
+ * OMS's reel_songs), though its tables use their types. Makes them on the target
+ * first. One that can't be made is logged; the restore then says what needed it.
+ */
+async function copyExtensions(from: import("pg").Pool, to: import("pg").Pool, target: string) {
+  const r = await from.query<{ e: string }>(
+    `select e.extname as e from pg_extension e join pg_namespace n on n.oid = e.extnamespace where n.nspname = 'public'`,
+  );
+  for (const { e } of r.rows) {
+    await to.query(`create extension if not exists ${q(e)} with schema public`).catch((err: unknown) => {
+      log("warn", `the ${target} database can't have the ${e} extension`, { error: errText(err) });
+    });
+  }
+}
+
 /** Row counts per table on each side, to show after a copy. */
 async function counts(pool: import("pg").Pool, tables: string[]) {
   const out: Record<string, number> = {};
@@ -430,6 +446,7 @@ export async function bootstrap(cfg: PairConfig, settings: Settings) {
       end $$;`);
     const db = (await local.query<{ d: string }>(`select current_database() as d`)).rows[0].d;
     await local.query(`alter database ${q(db)} set search_path = "$user", public, extensions`);
+    await copyExtensions(cloud, local, "ThinkPad's");
 
     const list = await restoreList(file, dir);
     const res = await run("pg_restore", ["--no-owner", "--no-privileges", "--single-transaction", "-L", list, "-d", libpqUrl(cfg.localUrl), file]).catch(
@@ -487,6 +504,7 @@ export async function reseedCloud(cfg: PairConfig, settings: Settings) {
     const excludeData = cfg.localOnly.flatMap((t) => ["--exclude-table-data", `public.${q(t)}`]);
     log("info", "copying the ThinkPad's database to the cloud", { pair: cfg.name });
     await run("pg_dump", ["--format=custom", "--schema=public", "--no-owner", "--no-privileges", ...excludeData, "--file", file, "-d", libpqUrl(cfg.localUrl)]);
+    await copyExtensions(local, cloud, "cloud");
     const list = await restoreList(file, dir);
     await run("pg_restore", ["--no-owner", "--no-privileges", "--single-transaction", "-L", list, "-d", libpqUrl(cfg.cloudUrl), file]);
     rmSync(list, { force: true });

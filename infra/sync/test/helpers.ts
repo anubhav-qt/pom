@@ -8,6 +8,19 @@ import { uninstall } from "../src/schema.ts";
 
 export const LOCAL_URL = process.env.LOCAL_URL ?? "postgres://paribelle:local@localhost:55432/shop";
 export const CLOUD_URL = process.env.CLOUD_URL ?? "postgres://postgres:cloud@localhost:55433/cloud";
+/** The cloud database as Supabase's own admin: extensions such as pgvector need a superuser. */
+export const CLOUD_SUPERUSER_URL = process.env.CLOUD_SUPERUSER_URL ?? "postgres://supabase_admin:admin@localhost:55433/cloud";
+
+/** What Supabase lets its `postgres` role do through its admin: install an extension in `public`. */
+export async function cloudExtension(name: string) {
+  const c = new pg.Client({ connectionString: CLOUD_SUPERUSER_URL });
+  await c.connect();
+  try {
+    await c.query(`create extension if not exists ${name} with schema public`);
+  } finally {
+    await c.end();
+  }
+}
 
 /** A small shop: serial and uuid keys, cascades, SET NULL, a composite key, bytea, an enum, a self-reference. */
 export const SCHEMA = `
@@ -91,11 +104,14 @@ export function client(url: string) {
  * A running setup like production after the move: the cloud had the schema and
  * some data (what Vercel/Render use today), bootstrap copied it to the ThinkPad.
  */
-export async function setup(opts: { settings?: Partial<Settings>; cfg?: Partial<PairConfig>; seed?: string } = {}) {
+export async function setup(
+  opts: { settings?: Partial<Settings>; cfg?: Partial<PairConfig>; seed?: string; extensions?: string[]; schema?: string } = {},
+) {
   await reset();
   const cloud = client(CLOUD_URL);
   const local = client(LOCAL_URL);
-  await cloud.query(SCHEMA);
+  for (const e of opts.extensions ?? []) await cloudExtension(e);
+  await cloud.query(SCHEMA + (opts.schema ?? ""));
   await cloud.query(
     opts.seed ??
       `insert into accounts (name) values ('amazon'), ('flipkart');

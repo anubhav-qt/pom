@@ -5,7 +5,7 @@ import { applyChanges } from "../src/apply.ts";
 import { tx } from "../src/db.ts";
 import { prune, reconcileAll, reseedCloud } from "../src/ops.ts";
 import { Pair } from "../src/pair.ts";
-import { assertConverged, close, conflicts, pairConfig, rows, settle, setup, testSettings } from "./helpers.ts";
+import { assertConverged, close, cloudExtension, conflicts, pairConfig, rows, settle, setup, testSettings } from "./helpers.ts";
 
 type Setup = Awaited<ReturnType<typeof setup>>;
 let current: Setup | null = null;
@@ -392,6 +392,32 @@ test("reseed: a new, empty cloud database filled from the ThinkPad", async () =>
   await cloud.query(`insert into accounts (name) values ('after reseed')`);
   await settle(again);
   await assertConverged(again);
+});
+
+test("pgvector (the OMS's reel_songs): copied at bootstrap, synced both ways, reseeded", async () => {
+  const { pair, local, cloud } = await fresh({
+    extensions: ["vector"],
+    schema: `create table reel_songs (id serial primary key, title text not null, embedding vector(3));`,
+    seed: `insert into reel_songs (title, embedding) values ('Lehenga', '[0.1,0.25,-3]'), ('Suit', null);`,
+  });
+  const copied = await local.query(`select embedding::text as e from reel_songs where title = 'Lehenga'`);
+  assert.equal(copied.rows[0].e, "[0.1,0.25,-3]");
+  await settle(pair);
+  await local.query(`insert into reel_songs (title, embedding) values ('Kurti', '[1,2,3]')`);
+  await cloud.query(`update reel_songs set embedding = '[0.5,0.5,0.5]' where title = 'Suit'`);
+  await settle(pair);
+  await assertConverged(pair, { tables: ["reel_songs"] });
+  const near = await local.query(`select title from reel_songs order by embedding <-> '[0.5,0.5,0.4]' limit 1`);
+  assert.equal(near.rows[0].title, "Suit", "the ThinkPad searches by embedding");
+
+  await pair.close();
+  await cloud.query(`drop schema public cascade; create schema public; drop schema paribelle_sync cascade`);
+  await cloudExtension("vector"); // a new Supabase project: its postgres role may create it
+  await reseedCloud(pair.cfg, pair.settings);
+  const again = new Pair(pair.cfg, pair.settings);
+  current!.pair = again;
+  await settle(again);
+  await assertConverged(again, { tables: ["reel_songs"] });
 });
 
 test("two syncs can't work the same databases", async () => {
