@@ -49,7 +49,7 @@ done
 echo
 compose ps --format 'table {{.Service}}\t{{.Status}}'
 echo
-compose exec -T sync node src/main.ts status | grep -E '"(name|ready)"' || true
+compose exec -T sync node src/main.ts status | grep -E '"(pair|ready)"' || true
 echo
 printf 'The gate from outside (expect 403): '
 curl -s -o /dev/null -w '%{http_code}\n' https://laptop.paribelle.in/ || echo "no answer yet (is the tunnel's public hostname set?)"

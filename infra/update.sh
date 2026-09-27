@@ -77,6 +77,7 @@ token=$(setting GHCR_TOKEN)
 
 compose pull --quiet $APPS api-migrate
 stale=""
+replaced=""
 [ "${1:-}" = --pulled ] && stale=" settings"
 for app in $APPS; do
   running=$(compose ps --quiet "$app")
@@ -84,11 +85,12 @@ for app in $APPS; do
   image=$(docker inspect --format '{{.Config.Image}}' "$running")
   want=$(docker image inspect --format '{{.Id}}' "$image")
   have=$(docker inspect --format '{{.Image}}' "$running")
-  [ "$want" = "$have" ] || stale="$stale $app"
+  [ "$want" = "$have" ] || { stale="$stale $app"; replaced="$replaced $have"; }
 done
 
 if [ -n "$stale" ]; then
   echo "$(date '+%F %T') updating:$stale"
   compose up -d --remove-orphans
-  docker image prune -f >/dev/null
+  # Only the images this update replaced: other projects on this machine (breader) keep theirs.
+  [ -z "$replaced" ] || docker image rm $replaced >/dev/null 2>&1 || true
 fi
