@@ -121,6 +121,22 @@ if [ -n "$stale" ]; then
   [ -z "$replaced" ] || docker image rm $replaced >/dev/null 2>&1 || true
 fi
 
+# Files a container reads once, at start (bind mounts): compose doesn't restart it when one
+# changes, and the gate has no admin API to reload through. Restart it when its file differs
+# from the one it last started with (.mounted; on the first run here, restart once).
+restart=""
+for entry in Caddyfile:gate hook.mjs:hook; do
+  file=${entry%%:*}
+  sum="$file $(sha256sum "$file" | cut -c1-64)"
+  grep -qxF "$sum" .mounted 2>/dev/null || restart="$restart ${entry#*:}"
+done
+if [ -n "$restart" ]; then
+  echo "$(date '+%F %T') restarting for new settings:$restart"
+  compose up -d --no-recreate $restart >/dev/null 2>&1 || true
+  compose restart $restart
+  for file in Caddyfile hook.mjs; do echo "$file $(sha256sum "$file" | cut -c1-64)"; done > .mounted
+fi
+
 # CI called again while this ran (another repo's image, say): go round once more.
 if [ "$(cat "$NOTE" 2>/dev/null || true)" != "$SEEN" ]; then
   SEEN=$(cat "$NOTE" 2>/dev/null || true) exec /bin/sh "$DIR/update.sh"
