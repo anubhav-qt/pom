@@ -18,19 +18,30 @@ import { parseVariantTitle } from "@/lib/variant-title";
  *    order (ads, storage, payouts) always use the day they posted.
  */
 
+import type { Marketplace } from "@/app/(app)/dashboard/channels";
 import type { Basis } from "@/app/(app)/dashboard/range";
 
 export type { Basis };
 
 const n = (v: unknown) => Number(v ?? 0);
 
-/** Lines inside [from, to) on the chosen basis, joined to their order when they have one. */
-function linesCte(from: Date, to: Date, basis: Basis) {
+const inList = (marketplaces: Marketplace[]) =>
+  sql.join(
+    marketplaces.map((c) => sql`${c}`),
+    sql`, `,
+  );
+
+/**
+ * Lines inside [from, to) on the chosen basis, from the chosen marketplaces'
+ * accounts, joined to their order when they have one.
+ */
+function linesCte(from: Date, to: Date, basis: Basis, marketplaces: Marketplace[]) {
   return sql`
     lines AS (
       SELECT t.*, o.id AS order_id, o.ordered_at,
              CASE WHEN ${basis} = 'ordered' AND o.id IS NOT NULL THEN o.ordered_at ELSE t.posted_at END AS bucket_at
       FROM finance_transactions t
+      JOIN channel_accounts ca ON ca.id = t.channel_account_id AND ca.channel IN (${inList(marketplaces)})
       LEFT JOIN orders o
         ON o.external_order_id = t.external_order_id AND o.channel_account_id = t.channel_account_id
       WHERE t.status <> 'DEFERRED_RELEASED'
@@ -88,6 +99,7 @@ export type LedgerStatus = "delivered" | "returned" | "rto" | "cancelled" | "shi
 
 export interface LedgerRow {
   orderId: number;
+  channel: Marketplace;
   externalOrderId: string;
   orderedAt: string;
   item: string;
@@ -96,9 +108,9 @@ export interface LedgerRow {
   fees: number;
   postage: number;
   refunded: number;
-  /** Everything Amazon paid minus everything it took, for this order. */
+  /** Everything the marketplace paid minus everything it took, for this order. */
   net: number;
-  /** Part of `net` Amazon is still holding. */
+  /** Part of `net` the marketplace is still holding. */
   held: number;
   /** From the product cost prices; null until every item in the order has one. */
   cost: number | null;
@@ -106,10 +118,10 @@ export interface LedgerRow {
   profit: number | null;
 }
 
-export async function getLedgerRows(from: Date, to: Date, basis: Basis): Promise<LedgerRow[]> {
+export async function getLedgerRows(from: Date, to: Date, basis: Basis, marketplaces: Marketplace[]): Promise<LedgerRow[]> {
   const rows = (
     await db.execute(sql`
-      WITH ${linesCte(from, to, basis)},
+      WITH ${linesCte(from, to, basis, marketplaces)},
       ${COST_LOOKUP},
       agg AS (
         SELECT order_id,
@@ -123,12 +135,12 @@ export async function getLedgerRows(from: Date, to: Date, basis: Basis): Promise
       ),
       picked AS (
         SELECT o.id FROM orders o
-        WHERE o.channel = 'amazon' AND (
+        WHERE o.channel IN (${inList(marketplaces)}) AND (
           o.id IN (SELECT order_id FROM agg)
           OR (${basis} = 'ordered' AND o.ordered_at >= ${from.toISOString()} AND o.ordered_at < ${to.toISOString()})
         )
       )
-      SELECT o.id, o.external_order_id, o.ordered_at, o.status, o.total_amount,
+      SELECT o.id, o.channel, o.external_order_id, o.ordered_at, o.status, o.total_amount,
         (SELECT COALESCE(NULLIF(oi.title, ''), oi.external_sku) FROM order_items oi WHERE oi.order_id = o.id ORDER BY oi.id LIMIT 1) AS item,
         (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
         COALESCE(a.net, 0) AS net, COALESCE(a.paid, 0) AS paid, COALESCE(a.refunded, 0) AS refunded,
@@ -163,6 +175,7 @@ export async function getLedgerRows(from: Date, to: Date, basis: Basis): Promise
     const cost = r.cost == null ? null : n(r.cost);
     return {
       orderId: n(r.id),
+      channel: String(r.channel) as Marketplace,
       externalOrderId: String(r.external_order_id),
       orderedAt: new Date(r.ordered_at as string).toISOString(),
       item: String(r.item ?? ""),
@@ -175,7 +188,7 @@ export async function getLedgerRows(from: Date, to: Date, basis: Basis): Promise
       held,
       cost,
       note: String(r.note ?? ""),
-      // No profit until Amazon has paid or taken something; a cost against a
+      // No profit until the marketplace has paid or taken something; a cost against a
       // zero would read as a loss on an order that simply has not settled yet.
       profit: cost == null || net === 0 ? null : net - cost,
     };
@@ -193,7 +206,7 @@ export interface ProductLedgerRow {
   imageUrl: string | null;
   /** Every seller SKU in the family. */
   skus: string[];
-  /** Units on orders Amazon has settled in the range. */
+  /** Units on orders the marketplace has settled in the range. */
   units: number;
   net: number;
   /** What the costed part of those orders cost us, each at the price it was costed at. */
@@ -209,15 +222,15 @@ export function productFamilyKey(name: string): string {
 }
 
 /**
- * One row per product (every size and colour together). Amazon's net for an
- * order is shared between its items by their price, and only orders Amazon has
- * actually paid or taken money on count, so profit is never a cost set against
- * a sale that has not settled.
+ * One row per product (every size and colour together). The marketplace's net
+ * for an order is shared between its items by their price, and only orders it
+ * has actually paid or taken money on count, so profit is never a cost set
+ * against a sale that has not settled.
  */
-export async function getProductLedger(from: Date, to: Date, basis: Basis): Promise<ProductLedgerRow[]> {
+export async function getProductLedger(from: Date, to: Date, basis: Basis, marketplaces: Marketplace[]): Promise<ProductLedgerRow[]> {
   const sold = (
     await db.execute(sql`
-      WITH ${linesCte(from, to, basis)},
+      WITH ${linesCte(from, to, basis, marketplaces)},
       agg AS (
         SELECT order_id, SUM(total) FILTER (WHERE type <> 'Transfer') AS net
         FROM in_range WHERE order_id IS NOT NULL GROUP BY order_id

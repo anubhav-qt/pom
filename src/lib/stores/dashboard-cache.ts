@@ -4,10 +4,11 @@ import { withBasePath } from "@/lib/base-path";
 import { create } from "zustand";
 
 import type { DashboardView } from "@/app/(app)/dashboard/view-actions";
+import { DEFAULT_CHANNEL, type FinanceChannel } from "@/app/(app)/dashboard/channels";
 import { DEFAULT_RANGE, type Basis, type DashRange } from "@/app/(app)/dashboard/range";
 
 /**
- * Client-side cache for the dashboard, keyed by range.
+ * Client-side cache for the dashboard, keyed by channel and range (`dashKey`).
  *
  * Same shape and reasoning as the orders-view cache: switching range, or
  * toggling away to Orders and back, used to re-run four aggregate queries for
@@ -26,8 +27,11 @@ interface Entry {
   inFlight?: Promise<DashboardView>;
 }
 
+/** The cache key for one channel's view of one range. */
+export const dashKey = (channel: FinanceChannel, range: DashRange) => `${channel}|${range}`;
+
 interface DashboardCacheState {
-  /** Keyed by range. */
+  /** Keyed by `dashKey`. */
   entries: Partial<Record<string, Entry>>;
 
   peek: (key: string) => DashboardView | null;
@@ -83,23 +87,26 @@ export const useDashboardCache = create<DashboardCacheState>((set, get) => ({
  * unmounting when the toggle switches to Orders and back. Mirrors
  * `useOrdersNav`: `go` moves the URL with `pushState` and updates the store;
  * `adopt` takes the range back from the URL on a `popstate`. `basis` only
- * applies to the Ledger; the Overview always counts by order date.
+ * applies to the Ledger; the Overview always counts by order date. `channel`
+ * (a marketplace, or all of them) applies to both.
  */
 interface DashboardNavState {
   range: DashRange;
   basis: Basis;
+  channel: FinanceChannel;
   /** Overview or Ledger, kept here so leaving Finance and coming back opens the same one. */
   tab: "overview" | "ledger";
-  go: (next: { range?: DashRange; basis?: Basis }, opts?: { replace?: boolean }) => void;
-  adopt: (next: { range: DashRange; basis: Basis }) => void;
+  go: (next: { range?: DashRange; basis?: Basis; channel?: FinanceChannel }, opts?: { replace?: boolean }) => void;
+  adopt: (next: { range: DashRange; basis: Basis; channel: FinanceChannel }) => void;
 }
 
 /** `/dashboard`, with only the parameters that differ from the defaults. */
-export function dashboardUrl(range: DashRange, basis: Basis, tab?: string): string {
+export function dashboardUrl(range: DashRange, basis: Basis, tab?: string, channel: FinanceChannel = DEFAULT_CHANNEL): string {
   const q = new URLSearchParams();
   if (range !== DEFAULT_RANGE) q.set("range", range);
   if (basis !== "paid") q.set("basis", basis);
   if (tab && tab !== "overview") q.set("tab", tab);
+  if (channel !== DEFAULT_CHANNEL) q.set("ch", channel);
   const s = q.toString();
   return s ? `/dashboard?${s}` : "/dashboard";
 }
@@ -107,24 +114,27 @@ export function dashboardUrl(range: DashRange, basis: Basis, tab?: string): stri
 export const useDashboardNav = create<DashboardNavState>((set, get) => ({
   range: DEFAULT_RANGE,
   basis: "paid",
+  channel: DEFAULT_CHANNEL,
   tab: "overview",
 
   go: (next, opts) => {
     const range = next.range ?? get().range;
     const basis = next.basis ?? get().basis;
+    const channel = next.channel ?? get().channel;
     if (typeof window !== "undefined") {
       const tab = new URLSearchParams(window.location.search).get("tab") ?? undefined;
-      const url = withBasePath(dashboardUrl(range, basis, tab));
+      const url = withBasePath(dashboardUrl(range, basis, tab, channel));
       if (opts?.replace) window.history.replaceState(null, "", url);
       else window.history.pushState(null, "", url);
     }
-    set({ range, basis });
+    set({ range, basis, channel });
   },
 
-  adopt: ({ range, basis }) => set({ range, basis }),
+  adopt: ({ range, basis, channel }) => set({ range, basis, channel }),
 }));
 
-/** The cached view for whatever range is currently selected, if any. */
+/** The cached view for whatever channel and range are currently selected, if any. */
 export function peekCurrentDashboard(): DashboardView | null {
-  return useDashboardCache.getState().peek(useDashboardNav.getState().range);
+  const { channel, range } = useDashboardNav.getState();
+  return useDashboardCache.getState().peek(dashKey(channel, range));
 }

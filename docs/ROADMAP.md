@@ -113,3 +113,31 @@ to its payout. `npm run backfill:finance` loads history once. The Finance screen
 `backfillAccount()` is script-only (`npm run backfill:amazon`). A future version
 could expose it as an owner-only Settings action with a date-range picker,
 reusing the existing `sync_runs` / `/api/sync-progress` progress plumbing.
+
+---
+
+## 6. Flipkart and Meesho: look through the first run's data
+
+**TODO (next session):** the first seller-portal run (2026-09-27, see
+[portals/procedure.md](portals/procedure.md)) wrote 178 Flipkart and 986 Meesho
+orders, their returns and 1,732 money lines, reconciled to the rupee against
+every payout. Nobody has looked through it in the app yet. Go through it in a
+session of its own:
+
+- Finance with the marketplace switch on Flipkart, then Meesho: do the month
+  totals, fees, return costs and "Money with …" match what the portals show?
+- Ledger › Orders: open a few orders of each kind (delivered, RTO, customer
+  return, exchange, claim) and check each one's lines add up.
+- Link the SKUs: 30 of Flipkart's 32 and all 18 of Meesho's are unlinked, so
+  those orders show sales and fees but no profit.
+- Flipkart takes TDS at 5%, not 0.1%: the PAN is probably not linked or active.
+- 40 Flipkart orders from Feb–Mar with no payments were left out; they are only
+  in the FY report, which is a download.
+- Meesho return reasons were not read (`fetchReturnClaims` allows about one
+  call a minute); read them on the next run.
+- The two upcoming Meesho payouts differ from the portal (10-01: ₹−175 against
+  ₹−157; 10-05: ₹0 against ₹488.98) because Meesho's order timeline lags; check
+  that the next run replaces them.
+- Build `npm run portal -- save` from the two generators in
+  `tmp/portals/2026-09-27/` (`gen-flipkart.mjs`, `gen-meesho.mjs`). `tmp/` is
+  not in git, so they are only on the machine that ran it.

@@ -3,10 +3,11 @@
 import { requireUser } from "@/lib/auth";
 import { getProfitData, type MoneyToday, type ProfitView } from "@/lib/profit";
 
+import { DEFAULT_CHANNEL, isFinanceChannel, type FinanceChannel, type Marketplace } from "./channels";
 import { DEFAULT_RANGE, isDashRange, rangeBounds, type DashRange } from "./range";
 
 /**
- * Everything the Finance overview needs for one range, in a single call. The
+ * Everything the Finance overview needs for one range and channel, in a single call. The
  * page calls it on the server for the first paint; the client cache
  * (`stores/dashboard-cache`) calls it for every later range change so a range
  * that has already been read is answered without a round trip.
@@ -14,6 +15,10 @@ import { DEFAULT_RANGE, isDashRange, rangeBounds, type DashRange } from "./range
 
 export interface DashboardView {
   range: DashRange;
+  /** The marketplace counted, or all of them. */
+  channel: FinanceChannel;
+  /** Marketplaces with any orders or money, for the switch (shown once there are two). */
+  channels: Marketplace[];
   /** Months with orders, newest first, for the range picker. */
   months: string[];
   profit: ProfitView;
@@ -23,15 +28,18 @@ export interface DashboardView {
   generatedAt: string;
 }
 
-export async function getDashboardView(rawRange?: string): Promise<DashboardView> {
+export async function getDashboardView(rawRange?: string, rawChannel?: string): Promise<DashboardView> {
   await requireUser();
 
   const range: DashRange = isDashRange(rawRange) ? rawRange : DEFAULT_RANGE;
+  const channel: FinanceChannel = isFinanceChannel(rawChannel) ? rawChannel : DEFAULT_CHANNEL;
   const { from, to } = rangeBounds(range);
-  const data = await getProfitData(from, to);
+  const data = await getProfitData(from, to, channel);
 
   return {
     range,
+    channel,
+    channels: data.channels,
     months: data.months,
     profit: data.view,
     money: data.money,

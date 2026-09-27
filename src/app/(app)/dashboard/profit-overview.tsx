@@ -4,11 +4,16 @@ import { Empty } from "@/components/ui";
 import { useKept } from "@/lib/stores/keep";
 import type { FlowLine, MonthRow, ProductRow, ProfitView } from "@/lib/profit";
 
+import { CHANNEL_LABEL, type FinanceChannel } from "./channels";
 import { rangeLabel } from "./range";
 import type { DashboardView } from "./view-actions";
 
+/** "Amazon", or "the marketplaces" with every marketplace counted: whom the money is with. */
+const holder = (channel: FinanceChannel) => (channel === "all" ? "the marketplaces" : CHANNEL_LABEL[channel]);
+
 /**
- * Finance › Overview: the real profit on Amazon orders, one screen.
+ * Finance › Overview: the real profit on marketplace orders (one marketplace,
+ * or all of them together), one screen.
  *
  * Read top to bottom it answers, in order: did we make money (the strip), how
  * sales became profit (the statement and one kept order), where the cash is
@@ -43,9 +48,14 @@ export function ProfitOverview({ view }: { view: DashboardView }) {
   const p = view.profit;
 
   if (view.lineCount === 0) {
+    // Amazon's money comes with a sync; Flipkart's and Meesho's from the seller portal procedure.
+    const fromPortal = view.channel === "flipkart" || view.channel === "meesho";
     return (
       <div className="panel">
-        <Empty title="No money data yet" hint="Press Sync now." />
+        <Empty
+          title="No money data yet"
+          hint={fromPortal ? `Its payments come from the seller portal procedure (docs/portals/procedure.md).` : "Press Sync now."}
+        />
       </div>
     );
   }
@@ -54,7 +64,7 @@ export function ProfitOverview({ view }: { view: DashboardView }) {
 
   return (
     <div className="print-sheet space-y-5 sm:space-y-[7px]">
-      <PrintHeader label={label} generatedAt={view.generatedAt} />
+      <PrintHeader label={label} generatedAt={view.generatedAt} channel={view.channel} />
 
       <Summary view={view} />
 
@@ -74,9 +84,9 @@ export function ProfitOverview({ view }: { view: DashboardView }) {
             <Returns p={p} />
           </div>
 
-          {p.months.length > 1 ? <Months months={p.months} /> : null}
+          {p.months.length > 1 ? <Months months={p.months} payer={p.payer} /> : null}
 
-          <Products rows={p.products} small={p.smallProducts} ads={p.flowOut.find((l) => l.key === "ads")?.value ?? 0} />
+          <Products rows={p.products} small={p.smallProducts} ads={p.flowOut.find((l) => l.key === "ads")?.value ?? 0} payer={p.payer} />
 
           <div className="grid gap-5 sm:gap-[7px] lg:grid-cols-2 print:grid-cols-2 [&>*]:min-w-0">
             <Tax p={p} />
@@ -123,7 +133,7 @@ function Dot({ color }: { color: string }) {
 }
 
 /** Shown only on paper: what the PDF is and when it was made. */
-function PrintHeader({ label, generatedAt }: { label: string; generatedAt: string }) {
+function PrintHeader({ label, generatedAt, channel }: { label: string; generatedAt: string; channel: FinanceChannel }) {
   const at = new Date(generatedAt).toLocaleString("en-IN", {
     day: "numeric",
     month: "short",
@@ -140,7 +150,9 @@ function PrintHeader({ label, generatedAt }: { label: string; generatedAt: strin
         </span>
         <span className="muted text-[11px]">{at}</span>
       </div>
-      <div className="mt-2 text-[15px] font-semibold">Amazon profit · {label}</div>
+      <div className="mt-2 text-[15px] font-semibold">
+        {channel === "all" ? "Profit, every marketplace" : `${CHANNEL_LABEL[channel]} profit`} · {label}
+      </div>
       <div className="muted text-[11.5px]">Orders placed in the period, with everything that happened to them since.</div>
     </div>
   );
@@ -180,7 +192,7 @@ function Summary({ view }: { view: DashboardView }) {
         </span>
         <span>RTO {pct(o.rtoRate)}</span>
       </Kpi>
-      <Kpi label="Amazon owes you" value={inr(m.owed)} tag="Today">
+      <Kpi label={view.channel === "all" ? "Marketplaces owe you" : `${CHANNEL_LABEL[view.channel]} owes you`} value={inr(m.owed)} tag="Today">
         <span>{inr(m.nextPayout)} next payout</span>
         <span>{inr(m.held)} on hold</span>
       </Kpi>
@@ -243,7 +255,7 @@ function Statement({ p, label }: { p: ProfitView; label: string }) {
         {p.flowOut.map((l) => (
           <FlowRow key={l.key} line={l} max={max} color={OUT} />
         ))}
-        <TotalRow label="Amazon net" note="paid or owed to you" value={p.net} />
+        <TotalRow label={`${p.payer} net`} note="paid or owed to you" value={p.net} />
         <FlowRow line={{ key: "cogs", label: "Cost of goods kept", value: -p.cogs, note: "at your cost price" }} max={max} color={OUT} />
         <TotalRow label="Profit" value={p.profit} color={profitColor(p.profit)} strong />
       </div>
@@ -394,7 +406,7 @@ function MoneyNow({ view }: { view: DashboardView }) {
   const total = parts.reduce((s, x) => s + Math.max(0, x.value), 0) || 1;
 
   return (
-    <Panel title="Money with Amazon" aside="Today, all orders">
+    <Panel title={`Money with ${holder(view.channel)}`} aside="Today, all orders">
       <div className="flex h-2.5 gap-[2px] overflow-hidden" role="img" aria-label={parts.map((x) => `${x.label} ${inr(x.value)}`).join(", ")}>
         {parts.map((x) => (
           <div
@@ -497,7 +509,7 @@ function Rate({ label, value, note }: { label: string; value: string; note: stri
 
 /* ------------------------------------------------------------------- months */
 
-function Months({ months }: { months: MonthRow[] }) {
+function Months({ months, payer }: { months: MonthRow[]; payer: string }) {
   const max = Math.max(1, ...months.map((m) => Math.abs(m.profit)));
   const anyOpen = months.some((m) => m.open);
   return (
@@ -510,7 +522,7 @@ function Months({ months }: { months: MonthRow[] }) {
               <Th>Orders</Th>
               <Th>Returned</Th>
               <Th>Sales</Th>
-              <Th>Amazon net</Th>
+              <Th>{payer} net</Th>
               <Th>Cost of goods</Th>
               <Th>Profit</Th>
               <th className="w-[18%] pb-2 print:hidden" aria-hidden />
@@ -591,7 +603,7 @@ function Td({ children, left, strong, color }: { children: React.ReactNode; left
 /** The best earners and every product losing money; the rest behind "Show all" (always printed). */
 const TOP_PRODUCTS = 10;
 
-function Products({ rows, small, ads }: { rows: ProductRow[]; small: ProfitView["smallProducts"]; ads: number }) {
+function Products({ rows, small, ads, payer }: { rows: ProductRow[]; small: ProfitView["smallProducts"]; ads: number; payer: string }) {
   const [all, setAll] = useKept("finance:all-products", false);
   if (rows.length === 0 && !small) return null;
   const max = Math.max(1, ...rows.filter((r) => !r.noCost).map((r) => Math.abs(r.profit)));
@@ -606,7 +618,7 @@ function Products({ rows, small, ads }: { rows: ProductRow[]; small: ProfitView[
               <Th left>Product</Th>
               <Th>Shipped</Th>
               <Th>Returned</Th>
-              <Th>Amazon net</Th>
+              <Th>{payer} net</Th>
               <Th>Cost of goods</Th>
               <Th>Profit</Th>
               <th className="w-[14%] pb-2 print:hidden" aria-hidden />
@@ -703,7 +715,7 @@ function Notes({ p }: { p: ProfitView }) {
   const mc = p.missingCost;
   const notes = [
     mc.orders > 0
-      ? `${num(mc.orders)} shipped orders have no cost${mc.unmapped ? ` (${num(mc.unmapped)} with a SKU not mapped to a product)` : ""}, so ${inr(mc.net)} of Amazon net has no cost against it.`
+      ? `${num(mc.orders)} shipped orders have no cost${mc.unmapped ? ` (${num(mc.unmapped)} with a SKU not mapped to a product)` : ""}, so ${inr(mc.net)} of ${p.payer === "Marketplace" ? "marketplace" : p.payer} net has no cost against it.`
       : null,
     "Cost of goods is your cost price, which already includes packaging and overheads.",
     "Returned goods count as back in stock at cost.",

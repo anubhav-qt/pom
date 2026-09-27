@@ -2,15 +2,16 @@
 
 import { create } from "zustand";
 
+import type { FinanceChannel } from "@/app/(app)/dashboard/channels";
 import type { LedgerData } from "@/app/(app)/dashboard/ledger-actions";
 import type { Basis } from "@/app/(app)/dashboard/range";
 
 import { createViewCache } from "./view-cache";
 
-/** The Finance ledger, keyed by date range and basis. Cleared by a sync (see `bumpSync`). */
+/** The Finance ledger, keyed by date range, basis and channel. Cleared by a sync (see `bumpSync`). */
 export const useLedgerCache = createViewCache<LedgerData>();
 
-export const ledgerKey = (from: string, to: string, basis: Basis) => `${from}|${to}|${basis}`;
+export const ledgerKey = (from: string, to: string, basis: Basis, channel: FinanceChannel) => `${from}|${to}|${basis}|${channel}`;
 
 /** India time, so a default range matches the wall calendar. */
 function isoDay(d: Date): string {
