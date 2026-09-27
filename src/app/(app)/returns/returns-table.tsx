@@ -7,6 +7,7 @@ import { Empty, LoadingOverlay, Spinner, Stat, StatStrip } from "@/components/ui
 import { friendlyItem } from "@/lib/friendly-item";
 import { OrderThumb } from "../orders/order-table";
 import { withBasePath } from "@/lib/base-path";
+import { useKept } from "@/lib/stores/keep";
 import { returnsKey, useReturnsCache, useReturnsNav, type ReturnsFilter, type ReturnsTab } from "@/lib/stores/returns-cache";
 import { useOrdersCache } from "@/lib/stores/orders-cache";
 import { dayLabel, money } from "@/lib/utils";
@@ -264,9 +265,10 @@ export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsV
 
 function ReturnCard({ row, onChanged }: { row: ReturnDeskRow; onChanged: () => void }) {
   const [pending, startTransition] = useTransition();
-  const [open, setOpen] = useState<"checkin" | "writeoff" | "claim" | null>(null);
-  const [restock, setRestock] = useState(true);
-  const [note, setNote] = useState("");
+  // Kept per return, so a half-filled check-in survives going to another screen and back.
+  const [open, setOpen] = useKept<"checkin" | "writeoff" | "claim" | null>(`returns:${row.id}:open`, null);
+  const [restock, setRestock] = useKept(`returns:${row.id}:restock`, true);
+  const [note, setNote] = useKept(`returns:${row.id}:note`, "");
   const [error, setError] = useState<string | null>(null);
   const it = friendlyItem(row.item);
 

@@ -10,6 +10,7 @@ import type {
   RunResult,
 } from "@/app/(app)/pdf-printer/printer-view";
 import { withBasePath } from "@/lib/base-path";
+import { blobs, kept } from "@/lib/stores/keep";
 
 const MAX_FILES = 20;
 /** What the new tab shows until the sheet is ready, so a blank tab never looks broken. */
@@ -45,9 +46,26 @@ interface PrinterState {
   reset: () => void;
   setOptions: (o: PrinterOptions) => void;
   build: () => Promise<void>;
+  /** After a reload: bring back the picked files, the options and the last result. */
+  resume: () => Promise<void>;
 }
 
 let seq = 0;
+let resumed = false;
+/** Set once `resume` has run, so the empty first state never overwrites what was kept. */
+let restored = false;
+
+const KEPT = "printer";
+/** Labels are a same-day job; a day is plenty. */
+const KEPT_MS = 24 * 3600_000;
+const fileKey = (id: string) => `printer:file:${id}`;
+
+interface Snapshot {
+  items: FileItem[];
+  options: PrinterOptions;
+  result: RunResult | null;
+  error: PrinterState["error"];
+}
 
 /**
  * The PDF printer's working state, kept outside the component for the same
@@ -72,7 +90,9 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
       const key = `${file.name}:${file.size}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      next.push({ item: { id: String(++seq), name: file.name, size: file.size }, file });
+      const id = String(++seq);
+      next.push({ item: { id, name: file.name, size: file.size }, file });
+      void blobs.put(fileKey(id), file);
     }
     // A new pick starts a new batch: the previous report no longer describes it.
     set({
@@ -86,9 +106,49 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
     });
   },
 
-  remove: (id) => set((s) => ({ items: s.items.filter((c) => c.item.id !== id) })),
+  remove: (id) => {
+    void blobs.drop(fileKey(id));
+    set((s) => ({ items: s.items.filter((c) => c.item.id !== id) }));
+  },
 
-  reset: () => set({ items: [], result: null, error: null, phase: "idle", popupBlocked: false }),
+  reset: () => {
+    void blobs.dropAll("printer:");
+    set({ items: [], result: null, error: null, phase: "idle", popupBlocked: false });
+  },
+
+  resume: async () => {
+    if (resumed) return;
+    resumed = true;
+    const snap = kept.get<Snapshot>(KEPT);
+    if (!snap || get().items.length > 0 || get().phase === "processing") {
+      restored = true;
+      return;
+    }
+    const items = (
+      await Promise.all(
+        snap.items.map(async (item) => {
+          const blob = await blobs.get(fileKey(item.id));
+          if (!blob) return null;
+          const file = blob instanceof File ? blob : new File([blob], item.name, { type: "application/pdf" });
+          return { item, file };
+        }),
+      )
+    ).filter((x): x is { item: FileItem; file: File } => x !== null);
+    restored = true;
+    if (get().items.length > 0 || get().phase === "processing") return; // Picked meanwhile; that wins.
+    seq = Math.max(seq, ...items.map((i) => Number(i.item.id) || 0));
+    const lost = snap.items.length - items.length;
+    set({
+      items,
+      options: snap.options,
+      result: snap.result,
+      phase: snap.result ? "done" : snap.error || lost > 0 ? "error" : "idle",
+      error:
+        lost > 0
+          ? { message: `${lost} file${lost === 1 ? " was" : "s were"} not kept by this browser. Add ${lost === 1 ? "it" : "them"} again.` }
+          : snap.error,
+    });
+  },
 
   setOptions: (options) => set({ options }),
 
@@ -134,3 +194,17 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
     }
   },
 }));
+
+if (typeof window !== "undefined") {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  usePrinterStore.subscribe((s) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (!restored) return;
+      if (s.items.length === 0 && !s.result) return kept.drop(KEPT);
+      // A build cut short by a reload is not kept as running: the files are, and can be built again.
+      const snap: Snapshot = { items: s.items.map((i) => i.item), options: s.options, result: s.result, error: s.error };
+      kept.set(KEPT, snap, KEPT_MS);
+    }, 250);
+  });
+}

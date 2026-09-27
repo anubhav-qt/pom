@@ -32,6 +32,9 @@ import { getDashboardView, type DashboardView } from "./view-actions";
 
 type Tab = "overview" | "ledger";
 
+/** Whether a Finance screen has mounted yet: only the first one takes its tab from the server's URL. */
+let tabSeeded = false;
+
 function paramsFromSearch(search: string): { range: DashRange; basis: Basis; tab: Tab } {
   const p = new URLSearchParams(search);
   const range = p.get("range") ?? undefined;
@@ -43,17 +46,29 @@ function paramsFromSearch(search: string): { range: DashRange; basis: Basis; tab
   };
 }
 
+function tabInUrl(tab: Tab) {
+  const q = new URLSearchParams(window.location.search);
+  if (tab === "ledger") q.set("tab", "ledger");
+  else q.delete("tab");
+  const s = q.toString();
+  window.history.replaceState(null, "", withBasePath(s ? `/dashboard?${s}` : "/dashboard"));
+}
+
 const BASIS_LABEL: Record<Basis, string> = { paid: "Payment date", ordered: "Order date" };
 
 export function DashboardWorkspace({
   initialView,
   initialBasis,
-  initialTab = "overview",
+  initialTab,
 }: {
   initialView: DashboardView;
   /** The Ledger's basis from the URL; left as it is when omitted. */
   initialBasis?: Basis;
-  /** From the URL on the server, so the first client render matches the server HTML. */
+  /**
+   * From the URL on the server, so the first client render matches the server
+   * HTML. Later mounts (coming back from another screen) open the tab that was
+   * showing when Finance was left.
+   */
   initialTab?: Tab;
 }) {
   const range = useDashboardNav((s) => s.range);
@@ -62,7 +77,16 @@ export function DashboardWorkspace({
   const go = useDashboardNav((s) => s.go);
   const ledgerView = useLedgerNav((s) => s.view);
 
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const [tab, setTabState] = useState<Tab>(() => {
+    if (tabSeeded || !initialTab) return useDashboardNav.getState().tab;
+    tabSeeded = true;
+    useDashboardNav.setState({ tab: initialTab });
+    return initialTab;
+  });
+  const setTab = (next: Tab) => {
+    useDashboardNav.setState({ tab: next });
+    setTabState(next);
+  };
   const [view, setView] = useState<DashboardView>(initialView);
   const [loading, setLoading] = useState(false);
 
@@ -81,7 +105,8 @@ export function DashboardWorkspace({
       if (stripBasePath(window.location.pathname) !== "/dashboard") return;
       const p = paramsFromSearch(window.location.search);
       adopt({ range: p.range, basis: p.basis });
-      setTab(p.tab);
+      useDashboardNav.setState({ tab: p.tab });
+      setTabState(p.tab);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -89,12 +114,15 @@ export function DashboardWorkspace({
 
   function selectTab(next: Tab) {
     setTab(next);
-    const q = new URLSearchParams(window.location.search);
-    if (next === "ledger") q.set("tab", "ledger");
-    else q.delete("tab");
-    const s = q.toString();
-    window.history.replaceState(null, "", withBasePath(s ? `/dashboard?${s}` : "/dashboard"));
+    tabInUrl(next);
   }
+
+  // Coming back to the Ledger through a plain /dashboard link: the URL should say so.
+  useEffect(() => {
+    if (stripBasePath(window.location.pathname) === "/dashboard") tabInUrl(tab);
+    // Only on mount; later changes go through selectTab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // A finished sync empties the cache, and so does a cost saved in the Ledger.
   // Re-read after a sync and on every return to Overview, so fresh numbers

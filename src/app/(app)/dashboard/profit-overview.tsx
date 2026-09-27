@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
-
 import { Empty } from "@/components/ui";
+import { useKept } from "@/lib/stores/keep";
 import type { FlowLine, MonthRow, ProductRow, ProfitView } from "@/lib/profit";
 
 import { rangeLabel } from "./range";
@@ -593,7 +592,7 @@ function Td({ children, left, strong, color }: { children: React.ReactNode; left
 const TOP_PRODUCTS = 10;
 
 function Products({ rows, small, ads }: { rows: ProductRow[]; small: ProfitView["smallProducts"]; ads: number }) {
-  const [all, setAll] = useState(false);
+  const [all, setAll] = useKept("finance:all-products", false);
   if (rows.length === 0 && !small) return null;
   const max = Math.max(1, ...rows.filter((r) => !r.noCost).map((r) => Math.abs(r.profit)));
   const shown = (r: ProductRow, i: number) => all || i < TOP_PRODUCTS || r.noCost || r.profit < 0;
