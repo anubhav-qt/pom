@@ -504,6 +504,28 @@ const formatMoney = (n: number, currency: string) => {
 
 type MetaResult = { ok: true; data: MetaStatus } | { ok: false; error: string };
 
+/** The prepaid balance, with the link to add money (only the owner can: Meta has no API for it). */
+function PrepaidLine({ prepaid, currency }: { prepaid: NonNullable<MetaMonth["prepaid"]>; currency: string }) {
+  const link = (
+    <a className="inline-flex items-center gap-1 font-medium hover:underline" href={prepaid.topUp} target="_blank" rel="noreferrer">
+      Add funds <ExternalLink className="h-3 w-3" />
+    </a>
+  );
+  const text = prepaid.balance === null ? "Prepaid funds: Meta didn't say how much is left." : `Prepaid balance: ${formatMoney(prepaid.balance, currency)}.`;
+  if (prepaid.low) {
+    return (
+      <Notice tone="warn">
+        {text} That&apos;s low: ads stop when it runs out, and only you can add money. {link}
+      </Notice>
+    );
+  }
+  return (
+    <p className="muted flex flex-wrap items-center gap-x-2 text-xs tabular-nums">
+      {text} {link}
+    </p>
+  );
+}
+
 function Meta() {
   const [status, setStatus] = useState<MetaStatus | null>(null);
   const [month, setMonth] = useState<MetaMonth | null>(null);
@@ -661,6 +683,7 @@ function Meta() {
                   {month.accountStatus !== "active" ? ` · account ${month.accountStatus}` : ""}
                 </p>
               ) : null}
+              {month?.prepaid ? <PrepaidLine prepaid={month.prepaid} currency={month.currency} /> : null}
               <p className="muted text-xs">
                 Seelie asks before every ad, restart or bigger budget, and refuses anything that wouldn&apos;t fit under the cap. It may pause an ad or lower its budget on its own.
               </p>

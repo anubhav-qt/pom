@@ -211,6 +211,8 @@ export interface MetaMonth {
   spent: number;
   heldByRunning: number;
   room: number;
+  /** Prepaid funds, when the account runs on them (balance null: Meta didn't say). */
+  prepaid: { balance: number | null; low: boolean; topUp: string } | null;
 }
 
 /** This month's ad spend against the cap (null without an ad account). */
@@ -220,7 +222,14 @@ export async function metaMonthAction(): Promise<Result<MetaMonth | null>> {
     const ctx = await adsContext().catch(() => null);
     if (!ctx) return null;
     const room = await capRoom(ctx);
-    return { currency: room.currency, accountStatus: room.accountStatus, spent: room.spentThisMonth, heldByRunning: room.committedTotal, room: room.room };
+    return {
+      currency: room.currency,
+      accountStatus: room.accountStatus,
+      spent: room.spentThisMonth,
+      heldByRunning: room.committedTotal,
+      room: room.room,
+      prepaid: room.prepaid ? { balance: room.prepaid.balance, low: room.fundsLow, topUp: room.prepaid.topUp } : null,
+    };
   });
 }
 

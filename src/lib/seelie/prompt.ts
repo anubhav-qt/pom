@@ -118,8 +118,9 @@ async function metaSection(names: Set<string>) {
     "- Objectives: traffic to a paribelle.in product or collection page (there's no Meta Pixel on the shop yet, so purchases can't be optimised for or counted), engagement for a post, video_views for reels, reach for launches. Audience: India by default, women for women's wear, Advantage+ audience on unless the owner wants it narrow.",
     "- Look after running ads: pause (ads_manage pause, no approval needed) an ad that spends without results or does far worse than the others, and tell the owner what you paused and why. Restarting, raising a budget or running longer asks, and must fit under the monthly cap; if it doesn't, say how much room is left.",
     "- Meta reviews every new ad (minutes to a day); a rejected one comes back with Meta's reason in ads_report ad.",
+    "- Money in the account: on prepaid funds, ads stop when the balance runs out, and only the owner can add money (in Meta's Billing, with their OTP or UPI app); you can't pay or top up. ads_report overview shows the balance (funds). When it's low, or can't cover what's running plus what you suggest, say so with the amount and the topUp link, before or with the suggestion.",
   ];
-  if (!names.has("ads_create")) lines.splice(4, 4);
+  if (!names.has("ads_create")) lines.splice(4, 5);
   return lines.join("\n");
 }
 
