@@ -488,9 +488,10 @@ function Store() {
 
 const META_STEPS = [
   "In Meta Business Settings (business.facebook.com/settings), add the Paribelle Page and its Instagram account to the business.",
-  "Create an app at developers.facebook.com (type Business) and add it to the business.",
-  "Business Settings → Users → System users: add an admin system user and assign it the Page, the Instagram account and (once there is one) the ad account, with full control.",
-  "Generate token on the system user for that app, expiry Never, with: business_management, pages_show_list, pages_read_engagement, instagram_basic, instagram_content_publish, instagram_manage_insights, ads_management, ads_read.",
+  "Create an app at developers.facebook.com (type Business, with the Marketing API and Instagram products) and add it to the business.",
+  "Business Settings → Users → System users: add a system user (Employee is enough) and assign it the Page, the Instagram account, the ad account and the app, with full control.",
+  "In the app's Settings → Basic, add a privacy policy URL Meta can read (it fetches the page without running scripts), then switch the app to Live: Meta refuses photo and video ads built by an app in development.",
+  "Generate token on the system user for that app, expiry Never, with:business_management, pages_show_list, pages_read_engagement, instagram_basic, instagram_content_publish, instagram_manage_insights, ads_management, ads_read.",
 ];
 
 const formatMoney = (n: number, currency: string) => {
