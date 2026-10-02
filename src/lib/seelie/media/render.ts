@@ -1,14 +1,14 @@
 import "server-only";
 
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, open, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, open, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { ffmpegPath, runFfmpeg } from "@/lib/reels/ffmpeg";
 
 import { mediaFolder, mediaPath, MediaError, READABLE_FORMATS, SAFE_NAME } from "./files";
-import { checkGraph, GraphError, localizeGraph } from "./graph";
+import { checkGraph, GraphError, localizeGraph, type CheckedGraph } from "./graph";
 import { resolveRef, type RefContext, type Resolved } from "./refs";
 
 /**
@@ -181,6 +181,35 @@ function inputArgs(input: RenderInput, media: Resolved, fps: number, total: numb
   return args;
 }
 
+/** The files the graph names, copied into its folder under the plain names localizeGraph gives them. */
+async function stageFiles(checked: CheckedGraph, files: Record<string, string>, work: string, ctx: Pick<RefContext, "chatImages">) {
+  const assetNames = new Map<number, string>();
+  for (const id of checked.uses.assets) {
+    const media = await resolveRef(`asset:${id}`, { chatImages: ctx.chatImages, workDir: work });
+    if (media.kind !== "subtitles") throw new MediaError(`$asset/${id} isn't subtitles.`);
+    const name = `asset-${id}${path.extname(media.file)}`;
+    await copyFile(media.file, path.join(work, name));
+    assetNames.set(id, name);
+  }
+  for (const font of checked.uses.fonts) {
+    await copyFile(mediaPath("fonts", font), path.join(work, `font-${font}`)).catch(() => {
+      throw new MediaError(`There's no font ${font}. video_assets fonts lists them; add_font adds a Google font.`);
+    });
+  }
+  for (const lut of checked.uses.luts) {
+    await copyFile(mediaPath("luts", lut), path.join(work, `lut-${lut}`)).catch(() => {
+      throw new MediaError(`There's no look ${lut}. video_assets fonts lists the looks too.`);
+    });
+  }
+  for (const name of checked.uses.files) await writeFile(path.join(work, `file-${name}`), files[name]);
+  if (checked.uses.fontsDir) {
+    await mkdir(path.join(work, "fonts"));
+    const fontsDir = await mediaFolder("fonts");
+    for (const f of await readdir(fontsDir)) await copyFile(path.join(fontsDir, f), path.join(work, "fonts", f));
+  }
+  return assetNames;
+}
+
 /**
  * Render `spec` to `outFile`. The graph is checked first (GraphError says what to fix);
  * inputs are resolved through refs.ts. Throws MediaError when ffmpeg refuses it.
@@ -212,31 +241,7 @@ export async function renderGraph(
       resolved.push(media);
     }
 
-    // The files the graph names, copied in under the plain names localizeGraph gives them.
-    const assetNames = new Map<number, string>();
-    for (const id of checked.uses.assets) {
-      const media = await resolveRef(`asset:${id}`, { chatImages: ctx.chatImages, workDir: work });
-      if (media.kind !== "subtitles") throw new MediaError(`$asset/${id} isn't subtitles.`);
-      const name = `asset-${id}${path.extname(media.file)}`;
-      await copyFile(media.file, path.join(work, name));
-      assetNames.set(id, name);
-    }
-    for (const font of checked.uses.fonts) {
-      await copyFile(mediaPath("fonts", font), path.join(work, `font-${font}`)).catch(() => {
-        throw new MediaError(`There's no font ${font}. video_assets fonts lists them; add_font adds a Google font.`);
-      });
-    }
-    for (const lut of checked.uses.luts) {
-      await copyFile(mediaPath("luts", lut), path.join(work, `lut-${lut}`)).catch(() => {
-        throw new MediaError(`There's no look ${lut}. video_assets fonts lists the looks too.`);
-      });
-    }
-    for (const name of checked.uses.files) await writeFile(path.join(work, `file-${name}`), files[name]);
-    if (checked.uses.fontsDir) {
-      await mkdir(path.join(work, "fonts"));
-      const fontsDir = await mediaFolder("fonts");
-      for (const f of await readdir(fontsDir)) await copyFile(path.join(fontsDir, f), path.join(work, "fonts", f));
-    }
+    const assetNames = await stageFiles(checked, files, work, ctx);
 
     const { width, height } = outputSize(spec);
     const { fps, duration } = spec;
@@ -285,6 +290,61 @@ export async function renderGraph(
   } catch (err) {
     if (err instanceof GraphError) throw new MediaError(`The graph: ${err.message}`);
     throw err;
+  } finally {
+    await rm(work, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* A still from a graph (photo_edit)                                          */
+/* -------------------------------------------------------------------------- */
+
+/** Stills are bigger than videos: a 4K photo is 3584x4800. */
+const MAX_STILL_SIDE = 8192;
+
+/**
+ * One picture from a graph: the same sandbox as videos, with images read as a single
+ * frame (a clip from `start`), and [vout]'s first frame written as a PNG.
+ */
+export async function renderStill(
+  spec: { graph: string; inputs: ({ ref: string; start?: number } | { file: string })[]; files?: Record<string, string> },
+  ctx: Pick<RefContext, "chatImages"> & { signal: AbortSignal; progress: (text: string) => void },
+): Promise<Buffer> {
+  if (spec.inputs.length === 0 || spec.inputs.length > 40) throw new MediaError("A graph takes 1 to 40 inputs.");
+  const files = spec.files ?? {};
+  for (const [name, content] of Object.entries(files)) {
+    if (!SAFE_NAME.test(name)) throw new MediaError(`"${name}" isn't a plain file name (letters, digits, . _ -).`);
+    if (content.length > 200_000) throw new MediaError(`${name} is longer than 200,000 characters.`);
+  }
+  let checked: CheckedGraph;
+  try {
+    checked = checkGraph(spec.graph, spec.inputs.length, files);
+  } catch (err) {
+    if (err instanceof GraphError) throw new MediaError(`The graph: ${err.message}`);
+    throw err;
+  }
+  const work = await mkdtemp(path.join(os.tmpdir(), "seelie-still-"));
+  try {
+    const args: string[] = [];
+    for (const input of spec.inputs) {
+      // A picture the server made itself (photo_edit's current image), by path.
+      if ("file" in input) {
+        args.push("-protocol_whitelist", "file", "-format_whitelist", READABLE_FORMATS.join(","), "-i", input.file);
+        continue;
+      }
+      const media = await resolveRef(input.ref, { chatImages: ctx.chatImages, workDir: work });
+      if (media.kind !== "image" && media.kind !== "video") throw new MediaError(`${input.ref} isn't a picture or a clip.`);
+      args.push("-protocol_whitelist", "file", "-format_whitelist", READABLE_FORMATS.join(","));
+      if (media.kind === "video" && input.start) args.push("-ss", input.start.toFixed(3));
+      args.push("-i", media.file);
+    }
+    const assetNames = await stageFiles(checked, files, work, ctx);
+    const graph = `${localizeGraph(spec.graph, (id) => assetNames.get(id) ?? `asset-${id}`)};
+[vout]scale=w='min(iw,${MAX_STILL_SIDE})':h='min(ih,${MAX_STILL_SIDE})':force_original_aspect_ratio=decrease,format=rgba[__v]`;
+    await writeFile(path.join(work, "graph.txt"), graph);
+    ctx.progress("Rendering the still…");
+    await runSandboxed([...args, "-filter_complex_script", "graph.txt", "-map", "[__v]", "-frames:v", "1", "-update", "1", "out.png"], work, 1, ctx.signal, () => {});
+    return await readFile(path.join(work, "out.png"));
   } finally {
     await rm(work, { recursive: true, force: true }).catch(() => {});
   }

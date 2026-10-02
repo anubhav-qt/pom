@@ -1,0 +1,6 @@
+{#- Last on purpose: the details that must survive, named one by one (Google's guidance:
+    say what to keep; "keep everything else" alone doesn't hold). -#}
+The garment must match the product images exactly. {{ garment.spec }}
+{% if garment.keep.length %}Keep exactly: {% for k in garment.keep %}{{ k }}{% if not loop.last %}; {% endif %}{% endfor %}.{% endif %}
+{% if garment.colours.length %}Its colours are {% for c in garment.colours %}{{ c }}{% if loop.revindex == 2 %} and {% elif not loop.last %}, {% endif %}{% endfor %}: render them true under this light, with no hue shift, no added saturation and no fading.{% endif %}
+Keep every motif at the same size, spacing and placement; add, remove, simplify or mirror no motif, border or embroidery; keep the neckline, the sleeve length and cuffs, the length and hem, the flare and the slits as they are.{% if not garment.hasBack and kind != "flat-lay" and change != "to-flat-lay" %} The product images show only its front, so the photograph shows the front or a slight three-quarter turn, never its back.{% endif %}

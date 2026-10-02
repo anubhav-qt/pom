@@ -1013,7 +1013,7 @@ export const seelieAssets = pgTable(
     userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
     /** image | video | audio | subtitles */
     kind: text("kind").notNull(),
-    /** upload | url | cutout | generated | frame */
+    /** upload | url | cutout | generated | frame | photoshoot | edited | mask */
     source: text("source").notNull(),
     name: text("name").notNull(),
     mime: text("mime").notNull(),
@@ -1061,6 +1061,90 @@ export const seelieVideos = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("seelie_videos_updated_idx").on(t.updatedAt)],
+);
+
+/**
+ * Seelie's product studio. Only photoshoots generate images (the Antigravity image
+ * model, capped at a handful of images per account every ~5 hours, a cap Google
+ * doesn't report); every other photo edit is Seelie's own code.
+ *
+ * A garment as Seelie has studied it: its photos and the exact description it wrote
+ * after looking at all of them, reused by every later shoot of that product.
+ * `key` names the product: "sku:<oms sku>", "store:<paribelle id>", "asin:<asin>",
+ * or "look:<name>" for one known only from photos.
+ */
+export const seelieGarments = pgTable("seelie_garments", {
+  key: text("key").primaryKey(),
+  name: text("name").notNull(),
+  /** Seelie's description after studying every photo (`GarmentSpec` in src/lib/seelie/studio/prompts.ts). */
+  spec: jsonb("spec"),
+  /** The product's photos as assets: `{ ref, view, note? }` (view: front, back, side, detail, worn, flat). */
+  photos: jsonb("photos").notNull().default([]),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** A recurring model for shoots (a synthetic person): reference images keep the face the same across a set. */
+export const seeliePersonas = pgTable("seelie_personas", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  /** Up to 4 image asset ids: face first, then full length. */
+  refs: jsonb("refs").notNull().default([]),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One photoshoot: a garment, a persona and its looks, each with every attempt, the
+ * check of each attempt and the one chosen (`ShootLook` in src/lib/seelie/studio/shoots.ts).
+ */
+export const seelieShoots = pgTable(
+  "seelie_shoots",
+  {
+    id: serial("id").primaryKey(),
+    chatId: uuid("chat_id").references(() => seelieChats.id, { onDelete: "set null" }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    garmentKey: text("garment_key").references(() => seelieGarments.key, { onDelete: "set null" }),
+    personaId: integer("persona_id").references(() => seeliePersonas.id, { onDelete: "set null" }),
+    /** What the owner asked for, in their words. */
+    brief: text("brief"),
+    looks: jsonb("looks").notNull().default([]),
+    /** planned | shooting | waiting (on the image cap) | done */
+    status: text("status").notNull().default("planned"),
+    liked: boolean("liked"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("seelie_shoots_updated_idx").on(t.updatedAt)],
+);
+
+/**
+ * Every image-model call: the ledger the image budget is worked out from, since the
+ * account's cap shows nowhere else. `outcome`: ok | limit (HTTP 429, with the reset
+ * time it gave) | empty (no image came back) | error.
+ */
+export const seelieImageCalls = pgTable(
+  "seelie_image_calls",
+  {
+    id: serial("id").primaryKey(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    chatId: uuid("chat_id").references(() => seelieChats.id, { onDelete: "set null" }),
+    shootId: integer("shoot_id").references(() => seelieShoots.id, { onDelete: "set null" }),
+    look: text("look"),
+    model: text("model").notNull(),
+    size: text("size"),
+    aspect: text("aspect"),
+    refs: integer("refs").notNull().default(0),
+    outcome: text("outcome").notNull(),
+    resetAt: timestamp("reset_at", { withTimezone: true }),
+    ms: integer("ms"),
+    error: text("error"),
+  },
+  (t) => [index("seelie_image_calls_at_idx").on(t.at)],
 );
 
 export type User = typeof users.$inferSelect;

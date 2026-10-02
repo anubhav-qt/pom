@@ -1,0 +1,17 @@
+{% extends "base.njk" %}
+
+{% block shot %}
+A premium ghost-mannequin product photograph for Paribelle, an Indian women's ethnic wear label: the {{ garment.name }} from the product images, holding the shape of a body inside it as if worn while no person or mannequin is visible; the inside of the back neckline shows through the open neck.
+{% endblock %}
+
+{% block subject %}
+It faces the camera {{ shot.angle or "straight on" }}, symmetrical, the sleeves falling naturally and the hem level{% if garment.hasDupatta %}, the dupatta draped over one shoulder so its border shows{% endif %}.{% if shot.pose %} {{ shot.pose }}.{% endif %}
+{% endblock %}
+
+{% block setting %}
+The background is {{ setting }}.
+{% endblock %}
+
+{% block light %}
+The light is {{ light }}. Shot on a full-frame camera with {{ camera }}.
+{% endblock %}

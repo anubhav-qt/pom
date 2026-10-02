@@ -1,0 +1,5 @@
+{#- What each attached image is for, by its number. Naming each one's role is the
+    biggest help to fidelity in Google's guidance for prompts with several images. -#}
+{% for r in refs %}
+Image {{ loop.index }} {% if r.role == "product" %}is the product{% if r.view %} ({{ r.view }}){% endif %}: our own photograph of the exact garment, the truth for every detail of it; its background, person, pose and light don't matter{% if r.view == "mirror selfie" %}, nor does the phone{% endif %}.{% elif r.role == "detail" %}is a close-up of the garment{% if r.note %}'s {{ r.note }}{% endif %}: reproduce it exactly.{% elif r.role == "persona" %}is the model: keep her face, features, skin tone, hair and build exactly.{% elif r.role == "anchor" %}is an earlier photograph from this set: match its location, light, colour grade and the model's look, not its pose or framing.{% elif r.role == "source" %}is the source photograph to change.{% else %}is a mood reference only: take its light, palette and atmosphere, nothing else.{% endif %}{% if r.note and r.role != "detail" %} {{ r.note }}.{% endif %}
+{% endfor %}

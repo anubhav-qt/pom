@@ -4,10 +4,11 @@ import type { User } from "@/db/schema";
 
 import { amazonApi, amazonListings, catalogueLink, inventoryTool, productsTool, productUpdate, pushStock, restockPlan } from "./catalogue";
 import { viewImages } from "./images";
-import { imageStudio } from "./imagery";
 import { finance, orderNotes } from "./money";
 import { cancellations, findOrders, fulfilment, orderDetails, ordersOverview, scanLookup } from "./orders";
-import { videoPublish } from "./publish";
+import { imageSpecs, photoEdit } from "./photo";
+import { photoshoot } from "./photoshoot";
+import { photoPublish, videoPublish } from "./publish";
 import { returnsDesk, returnsUpdate } from "./returns";
 import { songs } from "./songs";
 import { sqlQuery, sqlSchema } from "./sql";
@@ -70,8 +71,13 @@ const ALL = [
   videoRender,
   videoLibrary,
   videoPublish,
-  imageStudio,
   songs,
+  // Product photos: new pictures only through photoshoot (the capped image model); every
+  // edit is code (photo_edit); marketplace rules are saved presets
+  photoshoot,
+  photoEdit,
+  imageSpecs,
+  photoPublish,
   // The web
   webSearch,
   fetchUrl,
@@ -88,6 +94,6 @@ export function toolsFor(user: Pick<User, "role">): SeelieTool[] {
 
 /** Every tool's card label, by name (for rows read back from the database). */
 export function toolLabels(): Map<string, string> {
-  // reels: chats from before Seelie made its own videos still show its cards.
-  return new Map([...ALL.map((t) => [t.name, t.label] as [string, string]), ["reels", "Reels"]]);
+  // Retired tools: older chats still show their cards.
+  return new Map([...ALL.map((t) => [t.name, t.label] as [string, string]), ["reels", "Reels"], ["image_studio", "Image studio"]]);
 }

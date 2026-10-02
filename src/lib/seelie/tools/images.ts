@@ -74,7 +74,11 @@ export async function toJpeg(bytes: Buffer, edge: number, quality = 85): Promise
   const w = Math.max(1, Math.round(img.width * scale));
   const h = Math.max(1, Math.round(img.height * scale));
   const canvas = createCanvas(w, h);
-  canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+  const ctx = canvas.getContext("2d");
+  // JPEG has no transparency: a cut-out goes on white, not black.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
   return canvas.encode("jpeg", quality);
 }
 

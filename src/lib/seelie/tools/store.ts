@@ -9,6 +9,7 @@ import { parseVariantTitle, sortSizes } from "@/lib/variant-title";
 
 import { STORE_VENDOR_ID, storeApiUrl, storeDocs, StoreError, storeFetch, type StoreMethod } from "../store";
 import { fetchImage, toJpeg } from "./images";
+import { imageOf } from "./photo";
 import { defineTool, ToolError, type ToolContext } from "./types";
 import { listRefs, num, plural, StringEnum } from "./util";
 
@@ -199,7 +200,7 @@ const StoreChange = Type.Object({
   status: Type.Optional(StringEnum(["active", "draft", "inactive", "out_of_stock", "archived"])),
   ...PriceFields,
   categoryIds: Type.Optional(Type.Array(Type.String())),
-  images: Type.Optional(Type.Array(Type.String(), { description: "The full photo list (first is the cover)." })),
+  images: Type.Optional(Type.Array(Type.String(), { description: "The full photo list (first is the cover): store URLs, other https URLs, chat:N or asset:N (new ones are uploaded first)." })),
   allVariants: Type.Optional(Type.Object(PriceFields, { description: "Applied to every variant." })),
   variants: Type.Optional(
     Type.Array(
@@ -274,7 +275,13 @@ export const storeUpdateProducts = defineTool({
   },
   async execute(a, ctx) {
     const results = [];
+    // New photos (URLs, chat:N, asset:N) go on the store's own host first; a preview uploads nothing.
+    const photos = a.changes.flatMap((c) => [...(c.images ?? []), ...(c.variants ?? []).flatMap((v) => v.images ?? [])]).filter((u) => !isVideoUrl(u));
+    const hosted = a.preview ? new Map(photos.map((u) => [u, u])) : await rehost(photos, ctx);
+    const host = (list: string[]) => list.map((u) => hosted.get(u) ?? u);
     for (const change of a.changes) {
+      if (change.images) change.images = host(change.images);
+      for (const v of change.variants ?? []) if (v.images) v.images = host(v.images);
       ctx.progress(`${a.preview ? "Working out" : "Saving"} ${change.id}…`);
       const before = await getProduct(change.id);
       const variants = before.productVariants ?? [];
@@ -402,8 +409,8 @@ const UPLOAD_EDGE = 1920;
 
 /**
  * Photos on the store's own image host, so the shop never hotlinks Amazon.
- * Accepts https URLs and "chat:N" (the Nth image attached in this chat).
- * Already-hosted Cloudinary URLs pass through.
+ * Accepts https URLs, "chat:N" (the Nth image attached in this chat) and "asset:N"
+ * (Seelie's media: shoot results, photo_edit output). Cloudinary URLs pass through.
  */
 async function rehost(refs: string[], ctx: ToolContext): Promise<Map<string, string>> {
   const out = new Map<string, string>();
@@ -415,45 +422,42 @@ async function rehost(refs: string[], ctx: ToolContext): Promise<Map<string, str
     return true;
   });
   if (todo.length === 0) return out;
-  const chat = todo.some((r) => r.startsWith("chat:")) ? await ctx.chatImages() : [];
   for (let i = 0; i < todo.length; i += 10) {
     const batch = todo.slice(i, i + 10);
     ctx.progress(`Uploading photos ${i + 1}–${i + batch.length} of ${todo.length}…`);
     const files: Buffer[] = [];
     for (const ref of batch) {
-      let bytes: Buffer;
-      if (ref.startsWith("chat:")) {
-        const n = Number(ref.slice(5));
-        const image = chat[n - 1];
-        if (!image) throw new ToolError(`There's no image ${n} in this chat (it has ${chat.length}).`);
-        bytes = Buffer.from(image.data, "base64");
-      } else {
-        bytes = await fetchImage(ref, ctx.signal);
-      }
-      files.push(await toJpeg(bytes, UPLOAD_EDGE, 85));
+      const bytes = /^(chat|asset):/.test(ref) ? (await imageOf(ref, ctx)).bytes : await fetchImage(ref, ctx.signal);
+      files.push(await toJpeg(bytes, UPLOAD_EDGE, 88));
     }
-    const uploaded = await call<{ url: string }[]>("POST", "/upload/images", {
-      form: () => {
-        const form = new FormData();
-        files.forEach((f, j) => form.append("files", new Blob([new Uint8Array(f)], { type: "image/jpeg" }), `seelie-${Date.now()}-${j}.jpg`));
-        return form;
-      },
-      signal: ctx.signal,
-    });
-    batch.forEach((ref, j) => {
-      const url = uploaded[j]?.url;
-      if (!url) throw new ToolError("The store's image upload didn't answer with a URL.");
-      out.set(ref, url);
-    });
+    const urls = await uploadJpegs(files, ctx.signal);
+    batch.forEach((ref, j) => out.set(ref, urls[j]));
   }
   return out;
+}
+
+/** JPEGs onto the store's image host (paribelle.in's Cloudinary), 10 at most at a time; their URLs in order. */
+export async function uploadJpegs(files: Buffer[], signal: AbortSignal): Promise<string[]> {
+  const uploaded = await call<{ url: string }[]>("POST", "/upload/images", {
+    form: () => {
+      const form = new FormData();
+      files.forEach((f, j) => form.append("files", new Blob([new Uint8Array(f)], { type: "image/jpeg" }), `seelie-${Date.now()}-${j}.jpg`));
+      return form;
+    },
+    signal,
+  });
+  return files.map((_, j) => {
+    const url = uploaded[j]?.url;
+    if (!url) throw new ToolError("The store's image upload didn't answer with a URL.");
+    return url;
+  });
 }
 
 export const storeUploadImages = defineTool({
   name: "store_upload_images",
   label: "Upload photos to paribelle.in",
   description:
-    "Put photos on paribelle.in's image host and get their URLs, to use in store_create_products or store_update_products: https image URLs (e.g. Amazon's), or 'chat:N' for the Nth image attached in this chat. Up to 30.",
+    "Put photos on paribelle.in's image host and get their URLs, to use in store_create_products or store_update_products: https image URLs (e.g. Amazon's), 'chat:N' for the Nth image attached in this chat, or 'asset:N' (a shoot result, a photo_edit output). Up to 30.",
   parameters: Type.Object({ images: Type.Array(Type.String(), { minItems: 1, maxItems: 30 }) }),
   kind: "store",
   ownerOnly: true,
@@ -461,7 +465,7 @@ export const storeUploadImages = defineTool({
   summary: (a) => `Upload ${plural(a.images.length, "photo")}`,
   async execute(a, ctx) {
     const map = await rehost(a.images, ctx);
-    return { data: a.images.map((ref) => ({ from: ref.startsWith("chat:") ? ref : ref.slice(0, 120), url: map.get(ref) })) };
+    return { data: a.images.map((ref) => ({ from: ref.slice(0, 120), url: map.get(ref) })) };
   },
 });
 
@@ -499,7 +503,7 @@ const NewVariant = Type.Object({
   price: Type.Number({ minimum: 1 }),
   mrp: Type.Optional(Type.Number({ minimum: 1 })),
   stock: Type.Integer({ minimum: 0 }),
-  images: Type.Optional(Type.Array(Type.String(), { description: "This colour's photos (URLs or chat:N)." })),
+  images: Type.Optional(Type.Array(Type.String(), { description: "This colour's photos (URLs, chat:N or asset:N)." })),
 });
 
 const NewProduct = Type.Object({
@@ -509,7 +513,7 @@ const NewProduct = Type.Object({
   categoryIds: Type.Optional(Type.Array(Type.String())),
   code: Type.String({ description: "Product code (the product's own SKU)." }),
   status: Type.Optional(StringEnum(["active", "draft"], { description: "Default draft." })),
-  images: Type.Array(Type.String(), { description: "Product photos, cover first: URLs or chat:N." }),
+  images: Type.Array(Type.String(), { description: "Product photos, cover first: URLs, chat:N or asset:N." }),
   price: Type.Optional(Type.Number({ minimum: 1, description: "Single-option products only." })),
   mrp: Type.Optional(Type.Number({ minimum: 1 })),
   stock: Type.Optional(Type.Integer({ minimum: 0 })),

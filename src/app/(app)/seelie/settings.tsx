@@ -9,12 +9,14 @@ import { CenteredSpinner, Spinner } from "@/components/ui";
 import type { InstagramStatus } from "@/lib/seelie/instagram";
 import type { AccountLimits, LimitWindow } from "@/lib/seelie/limits";
 import type { StoreStatus } from "@/lib/seelie/store";
+import type { ImageBudget } from "@/lib/seelie/studio/budget";
 import { useSeelie } from "@/lib/stores/seelie-store";
 
 import {
   accountEnabledAction,
   cancelLoginAction,
   finishLoginAction,
+  imageBudgetAction,
   instagramConnectAction,
   instagramDisconnectAction,
   instagramStatusAction,
@@ -49,6 +51,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           hint="The reasoning before each reply, folded under it."
         />
         {online ? <Accounts owner={owner} /> : null}
+        {online ? <ImageGeneration /> : null}
         {owner ? <Store /> : null}
         {owner ? <Instagram /> : null}
       </div>
@@ -122,7 +125,7 @@ function resetIn(at: string | null) {
   return h ? `resets in ${h}h ${m}m` : `resets in ${m}m`;
 }
 
-function Bar({ w }: { w: LimitWindow }) {
+function Bar({ w, detail }: { w: LimitWindow; detail?: string }) {
   const pct = Math.round(w.used * 100);
   const color = w.used > 0.85 ? "var(--danger)" : w.used > 0.6 ? "var(--warn)" : "var(--accent)";
   return (
@@ -133,7 +136,8 @@ function Bar({ w }: { w: LimitWindow }) {
           {w.scope ? <span className="muted"> · {w.scope}</span> : null}
         </span>
         <span className="muted shrink-0 tabular-nums">
-          {pct}% used{resetIn(w.resetAt) ? ` · ${resetIn(w.resetAt)}` : ""}
+          {detail ?? `${pct}% used`}
+          {resetIn(w.resetAt) ? ` · ${resetIn(w.resetAt)}` : ""}
         </span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full" style={{ background: "var(--panel)" }}>
@@ -201,6 +205,64 @@ function Account({ account: a, owner, onChanged }: { account: AccountLimits; own
       {a.error ? <p className="muted text-xs">{a.error}</p> : null}
       {error ? <p className="text-xs" style={{ color: "var(--danger)" }}>{error}</p> : null}
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Image generation: the photoshoot budget from Seelie's own ledger            */
+/* -------------------------------------------------------------------------- */
+
+function ImageGeneration() {
+  // Reloads with the accounts (their Refresh button, an account turned on or off).
+  const limits = useSeelie((s) => s.limits);
+  const [budget, setBudget] = useState<ImageBudget | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void imageBudgetAction().then((res) => {
+      if (!live) return;
+      if (res.ok) {
+        setBudget(res.data);
+        setError(null);
+      } else setError(res.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, [limits]);
+
+  const b = budget;
+  return (
+    <section>
+      <Heading>Image generation</Heading>
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      {!b && !error ? <CenteredSpinner className="py-6" /> : null}
+      {b ? (
+        <div className="surface-2 space-y-2 p-3.5">
+          <Bar
+            w={{
+              id: "images",
+              label: "Photoshoots",
+              scope: `~${b.capacity} images per 5 hours${b.accounts > 1 ? ` across ${b.accounts} accounts` : ""}`,
+              used: b.blockedUntil ? 1 : b.capacity ? Math.min(1, b.used / b.capacity) : 0,
+              resetAt: b.resetAt,
+            }}
+            detail={b.blockedUntil ? "used up" : `about ${b.left} of ~${b.capacity} left`}
+          />
+          {b.waiting ? (
+            <p className="muted text-xs">
+              {b.waiting === 1 ? "1 look is" : `${b.waiting} looks are`} waiting in a shoot. Tell Seelie to continue in that chat once
+              the images are back.
+            </p>
+          ) : null}
+          <p className="muted text-xs">
+            Google doesn&apos;t show this limit, so Seelie counts every image it makes and learns where the limit falls. Only
+            photoshoots use it; editing photos is free.
+          </p>
+        </div>
+      ) : null}
+    </section>
   );
 }
 

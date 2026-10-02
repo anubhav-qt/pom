@@ -11,6 +11,9 @@ const basePath = "/pom";
 /** Seelie's ffmpeg and canvas, for the routes that render or read media. */
 const media = ["./node_modules/ffmpeg-static/ffmpeg*", "./node_modules/@napi-rs/canvas-linux-x64-gnu/**"];
 
+/** The product studio's prompt templates and the watermark alpha maps, read from src/ at run time. */
+const studio = ["./src/lib/seelie/studio/templates/**", "./src/lib/seelie/studio/watermark/**"];
+
 /**
  * onnxruntime-node (Seelie's cut-outs) loads `bin/napi-v6/<platform>/<arch>/`'s binding,
  * which pulls in its shared library by itself: tracing sees neither. Only the ThinkPad's
@@ -69,7 +72,7 @@ const nextConfig = {
    * external it resolves from node_modules normally, which is the only way
    * label splitting works inside a route handler.
    */
-  serverExternalPackages: ["pdf-lib", "xlsx", "pdfjs-dist", "@napi-rs/canvas", "ffmpeg-static", "onnxruntime-node"],
+  serverExternalPackages: ["pdf-lib", "xlsx", "pdfjs-dist", "@napi-rs/canvas", "ffmpeg-static", "onnxruntime-node", "nunjucks"],
 
   /**
    * pdfjs loads its worker with a dynamic import it builds at runtime, which
@@ -92,10 +95,13 @@ const nextConfig = {
     ],
     /**
      * Seelie's tools run inside the request that started the reply: reels, renders,
-     * cut-outs. Uploads are read by ffmpeg as they arrive.
+     * cut-outs, photo edits and shoots (their prompt templates and the watermark maps
+     * are read from src/ at run time). Uploads are read by ffmpeg as they arrive; an
+     * image asset's small copy is drawn with the canvas.
      */
-    "/api/seelie/runs": [...media, ...onnx, "./src/lib/reels/assets/**"],
+    "/api/seelie/runs": [...media, ...onnx, "./src/lib/reels/assets/**", ...studio],
     "/api/seelie/assets": media,
+    "/api/seelie/assets/[id]": media,
   },
 
   outputFileTracingExcludes: {

@@ -4,6 +4,7 @@ import type { AssistantMessage, ImageContent, TextContent, ToolCall, ToolResultM
 import {
   AlertTriangle,
   Ban,
+  Camera,
   Check,
   ChevronDown,
   Database,
@@ -248,6 +249,7 @@ const KIND: Record<ToolKind, { Icon: LucideIcon; asks: string }> = {
   market: { Icon: ShoppingBag, asks: "This changes Amazon." },
   store: { Icon: Globe, asks: "This changes paribelle.in." },
   publish: { Icon: Send, asks: "This posts publicly." },
+  spend: { Icon: Camera, asks: "This uses the image model's limited budget." },
 };
 
 function humanize(name: string) {
@@ -317,6 +319,7 @@ function ToolCard({ call, row: maybeRow, result, chatId }: { call: ToolCall; row
   const [open, setOpen] = useState(false);
   const out = readResult(result?.result);
   const video = videoOf(out?.data);
+  const pictures = picturesOf(out?.data);
   const { Icon } = KIND[row.kind];
   const took = duration(row);
 
@@ -342,6 +345,8 @@ function ToolCard({ call, row: maybeRow, result, chatId }: { call: ToolCall; row
         </div>
       ) : null}
 
+      {pictures.length ? <Pictures pictures={pictures} /> : null}
+
       {open || awaiting ? (
         <div className="space-y-2.5 border-t px-3 py-2.5" style={{ borderColor: "var(--border)" }}>
           <Section title={awaiting ? "What it will do" : "Asked"}>
@@ -363,6 +368,62 @@ function ToolCard({ call, row: maybeRow, result, chatId }: { call: ToolCall; row
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+interface CardPicture {
+  id: number;
+  name: string;
+  size?: string;
+}
+
+/** Sources of the pictures Seelie made (not the photos it was given, nor masks). */
+const MADE = new Set(["photoshoot", "edited", "generated", "cutout"]);
+
+/** The pictures a photo tool made, anywhere in its result (photo_edit's list, a shoot's results, a model sheet). */
+function picturesOf(data: unknown): CardPicture[] {
+  const found = new Map<number, CardPicture>();
+  const walk = (v: unknown, depth: number) => {
+    if (!v || typeof v !== "object" || depth > 4 || found.size >= 24) return;
+    if (Array.isArray(v)) return v.forEach((x) => walk(x, depth + 1));
+    const o = v as Record<string, unknown>;
+    const id = typeof o.ref === "string" ? /^asset:(\d+)$/.exec(o.ref)?.[1] : undefined;
+    if (id && o.kind === "image" && typeof o.source === "string" && MADE.has(o.source)) {
+      found.set(Number(id), { id: Number(id), name: typeof o.name === "string" ? o.name : o.ref as string, ...(typeof o.size === "string" ? { size: o.size } : {}) });
+      return;
+    }
+    for (const x of Object.values(o)) walk(x, depth + 1);
+  };
+  walk(data, 0);
+  return [...found.values()];
+}
+
+const assetUrl = (id: number, query: string) => withBasePath(`/api/seelie/assets/${id}?${query}`);
+
+/** What a photo tool made, each with Download (the full file). */
+function Pictures({ pictures }: { pictures: CardPicture[] }) {
+  return (
+    <div className="flex flex-wrap gap-2.5 px-3 pb-3">
+      {pictures.map((p) => (
+        <figure key={p.id} className="w-28 space-y-1">
+          <ZoomImg
+            src={assetUrl(p.id, "w=480")}
+            fullSrc={assetUrl(p.id, "w=1280")}
+            alt={p.name}
+            className="h-36 w-28 rounded-lg object-cover"
+            style={{ border: "1px solid var(--border)", background: "var(--panel)" }}
+          />
+          <figcaption className="flex items-center gap-1">
+            <span className="muted min-w-0 flex-1 truncate text-[11px]" title={p.name}>
+              {p.size ?? p.name}
+            </span>
+            <a href={assetUrl(p.id, "download=1")} download className="btn shrink-0 p-1" aria-label={`Download ${p.name}`} title="Download">
+              <Download className="h-3.5 w-3.5" />
+            </a>
+          </figcaption>
+        </figure>
+      ))}
     </div>
   );
 }

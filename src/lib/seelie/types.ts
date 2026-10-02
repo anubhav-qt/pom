@@ -11,11 +11,12 @@ import type { AssistantMessage, Message } from "@paribelle/pi-ai";
  *  - market: changes a marketplace (Amazon); always asks.
  *  - store:  changes paribelle.in; always asks.
  *  - publish: posts to a social account (Instagram); always asks.
+ *  - spend:  uses the image model's capped budget (a photoshoot); always asks.
  */
-export type ToolKind = "read" | "write" | "market" | "store" | "publish";
+export type ToolKind = "read" | "write" | "market" | "store" | "publish" | "spend";
 
 /** Kinds that ask even when the chat auto-approves. */
-export const ALWAYS_ASK: readonly ToolKind[] = ["market", "store", "publish"];
+export const ALWAYS_ASK: readonly ToolKind[] = ["market", "store", "publish", "spend"];
 
 export type ToolStatus = "queued" | "awaiting" | "denied" | "running" | "done" | "error";
 export type Approval = "auto" | "approved" | "denied";

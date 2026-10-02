@@ -86,14 +86,18 @@ stack's network; on Vercel `CLIPROXY_URL` is unset and Seelie shows offline.
   with the owner's admin login saved, encrypted, in the OMS database.
 - **Chats stay here.** The `seelie_*` tables aren't synced to Supabase (`sync/policy.json`).
 - **Videos.** Seelie renders with the image's ffmpeg, one render at a time, at low priority.
-  Its media (uploaded clips, renders, fonts, generated images and the 115 MB cut-out model,
-  downloaded on first use) lives in the `seelie-media` volume at `/data/seelie`, not in the
-  database and not in the backups. yt-dlp is in the image, pinned (`YTDLP_VERSION` and its
+  Its media (uploaded clips, renders, fonts, photoshoot pictures, local copies of the OMS
+  catalogue photos, and the cut-out, inpainting, selection and upscaling models, downloaded
+  on first use) lives in the `seelie-media` volume at `/data/seelie`, not in the database
+  and not in the backups. yt-dlp is in the image, pinned (`YTDLP_VERSION` and its
   checksum in the Dockerfile; bump both together when YouTube breaks it).
 - **Instagram.** Paste the shop account's long-lived token in Seelie's settings (the
   Instagram panel); it's kept encrypted and renewed by itself. Instagram fetches each reel
   from a signed two-hour link under `SEELIE_PUBLIC_URL` (default `https://www.paribelle.in`,
   which the Worker forwards to `/pom` here), so publishing needs the tunnel up.
+- **Photoshoots.** The image model (`gemini-3.1-flash-image`, through the Antigravity
+  sign-ins) has a cap Google doesn't show, about 9 images per 5 hours per account; Seelie
+  keeps its own ledger (`seelie_image_calls`) and each extra Antigravity sign-in adds to it.
 - **paribelle.in product videos** go through the API's admin `POST /upload/product-video`
   (Cloudinary), then last in the product's photos, where the storefront gallery plays them.
 - **Version.** The image is pinned to the release Seelie was tested with; to move it, set

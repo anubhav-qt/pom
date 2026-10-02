@@ -381,20 +381,25 @@ function agentTool(run: LiveRun, tool: SeelieTool): AgentTool {
 async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: Map<string, SeelieTool>) {
   const calls = message.content.filter((c) => c.type === "toolCall");
   if (calls.length === 0) return;
-  const rows: ToolRow[] = calls.map((call) => {
+  const rows: ToolRow[] = [];
+  for (const call of calls) {
     const tool = tools.get(call.name);
     let kind: ToolKind = "read";
     let summary: string | null = null;
     if (tool) {
       try {
         kind = kindOf(tool, call.arguments);
-        summary = tool.summary(call.arguments as never) || null;
       } catch {
         kind = typeof tool.kind === "string" ? tool.kind : "write";
       }
+      try {
+        summary = (await tool.summary(call.arguments as never)) || null;
+      } catch {
+        // Arguments it can't summarise: the card shows them as they are.
+      }
     }
     const asks = needsApproval(kind, run.autoApprove);
-    return {
+    rows.push({
       runId: run.id,
       callId: call.id,
       tool: call.name,
@@ -408,8 +413,8 @@ async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: M
       decidedAt: null,
       startedAt: null,
       endedAt: null,
-    };
-  });
+    });
+  }
   await db
     .insert(seelieToolCalls)
     .values(

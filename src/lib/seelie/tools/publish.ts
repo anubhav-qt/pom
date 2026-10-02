@@ -3,20 +3,33 @@ import "server-only";
 import { readFile, stat } from "node:fs/promises";
 
 import { Type } from "@paribelle/pi-ai";
+import { eq, or } from "drizzle-orm";
+
+import { db } from "@/db";
+import { products } from "@/db/schema";
+import { LOCAL_COPY_MARK } from "@/lib/photo-src";
 
 import { InstagramError, instagramReady, publishReel } from "../instagram";
-import { videoFile } from "../media/files";
+import { saveLocalCopy } from "../media/catalogue";
+import { subjectMask } from "../media/cutout";
+import { getAsset, videoFile } from "../media/files";
 import { addPublished, getVideo, publishedOf, versionOf, versionsOf, type VideoRow, type VideoVersion } from "../media/library";
 import { publicOrigin, publicVideoUrl } from "../media/public";
 import { storeApiUrl, StoreError, storeFetch } from "../store";
-import { getProduct, isVideoUrl, money, type StoreVariant } from "./store";
+import { whiteCheck } from "../studio/edit";
+import { decode, toCanvas } from "../studio/raster";
+import { amazonAccount, amazonAdapter } from "./catalogue";
+import { toJpeg } from "./images";
+import { imageOf } from "./photo";
+import { getProduct, isVideoUrl, money, uploadJpegs, type StoreVariant } from "./store";
 import { defineTool, ToolError, type ToolContext } from "./types";
-import { optional, StringEnum } from "./util";
+import { optional, plural, StringEnum } from "./util";
 
 /**
- * Sending a finished video out: to a paribelle.in product page (the video goes last in
- * the product's gallery and in each colour's, where the storefront plays it) or to
- * Instagram as a reel. Both always ask first.
+ * Sending finished work out. A video: to a paribelle.in product page (the video goes last
+ * in the product's gallery and in each colour's, where the storefront plays it) or to
+ * Instagram as a reel. A photo: to the OMS catalogue or an Amazon listing's image slots.
+ * All of it always asks first.
  */
 
 /** The store's product-video upload takes up to this. */
@@ -217,5 +230,153 @@ export const videoPublish = defineTool({
       throw new ToolError(err instanceof Error ? err.message : String(err));
     }
     return a.to === "instagram" ? toInstagram(video, v, a, ctx) : toParibelle(video, v, a, ctx);
+  },
+});
+
+/* -------------------------------------------------------------------------- */
+/* photo_publish                                                              */
+/* -------------------------------------------------------------------------- */
+
+const SLOTS = ["main", "1", "2", "3", "4", "5", "6", "7", "8"] as const;
+const slotAttribute = (slot: (typeof SLOTS)[number]) => (slot === "main" ? "main_product_image_locator" : `other_product_image_locator_${slot}`);
+
+/** Amazon's main image: the background must be pure white (RGB 255) to the edges. */
+const MAIN_WHITE = 0.97;
+
+/** Made by the image model, or edited from something that was (photo_edit keeps `from`). */
+async function generated(ref: string): Promise<boolean> {
+  let cur: unknown = ref;
+  for (let i = 0; i < 8 && typeof cur === "string" && cur.startsWith("asset:"); i++) {
+    const asset = await getAsset(Number(cur.slice(6)));
+    if (!asset) return false;
+    if (asset.source === "photoshoot" || asset.source === "generated") return true;
+    cur = (asset.meta as { from?: unknown } | null)?.from;
+  }
+  return false;
+}
+
+async function omsPhoto(a: { product?: string; ref?: string }, ctx: ToolContext) {
+  if (!storeApiUrl()) throw new ToolError("paribelle.in's image host isn't connected on this server, and OMS photos are kept there.");
+  const p = a.product?.trim();
+  if (!p || !a.ref) throw new ToolError("Which OMS product (product: SKU or id) and which photo (ref)?");
+  const [product] = await db
+    .select({ id: products.id, sku: products.sku, name: products.name, image: products.imageUrl })
+    .from(products)
+    .where(or(eq(products.sku, p), /^\d{1,9}$/.test(p) ? eq(products.id, Number(p)) : undefined))
+    .limit(1);
+  if (!product) throw new ToolError(`There's no OMS product ${p}.`);
+  const jpeg = await toJpeg((await imageOf(a.ref, ctx)).bytes, 1600, 88);
+  ctx.progress("Uploading the photo…");
+  const [url] = await uploadJpegs([jpeg], ctx.signal);
+  await saveLocalCopy(url, jpeg);
+  await db
+    .update(products)
+    .set({ imageUrl: `${url}${LOCAL_COPY_MARK}` })
+    .where(eq(products.id, product.id));
+  return { data: { product: product.sku, name: product.name, before: product.image, now: url, localCopy: true } };
+}
+
+type AmazonPhotoArgs = { sku?: string; images?: { slot: (typeof SLOTS)[number]; ref: string }[]; accountId?: number; preview?: boolean; allowGenerated?: boolean };
+
+async function amazonPhotos(a: AmazonPhotoArgs, ctx: ToolContext) {
+  const sku = a.sku?.trim();
+  if (!sku || !a.images?.length) throw new ToolError("Which listing (sku: the Amazon seller SKU) and which photos (images: slot + ref)?");
+  const slots = a.images.map((i) => i.slot);
+  if (new Set(slots).size !== slots.length) throw new ToolError("Two photos are for the same slot.");
+  if (!a.preview && !storeApiUrl()) throw new ToolError("Amazon fetches each photo from a public URL, and paribelle.in's image host (where they go) isn't connected here.");
+  const account = await amazonAccount(a.accountId);
+  const adapter = amazonAdapter(account);
+  if (!adapter.sellerId) throw new ToolError("This Amazon account has no seller id saved.");
+  const path = `/listings/2021-08-01/items/${adapter.sellerId}/${encodeURIComponent(sku)}`;
+  const amazonError = (err: unknown) => {
+    const e = err as { message?: string; body?: string };
+    return new ToolError(`${e.message ?? String(err)}${e.body ? `: ${e.body.slice(0, 1500)}` : ""}`);
+  };
+  let listing: { summaries?: { productType?: string; itemName?: string }[] };
+  try {
+    listing = await adapter.call("GET", path, { query: { marketplaceIds: adapter.marketplace, includedData: "summaries" } });
+  } catch (err) {
+    throw amazonError(err);
+  }
+  const productType = listing.summaries?.[0]?.productType;
+  if (!productType) throw new ToolError(`Amazon has no listing ${sku} in this marketplace (or it has no product type).`);
+
+  const files: Buffer[] = [];
+  const checks: Record<string, unknown>[] = [];
+  for (const [i, im] of a.images.entries()) {
+    ctx.progress(`Preparing photo ${i + 1} of ${a.images.length}…`);
+    const jpeg = await toJpeg((await imageOf(im.ref, ctx)).bytes, 3000, 92);
+    if (im.slot === "main") {
+      if (!a.allowGenerated && (await generated(im.ref))) {
+        throw new ToolError(
+          `${im.ref} was made by the image model. Amazon's main image is the real product on white: use a real photo (photo_edit white), or allowGenerated only if the owner says so.`,
+        );
+      }
+      const r = await decode(jpeg);
+      const mask = { w: r.w, h: r.h, a: await subjectMask(await toCanvas(r), r.w, r.h, { progress: ctx.progress, signal: ctx.signal }) };
+      const white = whiteCheck(r, mask);
+      const share = Math.round(white.pureWhite * 1000) / 10;
+      checks.push({ slot: "main", pureWhite: `${share}%`, edgesWhite: white.edgesWhite, fill: white.fill });
+      if (!white.edgesWhite || white.pureWhite < MAIN_WHITE) {
+        throw new ToolError(
+          `${im.ref} isn't on pure white (${share}% of the background is RGB 255${white.edgesWhite ? "" : ", and the edges aren't"}). Put it on catalogue white first (photo_edit white).`,
+        );
+      }
+    }
+    files.push(jpeg);
+  }
+
+  const urls = a.preview ? a.images.map(() => "(uploaded on publish)") : await uploadJpegs(files, ctx.signal);
+  const patches = a.images.map((im, i) => ({
+    op: "replace",
+    path: `/attributes/${slotAttribute(im.slot)}`,
+    value: [{ marketplace_id: adapter.marketplace, media_location: urls[i] }],
+  }));
+  const body = { productType, patches };
+  if (a.preview) {
+    return { text: "Nothing was sent: this is what publishing would send.", data: { listing: listing.summaries?.[0]?.itemName ?? sku, request: { method: "PATCH", path, body }, checks } };
+  }
+  ctx.progress("Sending the photos to Amazon…");
+  try {
+    const res = await adapter.call<{ status?: string; issues?: unknown[] }>("PATCH", path, { query: { marketplaceIds: adapter.marketplace, issueLocale: "en_US" }, body });
+    return {
+      text: res.status === "ACCEPTED" ? "Amazon accepted it; the photos show once its processing is done (minutes to hours)." : `Amazon answered ${res.status ?? "without a status"}.`,
+      data: { sku, status: res.status, issues: res.issues ?? [], photos: a.images.map((im, i) => ({ slot: im.slot, from: im.ref, url: urls[i] })), checks },
+      error: res.status !== "ACCEPTED",
+    };
+  } catch (err) {
+    throw amazonError(err);
+  }
+}
+
+export const photoPublish = defineTool({
+  name: "photo_publish",
+  label: "Publish photos",
+  description: [
+    "Send finished photos (chat:N or asset:N) out. Always asks the owner first; publish only what they asked for.",
+    "to 'oms': the OMS catalogue photo of a product (product: OMS SKU or id; ref): uploaded to paribelle.in's image host, with a copy kept on this server that the OMS shows.",
+    "to 'amazon': an Amazon listing's image slots (sku: the seller SKU; images: slot main or 1-8, and ref), uploaded to paribelle.in's host and set on the listing",
+    "(main_product_image_locator / other_product_image_locator_N by JSON Patch). The main slot is refused unless code finds a pure white background to the edges,",
+    "and refused for a picture the image model made (or one edited from it) unless the owner says otherwise (allowGenerated). preview: what would be sent, nothing uploaded.",
+    "paribelle.in product photos go through store_update_products (images take asset:N). Flipkart and Meesho have no API here: make the files in their sizes and the owner downloads them.",
+  ].join(" "),
+  parameters: Type.Object({
+    to: StringEnum(["oms", "amazon"]),
+    product: optional(Type.String()),
+    ref: optional(Type.String()),
+    sku: optional(Type.String()),
+    images: optional(Type.Array(Type.Object({ slot: StringEnum(SLOTS), ref: Type.String() }), { minItems: 1, maxItems: 9 })),
+    accountId: optional(Type.Integer()),
+    preview: optional(Type.Boolean()),
+    allowGenerated: optional(Type.Boolean()),
+  }),
+  kind: (a) => (a.preview ? "read" : a.to === "amazon" ? "market" : "store"),
+  ownerOnly: true,
+  summary: (a) =>
+    a.to === "amazon"
+      ? `${a.preview ? "Preview: " : ""}${plural(a.images?.length ?? 0, "photo")} on Amazon listing ${a.sku ?? "?"} (${(a.images ?? []).map((i) => `${i.slot}: ${i.ref}`).join(", ")})`
+      : `${a.ref ?? "?"} as the OMS photo of ${a.product ?? "?"}`,
+  async execute(a, ctx) {
+    return a.to === "amazon" ? amazonPhotos(a, ctx) : omsPhoto(a, ctx);
   },
 });

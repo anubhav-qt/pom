@@ -496,13 +496,13 @@ export const restockPlan = defineTool({
 /* Amazon catalogue                                                           */
 /* -------------------------------------------------------------------------- */
 
-function amazonAdapter(account: ChannelAccount): AmazonAdapter {
+export function amazonAdapter(account: ChannelAccount): AmazonAdapter {
   const adapter = adapterFor(account);
   if (!(adapter instanceof AmazonAdapter)) throw new ToolError(`Account ${account.id} isn't Amazon.`);
   return adapter;
 }
 
-async function amazonAccount(accountId?: number) {
+export async function amazonAccount(accountId?: number) {
   const accounts = (await accountsFor(accountId)).filter((a) => a.channel === "amazon");
   if (accounts.length === 0) throw new ToolError("No Amazon account is connected.");
   return accounts[0];

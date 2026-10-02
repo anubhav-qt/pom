@@ -159,7 +159,7 @@ export interface NewAsset {
   fromFile?: string;
   mime: string;
   name: string;
-  source: "upload" | "url" | "cutout" | "generated" | "frame";
+  source: "upload" | "url" | "cutout" | "generated" | "frame" | "photoshoot" | "edited" | "mask";
   chatId: string | null;
   userId: number | null;
   meta?: Record<string, unknown>;
@@ -208,6 +208,18 @@ export async function saveAsset(input: NewAsset): Promise<AssetRow> {
     })
     .returning();
   return row;
+}
+
+/** The long edges an image asset's small JPEG copies are made at (media/thumbs.ts). */
+export const THUMB_EDGES = [480, 1280] as const;
+export type ThumbEdge = (typeof THUMB_EDGES)[number];
+export const thumbFile = (id: number, edge: ThumbEdge) => mediaPath("cache", "thumbs", `${id}-${edge}.jpg`);
+
+/** An asset's file, its small copies and its row, gone for good. */
+export async function removeAsset(id: number): Promise<boolean> {
+  const [row] = await db.delete(seelieAssets).where(eq(seelieAssets.id, id)).returning({ file: seelieAssets.file });
+  if (row) await Promise.all([mediaPath(row.file), ...THUMB_EDGES.map((e) => thumbFile(id, e))].map((f) => rm(f, { force: true })));
+  return !!row;
 }
 
 export async function getAsset(id: number): Promise<AssetRow | null> {

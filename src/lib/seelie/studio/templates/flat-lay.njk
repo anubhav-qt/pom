@@ -1,0 +1,17 @@
+{% extends "base.njk" %}
+
+{% block shot %}
+A premium top-down flat-lay product photograph for Paribelle, an Indian women's ethnic wear label: the {{ garment.name }} from the product images, laid out on {{ setting }} and photographed straight from above with no perspective tilt.
+{% endblock %}
+
+{% block subject %}
+The garment lies smooth and symmetrical, pressed and uncreased, every piece of the set fully in view{% if garment.hasDupatta %}, the dupatta folded in a soft curve beside the kurta so its border shows along its length{% endif %}. Nothing is worn: no person, hands or mannequin.{% if shot.pose %} {{ shot.pose }}.{% endif %}
+{% endblock %}
+
+{% block light %}
+The light is {{ light }}, even across the whole garment, with a soft shadow at its edges. Shot on a full-frame camera with {{ camera }}.
+{% endblock %}
+
+{% block styling %}
+{% if styling %}Props, kept small and to the edges: {{ styling }}.{% endif %}
+{% endblock %}

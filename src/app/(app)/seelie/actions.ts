@@ -18,6 +18,7 @@ import { seelieConfig } from "@/lib/seelie/config";
 import { connectInstagram, disconnectInstagram, instagramStatus, type InstagramStatus } from "@/lib/seelie/instagram";
 import { getLimits, type AccountLimits } from "@/lib/seelie/limits";
 import { signInStore, signOutStore, storeStatus, type StoreStatus } from "@/lib/seelie/store";
+import { imageBudget, imageReset, type ImageBudget, type ImageReset } from "@/lib/seelie/studio/budget";
 import type { ChatSummary, ChatView } from "@/lib/seelie/types";
 
 /**
@@ -96,6 +97,19 @@ export async function statusAction(force = false): Promise<SeelieStatus> {
 export async function limitsAction(force = false): Promise<Result<AccountLimits[]>> {
   await requireUser();
   return attempt(() => getLimits(force));
+}
+
+/** The image model's budget, worked out from Seelie's own ledger. */
+export async function imageBudgetAction(): Promise<Result<ImageBudget>> {
+  await requireUser();
+  return attempt(() => imageBudget());
+}
+
+/** For the OMS-wide note that photoshoots are back; null when Seelie isn't set up here. */
+export async function imageResetAction(): Promise<ImageReset | null> {
+  const user = await requireUser();
+  if (!seelieConfig()) return null;
+  return imageReset(user.id);
 }
 
 /* Model accounts (owner) -------------------------------------------------- */
