@@ -1,29 +1,7 @@
 "use client";
 
 import type { AssistantMessage, ImageContent, TextContent, ToolCall, ToolResultMessage } from "@paribelle/pi-ai";
-import {
-  AlertTriangle,
-  Ban,
-  Camera,
-  Check,
-  ChevronDown,
-  Database,
-  Download,
-  Eraser,
-  Globe,
-  Hand,
-  Megaphone,
-  Music,
-  Paperclip,
-  PencilLine,
-  Send,
-  Share2,
-  ShoppingBag,
-  Sparkles,
-  Users,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { AlertTriangle, ChevronDown, Download, Music, Paperclip, Share2, X } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 
 import { ZoomImg } from "@/components/image-lightbox";
@@ -36,13 +14,54 @@ import { cn } from "@/lib/utils";
 import { Markdown } from "./markdown";
 
 /**
- * The open chat: what was asked, Seelie's thinking and replies, and a card per tool
- * call, with the approval buttons on the ones waiting for a yes.
+ * The open chat: what was asked, Seelie's replies, and between them the steps it took
+ * (its thinking and each tool call) as dots on a line, with the approval buttons on the
+ * ones waiting for a yes.
  */
 
 type Results = Map<string, { result: ToolResultMessage; seq: number }>;
+type Pending = { text: string; images: DraftImage[]; clips: DraftClip[] };
 
 const imageUrl = (chatId: string, seq: number, index: number) => withBasePath(`/api/seelie/chats/${chatId}/images/${seq}/${index}`);
+
+/** A step on the line: a thought or a tool call. */
+type StepItem = { type: "thinking"; text: string; live: boolean } | { type: "tool"; call: ToolCall };
+
+/** The chat in reading order. Steps in a row share one line, across a turn's model calls. */
+type Piece =
+  | { type: "user"; entry?: ChatMessage; pending?: Pending }
+  | { type: "text"; text: string }
+  | { type: "steps"; steps: StepItem[] }
+  | { type: "error"; text: string }
+  | { type: "stopped" };
+
+function piecesOf(messages: ChatMessage[], pending: Pending | null, partial: AssistantMessage | null, showThinking: boolean): Piece[] {
+  const pieces: Piece[] = [];
+  const step = (s: StepItem) => {
+    const last = pieces[pieces.length - 1];
+    if (last?.type === "steps") last.steps.push(s);
+    else pieces.push({ type: "steps", steps: [s] });
+  };
+  const reply = (message: AssistantMessage, streaming: boolean) => {
+    const end = message.content.length - 1;
+    message.content.forEach((block, i) => {
+      if (block.type === "thinking") {
+        if (showThinking && block.thinking.trim()) step({ type: "thinking", text: block.thinking, live: streaming && i === end });
+      } else if (block.type === "text") {
+        if (block.text.trim()) pieces.push({ type: "text", text: block.text });
+      } else step({ type: "tool", call: block });
+    });
+    if (message.stopReason === "error") pieces.push({ type: "error", text: message.errorMessage || "The model returned an error." });
+    else if (message.stopReason === "aborted") pieces.push({ type: "stopped" });
+  };
+  for (const m of messages) {
+    if (m.message.role === "user") pieces.push({ type: "user", entry: m });
+    else if (m.message.role === "assistant") reply(m.message, false);
+  }
+  if (pending) pieces.push({ type: "user", pending });
+  if (partial) reply(partial, true);
+  return pieces;
+}
 
 export function Timeline() {
   const chatId = useSeelie((s) => s.chatId);
@@ -51,6 +70,7 @@ export function Timeline() {
   const partial = useSeelie((s) => s.partial);
   const pending = useSeelie((s) => s.pending);
   const run = useSeelie((s) => s.run);
+  const showThinking = useSeelie((s) => s.showThinking);
 
   const results = useMemo(() => {
     const map: Results = new Map();
@@ -61,22 +81,43 @@ export function Timeline() {
   const active = !!run && ACTIVE_RUN.includes(run.status);
   const working = Object.values(tools).some((t) => t.runId === run?.id && (t.status === "running" || t.status === "awaiting"));
   const partialHasContent = !!partial?.content.some((c) => (c.type === "text" ? c.text : c.type === "thinking" ? c.thinking : true));
+  const pieces = useMemo(
+    () => piecesOf(messages, pending, partialHasContent ? partial : null, showThinking),
+    [messages, pending, partial, partialHasContent, showThinking],
+  );
+  const waiting = active && !partialHasContent && !working ? (run?.status === "waiting" ? "Waiting for your answer…" : "Seelie is working…") : null;
+  // Between steps, the wait is the next dot on their line.
+  const onLine = !!waiting && pieces[pieces.length - 1]?.type === "steps";
 
   return (
-    <div className="space-y-5 pb-4">
-      {messages.map((m) =>
-        m.message.role === "user" ? (
-          <UserBubble key={m.seq} entry={m} chatId={chatId} />
-        ) : m.message.role === "assistant" ? (
-          <Reply key={m.seq} message={m.message} tools={tools} results={results} chatId={chatId} />
-        ) : null,
-      )}
-      {pending ? <UserBubble pending={pending} chatId={chatId} /> : null}
-      {partial && partialHasContent ? <Reply message={partial} tools={tools} results={results} chatId={chatId} streaming /> : null}
-      {active && !partialHasContent && !working ? (
+    <div className="space-y-3 pb-4">
+      {pieces.map((p, i) => {
+        const key = `${p.type}:${i}`;
+        switch (p.type) {
+          case "user":
+            return <UserBubble key={key} entry={p.entry} pending={p.pending} chatId={chatId} />;
+          case "text":
+            return <Markdown key={key} text={p.text} />;
+          case "error":
+            return (
+              <Notice key={key} tone="danger">
+                {p.text}
+              </Notice>
+            );
+          case "stopped":
+            return (
+              <p key={key} className="muted text-xs">
+                Stopped.
+              </p>
+            );
+          case "steps":
+            return <Steps key={key} steps={p.steps} tools={tools} results={results} chatId={chatId} trailing={onLine && i === pieces.length - 1 ? waiting : null} />;
+        }
+      })}
+      {waiting && !onLine ? (
         <div className="flex items-center gap-2.5 py-1">
           <Spinner size="1.1rem" />
-          <span className="muted text-sm">{run.status === "waiting" ? "Waiting for your answer…" : "Seelie is working…"}</span>
+          <span className="muted text-sm">{waiting}</span>
         </div>
       ) : null}
     </div>
@@ -111,7 +152,7 @@ function attachmentOf(text: string): Attachment | null {
   }
 }
 
-function UserBubble({ entry, pending, chatId }: { entry?: ChatMessage; pending?: { text: string; images: DraftImage[]; clips: DraftClip[] }; chatId: string | null }) {
+function UserBubble({ entry, pending, chatId }: { entry?: ChatMessage; pending?: Pending; chatId: string | null }) {
   let text = pending?.text ?? "";
   let images: { src: string }[] = pending?.images.map((i) => ({ src: i.preview })) ?? [];
   let attached: Attachment[] = pending?.clips.map((c) => ({ name: c.name, kind: c.kind, src: c.preview })) ?? [];
@@ -128,7 +169,8 @@ function UserBubble({ entry, pending, chatId }: { entry?: ChatMessage; pending?:
     }
   }
   return (
-    <div className={cn("flex flex-col items-end gap-1.5", pending && "opacity-80")}>
+    // A little more room above each question than between the steps of a reply.
+    <div className={cn("flex flex-col items-end gap-1.5 pt-2 first:pt-0", pending && "opacity-80")}>
       {attached.length ? (
         <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
           {attached.map((a, i) =>
@@ -168,66 +210,6 @@ function UserBubble({ entry, pending, chatId }: { entry?: ChatMessage; pending?:
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Seelie's reply                                                             */
-/* -------------------------------------------------------------------------- */
-
-const Reply = memo(function Reply({
-  message,
-  tools,
-  results,
-  chatId,
-  streaming = false,
-}: {
-  message: AssistantMessage;
-  tools: Record<string, ToolRow>;
-  results: Results;
-  chatId: string | null;
-  streaming?: boolean;
-}) {
-  const showThinking = useSeelie((s) => s.showThinking);
-  const last = message.content.length - 1;
-  return (
-    <div className="space-y-3">
-      {message.content.map((block, i) => {
-        if (block.type === "thinking") {
-          if (!showThinking || !block.thinking.trim()) return null;
-          return <Thinking key={i} text={block.thinking} live={streaming && i === last} />;
-        }
-        if (block.type === "text") return block.text.trim() ? <Markdown key={i} text={block.text} /> : null;
-        if (block.name === "helpers") {
-          return <HelpersCard key={block.id} call={block} row={tools[block.id]} result={results.get(block.id)} tools={tools} chatId={chatId} />;
-        }
-        return <ToolCard key={block.id} call={block} row={tools[block.id]} result={results.get(block.id)} chatId={chatId} />;
-      })}
-      {message.stopReason === "error" ? (
-        <Notice tone="danger">{message.errorMessage || "The model returned an error."}</Notice>
-      ) : message.stopReason === "aborted" ? (
-        <p className="muted text-xs">Stopped.</p>
-      ) : null}
-    </div>
-  );
-});
-
-function Thinking({ text, live }: { text: string; live: boolean }) {
-  const [open, setOpen] = useState(live);
-  useEffect(() => setOpen(live), [live]);
-  return (
-    <div>
-      <button type="button" onClick={() => setOpen((v) => !v)} className="muted flex items-center gap-1.5 text-xs font-medium hover:text-[var(--text)]">
-        <Sparkles className={cn("h-3.5 w-3.5", live && "animate-pulse")} style={{ color: "var(--accent)" }} />
-        {live ? "Thinking…" : "Thought it through"}
-        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
-      </button>
-      {open ? (
-        <div className="muted mt-1.5 border-l-2 pl-3 text-[13px]" style={{ borderColor: "var(--border-strong)" }}>
-          <Markdown text={text} className="text-[13px]" />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export function Notice({ tone, children, onClose }: { tone: "danger" | "warn"; children: React.ReactNode; onClose?: () => void }) {
   return (
     <div
@@ -246,18 +228,125 @@ export function Notice({ tone, children, onClose }: { tone: "danger" | "warn"; c
 }
 
 /* -------------------------------------------------------------------------- */
-/* Tool cards                                                                 */
+/* Steps: dots on a line                                                      */
 /* -------------------------------------------------------------------------- */
 
-const KIND: Record<ToolKind, { Icon: LucideIcon; asks: string }> = {
-  read: { Icon: Database, asks: "" },
-  write: { Icon: PencilLine, asks: "This changes the OMS." },
-  market: { Icon: ShoppingBag, asks: "This changes Amazon." },
-  store: { Icon: Globe, asks: "This changes paribelle.in." },
-  publish: { Icon: Send, asks: "This posts publicly." },
-  spend: { Icon: Camera, asks: "This uses the image model's limited budget." },
-  ads: { Icon: Megaphone, asks: "This can spend money on Meta ads." },
-  forget: { Icon: Eraser, asks: "This deletes something Seelie remembers for you." },
+type Tone = "queued" | "live" | "ask" | "ok" | "bad" | "off" | "thought";
+
+const TONE: Record<Tone, { color: string; hollow?: boolean; ping?: boolean }> = {
+  queued: { color: "var(--accent)", hollow: true },
+  live: { color: "var(--accent)", ping: true },
+  ask: { color: "var(--warn)", ping: true },
+  ok: { color: "var(--ok)" },
+  bad: { color: "var(--danger)" },
+  off: { color: "var(--muted-2)", hollow: true },
+  thought: { color: "color-mix(in srgb, var(--accent) 45%, transparent)" },
+};
+
+const STATUS_TONE: Record<ToolRow["status"], Tone> = { queued: "queued", running: "live", awaiting: "ask", done: "ok", denied: "off", error: "bad" };
+const HELPER_TONE: Record<HelperState["status"], Tone> = { working: "live", done: "ok", error: "bad", stopped: "off" };
+
+/** Steps in a row, at most 40% of the chat's width (all of it on a phone). */
+function Steps({
+  steps,
+  tools,
+  results,
+  chatId,
+  trailing,
+}: {
+  steps: StepItem[];
+  tools: Record<string, ToolRow>;
+  results: Results;
+  chatId: string | null;
+  trailing: string | null;
+}) {
+  const count = steps.length + (trailing ? 1 : 0);
+  return (
+    <ol className="w-full sm:w-2/5 sm:min-w-[16rem]">
+      {steps.map((s, i) =>
+        s.type === "thinking" ? (
+          <ThinkingStep key={`thinking:${i}`} text={s.text} live={s.live} last={i === count - 1} />
+        ) : s.call.name === "helpers" ? (
+          <HelpersStep key={s.call.id} call={s.call} row={tools[s.call.id]} result={results.get(s.call.id)} tools={tools} chatId={chatId} last={i === count - 1} />
+        ) : (
+          <ToolStep key={s.call.id} call={s.call} row={tools[s.call.id]} result={results.get(s.call.id)} chatId={chatId} last={i === count - 1} />
+        ),
+      )}
+      {trailing ? (
+        <Step tone="live" last>
+          <p className="muted text-xs leading-5">{trailing}</p>
+        </Step>
+      ) : null}
+    </ol>
+  );
+}
+
+/** One dot, coloured by how the step went; the line runs on to the next dot. */
+function Step({ tone, last, children }: { tone: Tone; last: boolean; children: React.ReactNode }) {
+  const t = TONE[tone];
+  return (
+    <li className={cn("relative min-w-0 pl-5", !last && "pb-2.5")}>
+      {last ? null : <span aria-hidden className="absolute -bottom-[3px] left-1 top-[17px] w-px" style={{ background: "var(--border-strong)" }} />}
+      <span aria-hidden className="absolute left-0 top-[5.5px] h-[9px] w-[9px]">
+        {t.ping ? <span className="absolute inset-0 rounded-full opacity-60 motion-safe:animate-ping" style={{ background: t.color }} /> : null}
+        <span className="absolute inset-0 rounded-full" style={t.hollow ? { border: `1.5px solid ${t.color}` } : { background: t.color }} />
+      </span>
+      {children}
+    </li>
+  );
+}
+
+/** A step's name and what it's doing; opens for what it was asked and what came back. */
+function StepHead({ label, line, took, open, onToggle }: { label: string; line: string | null | undefined; took: string | null; open: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" onClick={onToggle} aria-expanded={open} className="group flex w-full items-start gap-2 text-left">
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-medium leading-5 group-hover:text-[var(--accent-ink)]">{label}</span>
+        {line ? <span className="muted line-clamp-2 break-words text-xs">{line}</span> : null}
+      </span>
+      {took ? (
+        <span className="shrink-0 text-[11px] leading-5 tabular-nums" style={{ color: "var(--muted-2)" }}>
+          {took}
+        </span>
+      ) : null}
+      <ChevronDown className={cn("mt-[3px] h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-180")} style={{ color: "var(--muted-2)" }} />
+    </button>
+  );
+}
+
+const ThinkingStep = memo(function ThinkingStep({ text, live, last }: { text: string; live: boolean; last: boolean }) {
+  const [open, setOpen] = useState(live);
+  useEffect(() => setOpen(live), [live]);
+  return (
+    <Step tone={live ? "live" : "thought"} last={last}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="muted flex items-center gap-1 text-xs font-medium leading-5 hover:text-[var(--text)]"
+      >
+        {live ? "Thinking…" : "Thought it through"}
+        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+      </button>
+      {open ? (
+        <div className="muted mt-1 text-[13px]">
+          <Markdown text={text} className="text-[13px]" />
+        </div>
+      ) : null}
+    </Step>
+  );
+});
+
+/** What each kind of change is, on its approval. */
+const ASKS: Record<ToolKind, string> = {
+  read: "",
+  write: "This changes the OMS.",
+  market: "This changes Amazon.",
+  store: "This changes paribelle.in.",
+  publish: "This posts publicly.",
+  spend: "This uses the image model's limited budget.",
+  ads: "This can spend money on Meta ads.",
+  forget: "This deletes something Seelie remembers for you.",
 };
 
 function humanize(name: string) {
@@ -268,22 +357,6 @@ function duration(row: ToolRow) {
   if (!row.startedAt || !row.endedAt) return null;
   const ms = new Date(row.endedAt).getTime() - new Date(row.startedAt).getTime();
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
-}
-
-function StatusIcon({ row }: { row: ToolRow }) {
-  switch (row.status) {
-    case "queued":
-    case "running":
-      return <Spinner size="0.95rem" />;
-    case "awaiting":
-      return <Hand className="h-4 w-4" style={{ color: "var(--warn)" }} />;
-    case "done":
-      return <Check className="h-4 w-4" style={{ color: "var(--ok)" }} />;
-    case "denied":
-      return <Ban className="h-4 w-4" style={{ color: "var(--muted-2)" }} />;
-    case "error":
-      return <X className="h-4 w-4" style={{ color: "var(--danger)" }} />;
-  }
 }
 
 /** What the tool returned: the text, and the data parsed back out of its last line. */
@@ -307,7 +380,19 @@ function readResult(result: ToolResultMessage | undefined) {
   return { text: prose, data, images, isError: result.isError };
 }
 
-function ToolCard({ call, row: maybeRow, result, chatId }: { call: ToolCall; row?: ToolRow; result?: { result: ToolResultMessage; seq: number }; chatId: string | null }) {
+const ToolStep = memo(function ToolStep({
+  call,
+  row: maybeRow,
+  result,
+  chatId,
+  last,
+}: {
+  call: ToolCall;
+  row?: ToolRow;
+  result?: { result: ToolResultMessage; seq: number };
+  chatId: string | null;
+  last: boolean;
+}) {
   const row: ToolRow = maybeRow ?? {
     runId: "",
     callId: call.id,
@@ -328,29 +413,19 @@ function ToolCard({ call, row: maybeRow, result, chatId }: { call: ToolCall; row
   const out = readResult(result?.result);
   const video = videoOf(out?.data);
   const pictures = picturesOf(out?.data);
-  const { Icon } = KIND[row.kind];
-  const took = duration(row);
 
   return (
-    <div className="surface-2 overflow-hidden" style={awaiting ? { borderColor: "color-mix(in srgb, var(--warn) 45%, transparent)" } : undefined}>
-      {/* On a phone the summary goes under the name; from `sm` up, beside it. */}
-      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left">
-        <Icon className="h-4 w-4 shrink-0" style={{ color: row.kind === "read" ? "var(--muted)" : "var(--accent-ink)" }} />
-        <span className="min-w-0 flex-1 sm:flex sm:items-center sm:gap-2.5">
-          <span className="block truncate text-[13px] font-medium sm:shrink-0 sm:overflow-visible">{row.label}</span>
-          <span className="muted block truncate text-xs sm:min-w-0 sm:flex-1">{row.status === "running" && row.progress ? row.progress : row.summary}</span>
-        </span>
-        {took ? <span className="shrink-0 text-[11px] tabular-nums" style={{ color: "var(--muted-2)" }}>{took}</span> : null}
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-          <StatusIcon row={row} />
-        </span>
-        <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-180")} style={{ color: "var(--muted-2)" }} />
-      </button>
-
-      {awaiting ? <Approval row={row} /> : null}
+    <Step tone={STATUS_TONE[row.status]} last={last}>
+      <StepHead
+        label={row.label}
+        line={row.status === "running" && row.progress ? row.progress : row.summary}
+        took={duration(row)}
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+      />
 
       {video ? (
-        <div className="px-3 pb-3">
+        <div className="mt-2">
           <video src={video.src} poster={video.poster} controls playsInline preload="metadata" className="max-h-[28rem] w-auto max-w-full rounded-xl bg-black" />
           <VideoActions video={video} />
         </div>
@@ -359,54 +434,52 @@ function ToolCard({ call, row: maybeRow, result, chatId }: { call: ToolCall; row
       {pictures.length ? <Pictures pictures={pictures} /> : null}
 
       {open || awaiting ? (
-        <div className="space-y-2.5 border-t px-3 py-2.5" style={{ borderColor: "var(--border)" }}>
-          <Section title={awaiting ? "What it will do" : "Asked"}>
-            <Args args={row.args} />
-          </Section>
-          {row.status === "denied" ? <p className="muted text-xs">Not allowed{row.decidedBy ? ` by ${row.decidedBy}` : ""}.</p> : null}
-          {out ? (
-            <Section title={out.isError ? "Error" : "Result"}>
-              {out.text ? <Pre text={out.text} tone={out.isError ? "danger" : undefined} /> : null}
-              {out.data !== undefined ? <DataView data={out.data} /> : null}
-              {out.images.length && chatId && result ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {out.images.map(({ index }) => (
-                    <ZoomImg key={index} src={imageUrl(chatId, result.seq, index)} alt={`Image ${index}`} className="h-24 w-24 rounded-lg object-cover" />
-                  ))}
-                </div>
-              ) : null}
+        <div className="surface-2 mt-2 overflow-hidden" style={awaiting ? { borderColor: "color-mix(in srgb, var(--warn) 45%, transparent)" } : undefined}>
+          {awaiting ? <Approval row={row} /> : null}
+          <div className="space-y-2.5 px-3 py-2.5">
+            <Section title={awaiting ? "What it will do" : "Asked"}>
+              <Args args={row.args} />
             </Section>
-          ) : null}
+            {row.status === "denied" ? <p className="muted text-xs">Not allowed{row.decidedBy ? ` by ${row.decidedBy}` : ""}.</p> : null}
+            {out ? (
+              <Section title={out.isError ? "Error" : "Result"}>
+                {out.text ? <Pre text={out.text} tone={out.isError ? "danger" : undefined} /> : null}
+                {out.data !== undefined ? <DataView data={out.data} /> : null}
+                {out.images.length && chatId && result ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {out.images.map(({ index }) => (
+                      <ZoomImg key={index} src={imageUrl(chatId, result.seq, index)} alt={`Image ${index}`} className="h-24 w-24 rounded-lg object-cover" />
+                    ))}
+                  </div>
+                ) : null}
+              </Section>
+            ) : null}
+          </div>
         </div>
       ) : null}
-    </div>
+    </Step>
   );
-}
+});
 
 /* -------------------------------------------------------------------------- */
 /* Helpers: parts of a request worked on at the same time                      */
 /* -------------------------------------------------------------------------- */
 
-const HELPER_ICON: Record<HelperState["status"], React.ReactNode> = {
-  working: <Spinner size="0.95rem" />,
-  done: <Check className="h-4 w-4" style={{ color: "var(--ok)" }} />,
-  error: <X className="h-4 w-4" style={{ color: "var(--danger)" }} />,
-  stopped: <Ban className="h-4 w-4" style={{ color: "var(--muted-2)" }} />,
-};
-
-/** A helpers call: each helper with its model, how it's doing, its steps (asking like any other) and its answer. */
-function HelpersCard({
+/** A helpers call: each helper as a dot of its own, with its model, its steps (asking like any other) and its answer. */
+function HelpersStep({
   call,
   row,
   result,
   tools,
   chatId,
+  last,
 }: {
   call: ToolCall;
   row?: ToolRow;
   result?: { result: ToolResultMessage; seq: number };
   tools: Record<string, ToolRow>;
   chatId: string | null;
+  last: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const live = !result && (!row || row.status === "running" || row.status === "queued");
@@ -417,80 +490,83 @@ function HelpersCard({
     fromResult ??
     jobs.map((j) => ({ title: j.title ?? "Helper", model: "", thinking: j.thinking ?? "", status: live ? "working" : "stopped", answer: null }));
   const steps = Object.values(tools).filter((t) => t.parent === call.id);
-  const shown = row ?? { status: result ? (result.result.isError ? "error" : "done") : "queued", summary: null, progress: null };
-  const took = row ? duration(row) : null;
+  const tone: Tone = row ? STATUS_TONE[row.status] : live ? "live" : result?.result.isError ? "bad" : "ok";
+  const titles = helpers.map((h) => h.title).join(", ");
 
   return (
-    <div className="surface-2 overflow-hidden">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left">
-        <Users className="h-4 w-4 shrink-0" style={{ color: "var(--accent-ink)" }} />
-        <span className="min-w-0 flex-1 sm:flex sm:items-center sm:gap-2.5">
-          <span className="block truncate text-[13px] font-medium sm:shrink-0 sm:overflow-visible">Helpers</span>
-          <span className="muted block truncate text-xs sm:min-w-0 sm:flex-1">
-            {live && shown.progress ? shown.progress : `${helpers.length} at once: ${helpers.map((h) => h.title).join(", ")}`}
-          </span>
-        </span>
-        {took ? <span className="shrink-0 text-[11px] tabular-nums" style={{ color: "var(--muted-2)" }}>{took}</span> : null}
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center">{row ? <StatusIcon row={row} /> : live ? <Spinner size="0.95rem" /> : null}</span>
-        <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-180")} style={{ color: "var(--muted-2)" }} />
-      </button>
-      <div className="space-y-3 border-t px-3 py-2.5" style={{ borderColor: "var(--border)" }}>
+    <Step tone={tone} last={last}>
+      <StepHead
+        label="Helpers"
+        line={live && row?.progress ? row.progress : `${helpers.length === 1 ? "1 helper" : `${helpers.length} at once`}: ${titles}`}
+        took={row ? duration(row) : null}
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+      />
+      <ol className="mt-2">
         {helpers.map((h, i) => (
-          <Helper
+          <HelperStep
             key={i}
             helper={h.status === "working" && !live ? { ...h, status: "stopped" } : h}
             steps={steps.filter((t) => t.helper === i)}
             open={open}
             chatId={chatId}
+            last={i === helpers.length - 1}
           />
         ))}
-      </div>
-    </div>
+      </ol>
+    </Step>
   );
 }
 
-function Helper({ helper: h, steps, open, chatId }: { helper: HelperState; steps: ToolRow[]; open: boolean; chatId: string | null }) {
+function HelperStep({ helper: h, steps, open, chatId, last }: { helper: HelperState; steps: ToolRow[]; open: boolean; chatId: string | null; last: boolean }) {
   const [answer, setAnswer] = useState(false);
   // Steps show while it works, when one waits for an answer, and when the card is opened.
   const showSteps = open || h.status === "working" || steps.some((t) => t.status === "awaiting");
+  const about = [
+    h.model ? `${h.model}${h.thinking ? ` · ${h.thinking}` : ""}` : null,
+    !showSteps && steps.length ? (steps.length === 1 ? "1 step" : `${steps.length} steps`) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <div>
-      <div className="flex items-center gap-2">
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center">{HELPER_ICON[h.status]}</span>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{h.title}</span>
-        {h.model ? (
-          <span className="muted hidden shrink-0 text-[11px] sm:inline">
-            {h.model}
-            {h.thinking ? ` · ${h.thinking}` : ""}
-          </span>
-        ) : null}
-        {!showSteps && steps.length ? <span className="muted shrink-0 text-[11px]">{steps.length === 1 ? "1 step" : `${steps.length} steps`}</span> : null}
+    <Step tone={HELPER_TONE[h.status]} last={last}>
+      <div className="flex items-start gap-2">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] font-medium leading-5">{h.title}</span>
+          {about ? <span className="muted block truncate text-[11px]">{about}</span> : null}
+        </span>
         {h.answer ? (
-          <button type="button" onClick={() => setAnswer((v) => !v)} className="muted flex shrink-0 items-center gap-0.5 text-xs hover:text-[var(--text)]">
+          <button
+            type="button"
+            onClick={() => setAnswer((v) => !v)}
+            aria-expanded={answer}
+            className="muted flex shrink-0 items-center gap-0.5 text-xs leading-5 hover:text-[var(--text)]"
+          >
             Answer
             <ChevronDown className={cn("h-3 w-3 transition-transform", answer && "rotate-180")} />
           </button>
         ) : null}
       </div>
       {showSteps && steps.length ? (
-        <div className="ml-[7px] mt-1.5 space-y-1.5 border-l-2 pl-3" style={{ borderColor: "var(--border)" }}>
-          {steps.map((t) => (
-            <ToolCard
+        <ol className="mt-2">
+          {steps.map((t, j) => (
+            <ToolStep
               key={t.callId}
               call={{ type: "toolCall", id: t.callId, name: t.tool, arguments: (t.args ?? {}) as ToolCall["arguments"] }}
               row={t}
               result={t.result ? { result: t.result, seq: -1 } : undefined}
               chatId={chatId}
+              last={j === steps.length - 1}
             />
           ))}
-        </div>
+        </ol>
       ) : null}
       {answer && h.answer ? (
-        <div className="muted ml-[7px] mt-1.5 border-l-2 pl-3" style={{ borderColor: "var(--border-strong)" }}>
+        <div className="surface-2 muted mt-2 px-2.5 py-2">
           <Markdown text={h.answer} className="text-[13px]" />
         </div>
       ) : null}
-    </div>
+    </Step>
   );
 }
 
@@ -527,7 +603,7 @@ const assetUrl = (id: number, query: string) => withBasePath(`/api/seelie/assets
 function Pictures({ pictures }: { pictures: CardPicture[] }) {
   return (
     // Three across a phone's width; fixed-size tiles from `sm` up.
-    <div className="grid grid-cols-3 gap-2 px-3 pb-3 sm:flex sm:flex-wrap sm:gap-2.5">
+    <div className="mt-2 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:gap-2.5">
       {pictures.map((p) => (
         <figure key={p.id} className="min-w-0 space-y-1 sm:w-28">
           <ZoomImg
@@ -628,24 +704,24 @@ function VideoActions({ video }: { video: CardVideo }) {
 function Approval({ row }: { row: ToolRow }) {
   const decide = useSeelie((s) => s.decide);
   return (
-    // On a phone Deny and Approve share the card's width, big enough for a thumb.
-    <div className="flex flex-wrap items-center gap-2 border-t px-3 py-2.5" style={{ borderColor: "var(--border)", background: "var(--warn-soft)" }}>
-      <p className="min-w-0 basis-full text-[13px] sm:flex-1">
-        <span className="font-medium">Seelie is asking first.</span> <span className="muted">{KIND[row.kind].asks}</span>
+    // Deny and Approve share the step's width, big enough for a thumb.
+    <div className="space-y-2 border-b px-3 py-2.5" style={{ borderColor: "var(--border)", background: "var(--warn-soft)" }}>
+      <p className="text-[13px]">
+        <span className="font-medium">Seelie is asking first.</span> <span className="muted">{ASKS[row.kind]}</span>
       </p>
-      <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0 sm:flex-wrap">
-        {row.kind === "write" ? (
-          <button type="button" className="btn shrink-0 px-2.5 py-2 text-xs sm:py-1.5" onClick={() => void decide(row, true, true)}>
-            Always in this chat
-          </button>
-        ) : null}
-        <button type="button" className="btn btn-white flex-1 px-3 py-2 text-[13px] sm:flex-none sm:py-1.5" onClick={() => void decide(row, false)}>
+      <div className="flex items-center gap-2">
+        <button type="button" className="btn btn-white flex-1 px-3 py-2 text-[13px] sm:py-1.5" onClick={() => void decide(row, false)}>
           Deny
         </button>
-        <button type="button" className="btn btn-blue flex-1 px-3 py-2 text-[13px] sm:flex-none sm:py-1.5" onClick={() => void decide(row, true)}>
+        <button type="button" className="btn btn-blue flex-1 px-3 py-2 text-[13px] sm:py-1.5" onClick={() => void decide(row, true)}>
           Approve
         </button>
       </div>
+      {row.kind === "write" ? (
+        <button type="button" className="btn w-full px-2.5 py-2 text-xs sm:py-1.5" onClick={() => void decide(row, true, true)}>
+          Always in this chat
+        </button>
+      ) : null}
     </div>
   );
 }
