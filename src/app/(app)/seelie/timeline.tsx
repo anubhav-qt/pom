@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Database,
   Download,
+  Eraser,
   Globe,
   Hand,
   Megaphone,
@@ -252,6 +253,7 @@ const KIND: Record<ToolKind, { Icon: LucideIcon; asks: string }> = {
   publish: { Icon: Send, asks: "This posts publicly." },
   spend: { Icon: Camera, asks: "This uses the image model's limited budget." },
   ads: { Icon: Megaphone, asks: "This can spend money on Meta ads." },
+  forget: { Icon: Eraser, asks: "This deletes something Seelie remembers for you." },
 };
 
 function humanize(name: string) {

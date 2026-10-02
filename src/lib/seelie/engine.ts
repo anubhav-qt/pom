@@ -399,7 +399,7 @@ async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: M
         kind = typeof tool.kind === "string" ? tool.kind : "write";
       }
       try {
-        summary = (await tool.summary(call.arguments as never)) || null;
+        summary = (await tool.summary(call.arguments as never, { user: run.user })) || null;
       } catch {
         // Arguments it can't summarise: the card shows them as they are.
       }

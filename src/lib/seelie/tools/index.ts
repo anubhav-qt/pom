@@ -6,6 +6,7 @@ import { amazonApi, amazonListings, catalogueLink, inventoryTool, productsTool, 
 import { adsCreate, adsManage, adsReport } from "./ads";
 import { viewImages } from "./images";
 import { instagram, instagramPost } from "./instagram";
+import { memory } from "./memory";
 import { finance, orderNotes } from "./money";
 import { cancellations, findOrders, fulfilment, orderDetails, ordersOverview, scanLookup } from "./orders";
 import { imageSpecs, photoEdit } from "./photo";
@@ -91,7 +92,8 @@ const ALL = [
   webSearch,
   fetchUrl,
   youtube,
-  // Routines (scheduled runs)
+  // Memory (what the person asked Seelie to keep) and routines (scheduled runs)
+  memory,
   routines,
   // Anything else
   sqlSchema,

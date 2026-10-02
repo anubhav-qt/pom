@@ -1190,6 +1190,26 @@ export const seelieRoutines = pgTable(
   (t) => [index("seelie_routines_due_idx").on(t.enabled, t.nextRunAt), index("seelie_routines_user_idx").on(t.userId)],
 );
 
+/**
+ * What a user told Seelie to remember ("remember that…"): in every chat of theirs, routines
+ * included, until they delete it (in Seelie's settings, or by asking, which asks first).
+ */
+export const seelieMemories = pgTable(
+  "seelie_memories",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    /** The chat it was said in. */
+    chatId: uuid("chat_id").references(() => seelieChats.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("seelie_memories_user_idx").on(t.userId, t.createdAt)],
+);
+
 export type User = typeof users.$inferSelect;
 export type ChannelAccount = typeof channelAccounts.$inferSelect;
 export type RestockPlanItem = typeof restockPlanItems.$inferSelect;

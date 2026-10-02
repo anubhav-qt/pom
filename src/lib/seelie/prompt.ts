@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { seelieShoots, seelieVideos, type User } from "@/db/schema";
 import { ENABLED_CHANNELS, FEATURES } from "@/config/features";
 
+import { listMemories, memorySection } from "./memories";
 import { metaStatus } from "./meta";
 import { storeApiUrl, storeStatus } from "./store";
 import { budgetLine, imageBudget } from "./studio/budget";
@@ -146,11 +147,15 @@ async function studioSection(names: Set<string>) {
 }
 
 export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promise<string> {
-  const [lastSync, store] = await Promise.all([lastOrdersSync().catch(() => null), storeLine(user, tools)]);
+  const names = new Set(tools.map((t) => t.name));
+  const [lastSync, store, memories] = await Promise.all([
+    lastOrdersSync().catch(() => null),
+    storeLine(user, tools),
+    names.has("memory") ? listMemories(user) : null,
+  ]);
   const off = Object.entries(FEATURES)
     .filter(([key, on]) => !on && SWITCHED_OFF[key])
     .map(([key]) => SWITCHED_OFF[key]);
-  const names = new Set(tools.map((t) => t.name));
 
   const sections: string[] = [];
 
@@ -183,6 +188,8 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
       "- If a tool fails, read the error, fix the call if you can, and otherwise tell the user plainly what failed.",
     ].join("\n"),
   );
+
+  if (memories) sections.push(memorySection(user, memories));
 
   const flows: string[] = [];
   if (names.has("store_amazon_gap") && names.has("store_create_products")) {

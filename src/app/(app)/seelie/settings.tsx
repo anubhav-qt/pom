@@ -7,6 +7,7 @@ import { Modal } from "@/components/modal";
 import { Toggle } from "@/components/toggle";
 import { CenteredSpinner, Spinner } from "@/components/ui";
 import type { AccountLimits, LimitWindow } from "@/lib/seelie/limits";
+import type { MemoryView } from "@/lib/seelie/memories";
 import type { MetaStatus } from "@/lib/seelie/meta";
 import type { StoreStatus } from "@/lib/seelie/store";
 import type { ImageBudget } from "@/lib/seelie/studio/budget";
@@ -14,10 +15,13 @@ import { useSeelie } from "@/lib/stores/seelie-store";
 
 import {
   accountEnabledAction,
+  addMemoryAction,
   cancelLoginAction,
+  deleteMemoryAction,
   finishLoginAction,
   imageBudgetAction,
   loginStatusAction,
+  memoriesAction,
   metaChooseAction,
   metaConnectAction,
   metaDisconnectAction,
@@ -30,6 +34,7 @@ import {
   storeSignInAction,
   storeSignOutAction,
   storeStatusAction,
+  updateMemoryAction,
 } from "./actions";
 import { Notice } from "./timeline";
 
@@ -54,6 +59,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           label="Show Seelie's thinking"
           hint="The reasoning before each reply, folded under it."
         />
+        <Memories />
         {online ? <Accounts owner={owner} /> : null}
         {online ? <ImageGeneration /> : null}
         {owner ? <Store /> : null}
@@ -70,6 +76,159 @@ function Heading({ children, action }: { children: React.ReactNode; action?: Rea
         {children}
       </h3>
       {action}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Memories: what this person asked Seelie to remember                         */
+/* -------------------------------------------------------------------------- */
+
+/** Matches MAX_MEMORY on the server. */
+const MEMORY_CHARS = 500;
+
+function Memories() {
+  const [memories, setMemories] = useState<MemoryView[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [text, setText] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  async function load() {
+    const res = await memoriesAction();
+    if (res.ok) {
+      setMemories(res.data);
+      setError(null);
+    } else setError(res.error);
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setAdding(true);
+    const res = await addMemoryAction(text);
+    setAdding(false);
+    if (!res.ok) return setError(res.error);
+    setText("");
+    setError(null);
+    await load();
+  }
+
+  return (
+    <section>
+      <Heading action={memories?.length ? <span className="muted text-xs tabular-nums">{memories.length}</span> : null}>Memories</Heading>
+      <p className="muted mb-2.5 text-xs">
+        What you asked Seelie to remember. It reads them in every chat until you delete them, here or by telling Seelie to forget.
+        Only you see yours.
+      </p>
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      {!memories && !error ? <CenteredSpinner className="py-6" /> : null}
+      {memories && !memories.length ? <p className="muted text-sm">Nothing yet. Say &ldquo;remember&hellip;&rdquo; in a chat, or add one here.</p> : null}
+      {memories?.length ? (
+        <div className="space-y-2">
+          {memories.map((m) => (
+            <Memory key={m.id} memory={m} onChanged={load} />
+          ))}
+        </div>
+      ) : null}
+      {memories ? (
+        <form onSubmit={add} className="mt-2.5 flex gap-2">
+          <input
+            className="input min-w-0 flex-1 text-base sm:text-sm"
+            placeholder="Something Seelie should always remember"
+            value={text}
+            maxLength={MEMORY_CHARS}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <button type="submit" className="btn btn-white shrink-0 text-[13px]" disabled={adding || !text.trim()}>
+            {adding ? <Spinner size="1rem" /> : null}
+            Add
+          </button>
+        </form>
+      ) : null}
+    </section>
+  );
+}
+
+function Memory({ memory: m, onChanged }: { memory: MemoryView; onChanged: () => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(m.text);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
+    setBusy(true);
+    setError(null);
+    const res = await fn();
+    setBusy(false);
+    setConfirm(false);
+    if (!res.ok) return setError(res.error ?? "That didn't work.");
+    setEditing(false);
+    await onChanged();
+  }
+
+  return (
+    <div className="surface-2 p-3">
+      {editing ? (
+        <form
+          className="space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(() => updateMemoryAction(m.id, draft));
+          }}
+        >
+          <textarea
+            className="input min-h-[4.5rem] w-full resize-y text-base sm:text-sm"
+            value={draft}
+            maxLength={MEMORY_CHARS}
+            autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <div className="flex justify-end gap-1.5">
+            <button
+              type="button"
+              className="btn px-2 py-1 text-xs"
+              disabled={busy}
+              onClick={() => {
+                setEditing(false);
+                setDraft(m.text);
+                setError(null);
+              }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary px-2.5 py-1 text-xs" disabled={busy || !draft.trim() || draft.trim() === m.text}>
+              {busy ? <Spinner size="0.85rem" /> : null}
+              Save
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm">{m.text}</p>
+          <div className="flex shrink-0 items-center gap-1">
+            {busy ? <Spinner size="1rem" /> : null}
+            <button type="button" className="btn px-2 py-1 text-xs" disabled={busy} onClick={() => setEditing(true)}>
+              Edit
+            </button>
+            <button
+              type="button"
+              className="btn px-2 py-1 text-xs"
+              style={{ color: "var(--danger)" }}
+              disabled={busy}
+              onClick={() => (confirm ? void run(() => deleteMemoryAction(m.id)) : setConfirm(true))}
+              onBlur={() => setConfirm(false)}
+            >
+              {confirm ? "Delete for good?" : "Delete"}
+            </button>
+          </div>
+        </div>
+      )}
+      {error ? <p className="mt-1.5 text-xs" style={{ color: "var(--danger)" }}>{error}</p> : null}
     </div>
   );
 }

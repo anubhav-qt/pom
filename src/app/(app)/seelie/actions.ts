@@ -18,6 +18,7 @@ import { seelieConfig } from "@/lib/seelie/config";
 import { adsContext, capRoom } from "@/lib/seelie/ads";
 import { chooseMeta, connectMeta, disconnectMeta, metaStatus, refreshMeta, type MetaStatus } from "@/lib/seelie/meta";
 import { getLimits, type AccountLimits } from "@/lib/seelie/limits";
+import { addMemory, deleteMemories, listMemories, updateMemory, type MemoryView } from "@/lib/seelie/memories";
 import {
   deleteRoutine,
   listRoutines,
@@ -162,6 +163,28 @@ export async function routineNotesAction(): Promise<RoutineNotes | null> {
 export async function routineSeenAction(routineId: number): Promise<void> {
   const user = await requireUser();
   await markRoutinesSeen(user, { routineId });
+}
+
+/* Memories ---------------------------------------------------------------- */
+
+export async function memoriesAction(): Promise<Result<MemoryView[]>> {
+  const user = await requireUser();
+  return attempt(() => listMemories(user));
+}
+
+export async function addMemoryAction(text: string): Promise<Result<MemoryView>> {
+  const user = await requireUser();
+  return attempt(async () => (await addMemory(user, text)).memory);
+}
+
+export async function updateMemoryAction(id: number, text: string): Promise<Result<MemoryView>> {
+  const user = await requireUser();
+  return attempt(() => updateMemory(user, id, text));
+}
+
+export async function deleteMemoryAction(id: number): Promise<Result<null>> {
+  const user = await requireUser();
+  return attempt(async () => (await deleteMemories(user, [id]), null));
 }
 
 /* Model accounts (owner) -------------------------------------------------- */

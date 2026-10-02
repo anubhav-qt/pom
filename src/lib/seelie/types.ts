@@ -13,11 +13,12 @@ import type { AssistantMessage, Message } from "@paribelle/pi-ai";
  *  - publish: posts to a social account (Instagram); always asks.
  *  - spend:  uses the image model's capped budget (a photoshoot); always asks.
  *  - ads:    can spend money on Meta ads (start, restart, a bigger budget); always asks.
+ *  - forget: deletes something the user told Seelie to remember; always asks.
  */
-export type ToolKind = "read" | "write" | "market" | "store" | "publish" | "spend" | "ads";
+export type ToolKind = "read" | "write" | "market" | "store" | "publish" | "spend" | "ads" | "forget";
 
 /** Kinds that ask even when the chat auto-approves. */
-export const ALWAYS_ASK: readonly ToolKind[] = ["market", "store", "publish", "spend", "ads"];
+export const ALWAYS_ASK: readonly ToolKind[] = ["market", "store", "publish", "spend", "ads", "forget"];
 
 export type ToolStatus = "queued" | "awaiting" | "denied" | "running" | "done" | "error";
 export type Approval = "auto" | "approved" | "denied";
