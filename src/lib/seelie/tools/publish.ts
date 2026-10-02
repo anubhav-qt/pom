@@ -9,12 +9,10 @@ import { db } from "@/db";
 import { products } from "@/db/schema";
 import { LOCAL_COPY_MARK } from "@/lib/photo-src";
 
-import { InstagramError, instagramReady, publishReel } from "../instagram";
 import { saveLocalCopy } from "../media/catalogue";
 import { subjectMask } from "../media/cutout";
 import { getAsset, videoFile } from "../media/files";
 import { addPublished, getVideo, publishedOf, versionOf, versionsOf, type VideoRow, type VideoVersion } from "../media/library";
-import { publicOrigin, publicVideoUrl } from "../media/public";
 import { storeApiUrl, StoreError, storeFetch } from "../store";
 import { whiteCheck } from "../studio/edit";
 import { decode, toCanvas } from "../studio/raster";
@@ -27,18 +25,15 @@ import { optional, plural, StringEnum } from "./util";
 
 /**
  * Sending finished work out. A video: to a paribelle.in product page (the video goes last
- * in the product's gallery and in each colour's, where the storefront plays it) or to
- * Instagram as a reel. A photo: to the OMS catalogue or an Amazon listing's image slots.
- * All of it always asks first.
+ * in the product's gallery and in each colour's, where the storefront plays it). A photo:
+ * to the OMS catalogue or an Amazon listing's image slots. Instagram has its own tool
+ * (instagram.ts). All of it always asks first.
  */
 
 /** The store's product-video upload takes up to this. */
 const STORE_MAX_BYTES = 100 * 1024 * 1024;
-/** Instagram fetches the file itself; the link outlives a slow processing queue. */
-const INSTAGRAM_LINK_SECONDS = 2 * 60 * 60;
-
 /** The final version to publish: the one named, or the latest final. */
-function finalOf(video: VideoRow, version?: number): VideoVersion {
+export function finalOf(video: VideoRow, version?: number): VideoVersion {
   if (version !== undefined) {
     const v = versionOf(video, version);
     if (v.quality !== "final") throw new ToolError(`video:${video.id}@${v.version} is a draft. Render it as a final (video_render quality "final") and publish that.`);
@@ -153,72 +148,27 @@ async function toParibelle(video: VideoRow, v: VideoVersion, a: { product?: stri
   };
 }
 
-async function toInstagram(video: VideoRow, v: VideoVersion, a: { caption?: string; shareToFeed?: boolean; coverAt?: number }, ctx: ToolContext) {
-  if (!(await instagramReady())) throw new ToolError("Instagram isn't connected: the owner adds the account's token in Seelie's settings (gear, top right).");
-  const origin = publicOrigin();
-  if (/^https?:\/\/(localhost|127\.|\[::1\])/i.test(origin)) throw new ToolError(`Instagram fetches the video from ${origin}, which it can't reach. Set SEELIE_PUBLIC_URL to the OMS's public address.`);
-  if (v.seconds < 3) throw new ToolError("Instagram takes reels of 3 seconds or more.");
-  const before = publishedOf(video).find((p) => p.to === "instagram" && p.version === v.version);
-  if (before?.to === "instagram") throw new ToolError(`video:${video.id}@${v.version} is already on Instagram${before.permalink ? ` (${before.permalink})` : ""}.`);
-  const caption = (a.caption ?? "").trim();
-  if (caption.length > 2200) throw new ToolError("Instagram captions are up to 2,200 characters.");
-  if ((caption.match(/#[\p{L}\p{N}_]+/gu) ?? []).length > 30) throw new ToolError("Instagram allows up to 30 hashtags.");
-  if (a.coverAt !== undefined && a.coverAt > v.seconds) throw new ToolError(`coverAt is past the end (${v.seconds} s).`);
-
-  try {
-    const out = await publishReel({
-      videoUrl: publicVideoUrl(video.id, v.version, INSTAGRAM_LINK_SECONDS),
-      caption,
-      shareToFeed: a.shareToFeed ?? true,
-      coverAtMs: a.coverAt !== undefined ? a.coverAt * 1000 : undefined,
-      signal: ctx.signal,
-      progress: ctx.progress,
-    });
-    await addPublished(video.id, {
-      to: "instagram",
-      version: v.version,
-      mediaId: out.mediaId,
-      permalink: out.permalink,
-      caption,
-      at: new Date().toISOString(),
-      by: ctx.user.id,
-    });
-    return { data: { published: `video:${video.id}@${v.version}`, account: `@${out.username}`, link: out.permalink } };
-  } catch (err) {
-    if (err instanceof InstagramError) throw new ToolError(err.message);
-    throw err;
-  }
-}
-
 export const videoPublish = defineTool({
   name: "video_publish",
   label: "Publish a video",
   description: [
-    "Send a final version of a library video out. Always asks the owner first; publish only what they asked for.",
+    "Send a final version of a library video to paribelle.in. Always asks the owner first; publish only what they asked for.",
     "to 'paribelle': adds it to a paribelle.in product (product: id or slug), last in the product's gallery and in each colour's own gallery,",
     "where the storefront plays it. colours: which colours with their own photos get it (default every one; [] for the product's gallery only).",
     "The product needs at least 2 photos.",
-    "to 'instagram': posts it as a reel on the connected account. caption (up to 2,200 characters, 30 hashtags), shareToFeed (default true),",
-    "coverAt: the moment, in seconds, for the cover. Reels posted this way can't use Instagram's music library and a commercial song in the video",
-    "may get it muted; say so when the video carries a library song.",
-    "Each version goes to a product or to Instagram once; video_library get shows where a video went.",
+    "Each version goes to a product once; video_library get shows where a video went. Instagram: instagram_post.",
   ].join(" "),
   parameters: Type.Object({
     videoId: Type.Integer(),
     version: optional(Type.Integer({ description: "Default: its latest final." })),
-    to: StringEnum(["paribelle", "instagram"]),
+    to: StringEnum(["paribelle"]),
     product: optional(Type.String()),
     colours: optional(Type.Array(Type.String(), { maxItems: 40 })),
-    caption: optional(Type.String({ maxLength: 2200 })),
-    shareToFeed: optional(Type.Boolean()),
-    coverAt: optional(Type.Number({ minimum: 0 })),
   }),
-  kind: (a) => (a.to === "instagram" ? "publish" : "store"),
+  kind: "store",
   ownerOnly: true,
   summary: (a) =>
-    a.to === "instagram"
-      ? `Post video:${a.videoId}${a.version ? `@${a.version}` : ""} to Instagram${a.caption ? `: "${a.caption.slice(0, 80)}${a.caption.length > 80 ? "…" : ""}"` : ""}`
-      : `Add video:${a.videoId}${a.version ? `@${a.version}` : ""} to paribelle.in product ${a.product ?? "?"}${a.colours ? (a.colours.length ? ` (${a.colours.join(", ")})` : " (gallery only)") : ""}`,
+    `Add video:${a.videoId}${a.version ? `@${a.version}` : ""} to paribelle.in product ${a.product ?? "?"}${a.colours ? (a.colours.length ? ` (${a.colours.join(", ")})` : " (gallery only)") : ""}`,
   async execute(a, ctx) {
     const video = await getVideo(a.videoId);
     if (!video) throw new ToolError(`There's no video:${a.videoId}. video_library list shows them.`);
@@ -229,7 +179,7 @@ export const videoPublish = defineTool({
       if (err instanceof ToolError) throw err;
       throw new ToolError(err instanceof Error ? err.message : String(err));
     }
-    return a.to === "instagram" ? toInstagram(video, v, a, ctx) : toParibelle(video, v, a, ctx);
+    return toParibelle(video, v, a, ctx);
   },
 });
 
@@ -244,7 +194,7 @@ const slotAttribute = (slot: (typeof SLOTS)[number]) => (slot === "main" ? "main
 const MAIN_WHITE = 0.97;
 
 /** Made by the image model, or edited from something that was (photo_edit keeps `from`). */
-async function generated(ref: string): Promise<boolean> {
+export async function generated(ref: string): Promise<boolean> {
   let cur: unknown = ref;
   for (let i = 0; i < 8 && typeof cur === "string" && cur.startsWith("asset:"); i++) {
     const asset = await getAsset(Number(cur.slice(6)));

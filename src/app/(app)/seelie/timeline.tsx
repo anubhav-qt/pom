@@ -11,6 +11,7 @@ import {
   Download,
   Globe,
   Hand,
+  Megaphone,
   Music,
   Paperclip,
   PencilLine,
@@ -250,6 +251,7 @@ const KIND: Record<ToolKind, { Icon: LucideIcon; asks: string }> = {
   store: { Icon: Globe, asks: "This changes paribelle.in." },
   publish: { Icon: Send, asks: "This posts publicly." },
   spend: { Icon: Camera, asks: "This uses the image model's limited budget." },
+  ads: { Icon: Megaphone, asks: "This can spend money on Meta ads." },
 };
 
 function humanize(name: string) {

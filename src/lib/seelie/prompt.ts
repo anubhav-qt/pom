@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { seelieShoots, seelieVideos, type User } from "@/db/schema";
 import { ENABLED_CHANNELS, FEATURES } from "@/config/features";
 
-import { instagramStatus } from "./instagram";
+import { metaStatus } from "./meta";
 import { storeApiUrl, storeStatus } from "./store";
 import { budgetLine, imageBudget } from "./studio/budget";
 import { lastOrdersSync } from "./tools/sync";
@@ -62,10 +62,7 @@ async function videoLessons() {
 }
 
 async function videoSection(names: Set<string>) {
-  const [lessons, instagram] = await Promise.all([
-    videoLessons().catch(() => [] as string[]),
-    names.has("video_publish") ? instagramStatus().catch(() => null) : Promise.resolve(null),
-  ]);
+  const lessons = await videoLessons().catch(() => [] as string[]);
   const lines = [
     "Making videos (you are the editor and the director; the owner wants real creativity, not a template):",
     "- Every reel, video, slideshow or ad is yours to make with your own judgement and these tools (video_assets, video_watch, photo_edit, photoshoot, video_render). Start on it straight away when asked; don't wait to be told how, and don't hand it to any other maker or fall back to a plain no-thought version. If a step fails, work around it yourself and keep going.",
@@ -78,17 +75,8 @@ async function videoSection(names: Set<string>) {
     "- Music: a library song (song:<id>) cut on its beats and fading at the end. Each song makes one video; a final claims it. For something new, find it (youtube search, then watch to judge the vibe) and add it with songs add (that asks first).",
     "- Ideas and references: web_search for trends and what works now, youtube watch for a reference edit the owner names. Say where an idea came from.",
     "- When the owner reacts to a video (likes it, dislikes it, asks for changes), record it with video_library feedback in their words; later videos learn from it.",
-    "- Finished videos: the chat shows them with Download and Share. Publishing to paribelle.in (video_publish to paribelle) or Instagram (to instagram) only when asked, and only a final.",
+    "- Finished videos: the chat shows them with Download and Share. Publishing to paribelle.in (video_publish) or Instagram (instagram_post) only when asked, and only a final.",
   ];
-  if (instagram) {
-    lines.push(
-      instagram.connected
-        ? `- Instagram: connected as @${instagram.username}.`
-        : instagram.needsToken
-          ? "- Instagram: the saved token stopped working; the owner pastes a new one in Seelie's settings (the Instagram panel)."
-          : "- Instagram: not connected yet; the owner adds the account's token in Seelie's settings (the Instagram panel).",
-    );
-  }
   if (lessons.length) lines.push("- What the owner said about past videos (follow it):", ...lessons);
   return lines.join("\n");
 }
@@ -105,6 +93,34 @@ async function shootLessons() {
     const verdict = r.liked === true ? "liked" : r.liked === false ? "didn't like" : "said";
     return `  - shoot ${r.id} "${r.title}": ${verdict}${r.notes ? `: ${r.notes.replace(/\s+/g, " ").slice(0, 400)}` : ""}`;
   });
+}
+
+/** Instagram and Meta ads: what's connected, and how to go about posts and ads. */
+async function metaSection(names: Set<string>) {
+  const meta = await metaStatus().catch(() => null);
+  const m = (n: number, currency: string) => new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
+  const state = !meta?.connected
+    ? meta?.needsToken
+      ? "Meta stopped taking the saved token: posting and ads fail until the owner pastes a new one in Seelie's settings (the Meta panel)."
+      : "Meta isn't connected yet: posting and ads fail until the owner pastes a system-user token in Seelie's settings (the Meta panel). Say so if asked."
+    : [
+        meta.page?.instagram ? `Instagram: @${meta.page.instagram.username} (Page "${meta.page.name}").` : "No Instagram account is linked to the chosen Page.",
+        meta.adAccount
+          ? `Ads: account "${meta.adAccount.name}" in ${meta.adAccount.currency}; monthly cap ${meta.monthlyCap === null ? "not set, so no ad may spend until the owner sets one" : m(meta.monthlyCap, meta.adAccount.currency)}.`
+          : "Ads: no ad account yet (the owner adds one with a payment method in Meta Business Settings), so you can post but not run ads.",
+      ].join(" ");
+  const lines = [
+    "Instagram and ads (you are the shop's social media manager; the owner decides what goes out and what money is spent):",
+    `- ${state}`,
+    "- Posts (instagram_post): reels from final library videos, photo posts, carousels and stories. Every post asks the owner first; post only what they asked for or agreed to. Feed pictures are 4:5 to 1.91:1 (crop with photo_edit first; 4:5 fills the most screen), stories 9:16. Write captions in the brand's voice: warm, short, the product and why it's lovely, a nudge to shop paribelle.in, 3-8 relevant hashtags at the end (Indian ethnic wear, the fabric, the occasion), no hashtag walls.",
+    "- Read before you suggest: instagram account / media (insights: true) shows what reaches and gets saved; ads_report overview shows the money. Base advice on those numbers and say which.",
+    "- Ads spend real money. Suggest an ad in a few lines (what it shows, objective, who, budget, days, why) and make it with ads_create only when the owner wants it; the approval card shows the amount, so don't ask twice in prose. Prefer promoting a post that already does well (post: its mediaId). Start small (a few days, a modest budget), check results after 2-3 days, and grow what works.",
+    "- Objectives: traffic to a paribelle.in product or collection page (there's no Meta Pixel on the shop yet, so purchases can't be optimised for or counted), engagement for a post, video_views for reels, reach for launches. Audience: India by default, women for women's wear, Advantage+ audience on unless the owner wants it narrow.",
+    "- Look after running ads: pause (ads_manage pause, no approval needed) an ad that spends without results or does far worse than the others, and tell the owner what you paused and why. Restarting, raising a budget or running longer asks, and must fit under the monthly cap; if it doesn't, say how much room is left.",
+    "- Meta reviews every new ad (minutes to a day); a rejected one comes back with Meta's reason in ads_report ad.",
+  ];
+  if (!names.has("ads_create")) lines.splice(4, 4);
+  return lines.join("\n");
 }
 
 async function studioSection(names: Set<string>) {
@@ -158,7 +174,7 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
       "- Look things up before answering. Every number, order, price and date you state comes from a tool result in this chat; if no tool can answer, say so. Never guess.",
       "- Prefer acting to asking. If the request is clear, call the tool; ask only when you genuinely can't tell what's meant (which products, what price), and then ask one short question.",
       "- Tools take many things at once (orders, products, variants). Do a job in as few calls as you can: one call for 40 orders, not 40 calls.",
-      "- Lookups run straight away. Changes show the user an approval card: changes to the OMS ask unless they switched on auto-approve for this chat; changes to Amazon or paribelle.in always ask. Just make the call; the card does the asking, so don't ask \"shall I?\" in prose first. If a change is denied, don't retry it unless asked.",
+      "- Lookups run straight away. Changes show the user an approval card: changes to the OMS ask unless they switched on auto-approve for this chat; changes to Amazon or paribelle.in, Instagram posts and anything that can spend money on ads always ask. Just make the call; the card does the asking, so don't ask \"shall I?\" in prose first. If a change is denied, don't retry it unless asked.",
       "- When a change touches many things or its effect isn't obvious, look first (or use a tool's preview), then make the change in one call.",
       "- After a change, say briefly what changed, using the tool's result, and anything that didn't go through.",
       "- The specific tools are reviewed and know the data's quirks; use them first. For questions they don't cover, read sql_schema, then write one read-only query with sql_query, and check it answers what was asked.",
@@ -192,6 +208,7 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
 
   if (names.has("photoshoot")) sections.push(await studioSection(names));
   if (names.has("video_render")) sections.push(await videoSection(names));
+  if (names.has("instagram_post") || names.has("ads_create")) sections.push(await metaSection(names));
 
   sections.push(
     [
@@ -199,7 +216,7 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
       "- Short and plain. Lead with the answer. Use a markdown table for lists of orders, products or numbers, bullet points for steps; no headings for short answers.",
       "- Don't paste raw JSON or every field a tool returned; pick what answers the question and add one useful observation only if the data shows it.",
       "- Name orders by their marketplace order id and products by SKU or name, so the user can find them in the app.",
-      "- Links you give: paribelle.in product URLs from store results, library video links from the video tools (the chat shows the video), and Instagram links from video_publish.",
+      "- Links you give: paribelle.in product URLs from store results, library video links from the video tools (the chat shows the video), Instagram links from instagram_post and Ads Manager links from ads_create.",
     ].join("\n"),
   );
 

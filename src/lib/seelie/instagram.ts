@@ -1,48 +1,16 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-
-import { db } from "@/db";
-import { seelieSettings, type User } from "@/db/schema";
-
-import { seal, unseal, type Sealed } from "./sealed";
+import { MetaError, metaCall, metaContext, type MetaContext } from "./meta";
 
 /**
- * Instagram, through the Instagram API with Instagram Login (graph.instagram.com):
- * a professional (business or creator) account's long-lived token, which the owner
- * pastes into Seelie's settings once. It lasts 60 days and is refreshed whenever it's
- * used or the settings are opened and it's over a week old, so it never runs out while
- * Seelie is in use. The token is kept sealed (sealed.ts), never shown again.
+ * Instagram, through the Instagram API with Facebook Login: the professional account
+ * linked to the shop's Facebook Page, reached with the Meta system-user token (meta.ts).
  *
- * Publishing a reel: Instagram fetches the video itself from a signed, hour-long link
- * to the OMS (media/public.ts), so the OMS must be reachable from the internet.
+ * Posting: Instagram fetches each photo and video itself from a signed, short-lived link
+ * to the OMS (media/public.ts), so the OMS must be reachable from the internet. A post is
+ * a container that Instagram processes, then publishes; a carousel is one container per
+ * item and a parent holding them.
  */
-
-const SETTINGS_KEY = "instagram";
-const API = "https://graph.instagram.com/v23.0";
-const REFRESH_AFTER_MS = 7 * 86_400_000;
-
-interface StoredInstagram {
-  token: Sealed;
-  accountId: string;
-  username: string;
-  accountType: string | null;
-  /** When the token stops working unless refreshed. */
-  expiresAt: string | null;
-  refreshedAt: string;
-  savedAt: string;
-  /** Set when Instagram refused the token: paste a new one. */
-  failedAt: string | null;
-}
-
-export interface InstagramStatus {
-  connected: boolean;
-  username: string | null;
-  accountType: string | null;
-  expiresAt: string | null;
-  needsToken: boolean;
-  savedAt: string | null;
-}
 
 export class InstagramError extends Error {
   constructor(message: string) {
@@ -51,162 +19,207 @@ export class InstagramError extends Error {
   }
 }
 
-async function read(): Promise<StoredInstagram | null> {
-  const [row] = await db.select().from(seelieSettings).where(eq(seelieSettings.key, SETTINGS_KEY)).limit(1);
-  return (row?.value as StoredInstagram | undefined) ?? null;
+export interface InstagramContext extends MetaContext {
+  instagram: { id: string; username: string };
 }
 
-async function write(value: StoredInstagram, userId: number | null) {
-  await db
-    .insert(seelieSettings)
-    .values({ key: SETTINGS_KEY, value, updatedBy: userId, updatedAt: new Date() })
-    .onConflictDoUpdate({ target: seelieSettings.key, set: { value, updatedBy: userId, updatedAt: new Date() } });
+/** The Meta connection with an Instagram account on its Page, or a plain reason why not. */
+export async function instagramContext(): Promise<InstagramContext> {
+  const ctx = await metaContext().catch((err: unknown) => {
+    throw new InstagramError(err instanceof Error ? err.message : String(err));
+  });
+  if (!ctx.page) throw new InstagramError("No Facebook Page is chosen in Seelie's settings (the Meta panel).");
+  if (!ctx.instagram) {
+    throw new InstagramError(`The Page "${ctx.page.name}" has no Instagram professional account linked (Page settings → Linked accounts), or the token can't see it.`);
+  }
+  return ctx as InstagramContext;
 }
 
-type GraphError = { error?: { message?: string; code?: number; error_subcode?: number; error_user_msg?: string } };
-
-/** One Graph call. The token goes in the query, as the API takes it; it's never logged. */
-async function graph<T>(method: "GET" | "POST", path: string, params: Record<string, string>, token: string, signal?: AbortSignal): Promise<T> {
-  const url = new URL(path.startsWith("https://") ? path : `${API}${path}`);
-  const body = new URLSearchParams({ ...params, access_token: token });
-  if (method === "GET") url.search = body.toString();
-  let res: Response;
+async function call<T>(ctx: MetaContext, method: "GET" | "POST", path: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
   try {
-    res = await fetch(url, {
-      method,
-      body: method === "POST" ? body : undefined,
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
-      cache: "no-store",
-    });
+    return await metaCall<T>(ctx, method, path, params, { signal });
   } catch (err) {
-    if (signal?.aborted) throw err;
-    throw new InstagramError(`Instagram can't be reached (${err instanceof Error ? err.message : String(err)}).`);
-  }
-  const json = (await res.json().catch(() => null)) as (T & GraphError) | null;
-  if (!res.ok || !json || json.error) {
-    const e = json?.error;
-    const expired = e?.code === 190;
-    throw Object.assign(new InstagramError(expired ? "Instagram's token has expired or was revoked: paste a new one in Seelie's settings." : `Instagram: ${e?.error_user_msg ?? e?.message ?? `HTTP ${res.status}`}`), { expired });
-  }
-  return json;
-}
-
-function status(saved: StoredInstagram | null): InstagramStatus {
-  return {
-    connected: !!saved && !saved.failedAt,
-    username: saved?.username ?? null,
-    accountType: saved?.accountType ?? null,
-    expiresAt: saved?.expiresAt ?? null,
-    needsToken: !!saved?.failedAt,
-    savedAt: saved?.savedAt ?? null,
-  };
-}
-
-/** The settings panel's view; refreshes a week-old token on the way. */
-export async function instagramStatus(): Promise<InstagramStatus> {
-  const saved = await read();
-  if (saved && !saved.failedAt) await token(saved).catch(() => {});
-  return status(await read());
-}
-
-/** The owner pastes a long-lived token; it's checked with Instagram before it's kept. */
-export async function connectInstagram(user: User, raw: string): Promise<InstagramStatus> {
-  const plain = raw.trim();
-  if (!/^[A-Za-z0-9_|.-]{40,}$/.test(plain)) throw new InstagramError("That doesn't look like an Instagram access token.");
-  const me = await graph<{ user_id?: string; id?: string; username: string; account_type?: string }>("GET", "/me", { fields: "user_id,username,account_type" }, plain);
-  const accountId = me.user_id ?? me.id;
-  if (!accountId) throw new InstagramError("Instagram didn't say which account the token is for.");
-  if (me.account_type && !["BUSINESS", "MEDIA_CREATOR"].includes(me.account_type)) {
-    throw new InstagramError(`@${me.username} is a personal account; publishing needs a business or creator account.`);
-  }
-  const now = new Date().toISOString();
-  await write({ token: seal(plain, "instagram"), accountId, username: me.username, accountType: me.account_type ?? null, expiresAt: null, refreshedAt: now, savedAt: now, failedAt: null }, user.id);
-  // A brand-new token can't be refreshed for a day; the expiry is learned at the first refresh.
-  return status(await read());
-}
-
-export async function disconnectInstagram() {
-  await db.delete(seelieSettings).where(eq(seelieSettings.key, SETTINGS_KEY));
-}
-
-/** The working token, refreshed when it's over a week old. */
-async function token(saved: StoredInstagram): Promise<string> {
-  if (saved.failedAt) throw new InstagramError("Instagram's token stopped working: the owner pastes a new one in Seelie's settings.");
-  let plain: string;
-  try {
-    plain = unseal(saved.token, "instagram");
-  } catch {
-    throw new InstagramError("The saved Instagram token can't be read (AUTH_SECRET changed): paste it again in Seelie's settings.");
-  }
-  if (Date.now() - Date.parse(saved.refreshedAt) < REFRESH_AFTER_MS) return plain;
-  try {
-    const r = await graph<{ access_token: string; expires_in?: number }>("GET", "https://graph.instagram.com/refresh_access_token", { grant_type: "ig_refresh_token" }, plain);
-    const now = new Date();
-    await write({ ...saved, token: seal(r.access_token, "instagram"), refreshedAt: now.toISOString(), expiresAt: r.expires_in ? new Date(now.getTime() + r.expires_in * 1000).toISOString() : saved.expiresAt }, null);
-    return r.access_token;
-  } catch (err) {
-    if ((err as { expired?: boolean }).expired) {
-      await write({ ...saved, failedAt: new Date().toISOString() }, null);
-      throw err;
-    }
-    // Refresh refused for another reason (too young): the old token still works.
-    return plain;
+    if (err instanceof MetaError) throw new InstagramError(err.message.replace(/^Meta: /, "Instagram: "));
+    throw err;
   }
 }
 
-export async function instagramReady() {
-  const saved = await read();
-  return !!saved && !saved.failedAt;
-}
+export type PostType = "reel" | "photo" | "carousel" | "story";
+export type PostItem = { kind: "image" | "video"; url: string };
 
-/**
- * Posts a reel from a public video URL: make the container, wait for Instagram to
- * fetch and process the video, publish, then read its link.
- */
-export async function publishReel(input: {
-  videoUrl: string;
+export interface PostInput {
+  type: PostType;
+  items: PostItem[];
   caption: string;
-  shareToFeed: boolean;
+  altText?: string;
+  collaborators?: string[];
+  shareToFeed?: boolean;
   coverAtMs?: number;
+  /** Meta's AI label: made or changed by AI in a way that looks real. */
+  aiGenerated?: boolean;
   signal: AbortSignal;
   progress: (text: string) => void;
-}): Promise<{ mediaId: string; permalink: string | null; username: string }> {
-  const saved = await read();
-  if (!saved) throw new InstagramError("Instagram isn't connected: the owner adds the account's token in Seelie's settings.");
-  const access = await token(saved);
-  const fail = async (err: unknown): Promise<never> => {
-    if ((err as { expired?: boolean }).expired) await write({ ...saved, failedAt: new Date().toISOString() }, null);
-    throw err;
-  };
+}
 
-  input.progress("Sending the video to Instagram…");
-  const container = await graph<{ id: string }>(
-    "POST",
-    `/${saved.accountId}/media`,
-    {
-      media_type: "REELS",
-      video_url: input.videoUrl,
-      caption: input.caption,
-      share_to_feed: String(input.shareToFeed),
-      ...(input.coverAtMs !== undefined ? { thumb_offset: String(Math.round(input.coverAtMs)) } : {}),
-    },
-    access,
-    input.signal,
-  ).catch(fail);
-
+/** Wait for Instagram to fetch and process a container. */
+async function ready(ctx: InstagramContext, id: string, what: string, input: Pick<PostInput, "signal" | "progress">) {
   const started = Date.now();
   for (;;) {
-    const s = await graph<{ status_code: string; status?: string }>("GET", `/${container.id}`, { fields: "status_code,status" }, access, input.signal).catch(fail);
-    if (s.status_code === "FINISHED") break;
-    if (s.status_code === "ERROR" || s.status_code === "EXPIRED") throw new InstagramError(`Instagram couldn't take the video: ${s.status ?? s.status_code}`);
-    if (Date.now() - started > 10 * 60_000) throw new InstagramError("Instagram is still processing the video after 10 minutes; nothing was posted.");
-    input.progress(`Instagram is processing the video (${Math.round((Date.now() - started) / 1000)} s)…`);
-    await new Promise((ok) => setTimeout(ok, 5000));
+    const s = await call<{ status_code?: string; status?: string }>(ctx, "GET", `/${id}`, { fields: "status_code,status" }, input.signal);
+    if (s.status_code === "FINISHED" || s.status_code === "PUBLISHED") return;
+    if (s.status_code === "ERROR" || s.status_code === "EXPIRED") throw new InstagramError(`Instagram couldn't take ${what}: ${s.status ?? s.status_code}`);
+    if (Date.now() - started > 10 * 60_000) throw new InstagramError(`Instagram is still processing ${what} after 10 minutes; nothing was posted.`);
     if (input.signal.aborted) throw new InstagramError("Stopped before posting.");
+    input.progress(`Instagram is processing ${what} (${Math.round((Date.now() - started) / 1000)} s)…`);
+    await new Promise((ok) => setTimeout(ok, 4000));
+  }
+}
+
+/** How many posts the account may still publish through the API today (Instagram allows 100 in 24 hours). */
+export async function publishingRoom(ctx: InstagramContext, signal?: AbortSignal): Promise<{ used: number; total: number } | null> {
+  try {
+    const r = await call<{ data?: { quota_usage?: number; config?: { quota_total?: number } }[] }>(
+      ctx,
+      "GET",
+      `/${ctx.instagram.id}/content_publishing_limit`,
+      { fields: "quota_usage,config" },
+      signal,
+    );
+    const row = r.data?.[0];
+    return row ? { used: row.quota_usage ?? 0, total: row.config?.quota_total ?? 100 } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Post to Instagram: make the container(s), wait for processing, publish, read its link. */
+export async function publishPost(input: PostInput): Promise<{ mediaId: string; permalink: string | null; username: string }> {
+  const ctx = await instagramContext();
+  const ig = ctx.instagram.id;
+  const room = await publishingRoom(ctx, input.signal);
+  if (room && room.used >= room.total) throw new InstagramError(`The account has used all ${room.total} API posts allowed in 24 hours; try later.`);
+
+  const shared = {
+    ...(input.collaborators?.length ? { collaborators: input.collaborators } : {}),
+    ...(input.aiGenerated ? { is_ai_generated: true } : {}),
+  };
+  let container: string;
+
+  if (input.type === "carousel") {
+    const children: string[] = [];
+    for (const [i, item] of input.items.entries()) {
+      input.progress(`Sending item ${i + 1} of ${input.items.length} to Instagram…`);
+      const child = await call<{ id: string }>(
+        ctx,
+        "POST",
+        `/${ig}/media`,
+        item.kind === "image" ? { image_url: item.url, is_carousel_item: true } : { media_type: "VIDEO", video_url: item.url, is_carousel_item: true },
+        input.signal,
+      );
+      children.push(child.id);
+    }
+    for (const [i, id] of children.entries()) await ready(ctx, id, `item ${i + 1}`, input);
+    input.progress("Putting the carousel together…");
+    container = (
+      await call<{ id: string }>(ctx, "POST", `/${ig}/media`, { media_type: "CAROUSEL", children: children.join(","), caption: input.caption, ...shared }, input.signal)
+    ).id;
+  } else {
+    const item = input.items[0];
+    input.progress(`Sending the ${item.kind === "image" ? "photo" : "video"} to Instagram…`);
+    const params: Record<string, unknown> =
+      input.type === "story"
+        ? { media_type: "STORIES", ...(item.kind === "image" ? { image_url: item.url } : { video_url: item.url }) }
+        : input.type === "reel"
+          ? {
+              media_type: "REELS",
+              video_url: item.url,
+              caption: input.caption,
+              share_to_feed: input.shareToFeed ?? true,
+              ...(input.coverAtMs !== undefined ? { thumb_offset: Math.round(input.coverAtMs) } : {}),
+              ...shared,
+            }
+          : { image_url: item.url, caption: input.caption, ...(input.altText ? { alt_text: input.altText } : {}), ...shared };
+    container = (await call<{ id: string }>(ctx, "POST", `/${ig}/media`, params, input.signal)).id;
   }
 
+  await ready(ctx, container, input.type === "carousel" ? "the carousel" : `the ${input.type}`, input);
   input.progress("Publishing…");
-  const media = await graph<{ id: string }>("POST", `/${saved.accountId}/media_publish`, { creation_id: container.id }, access, input.signal).catch(fail);
-  const info = await graph<{ permalink?: string }>("GET", `/${media.id}`, { fields: "permalink" }, access).catch(() => ({ permalink: undefined }));
-  return { mediaId: media.id, permalink: info.permalink ?? null, username: saved.username };
+  const media = await call<{ id: string }>(ctx, "POST", `/${ig}/media_publish`, { creation_id: container }, input.signal);
+  const info = await call<{ permalink?: string }>(ctx, "GET", `/${media.id}`, { fields: "permalink" }).catch(() => ({ permalink: undefined }));
+  return { mediaId: media.id, permalink: info.permalink ?? null, username: ctx.instagram.username };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reading                                                                    */
+/* -------------------------------------------------------------------------- */
+
+type Insight = { name: string; values?: { value: number }[]; total_value?: { value: number } };
+
+const valueOf = (i: Insight) => i.total_value?.value ?? i.values?.at(-1)?.value ?? null;
+
+export async function accountInfo(ctx: InstagramContext, days: number, signal?: AbortSignal) {
+  const profile = await call<Record<string, unknown>>(
+    ctx,
+    "GET",
+    `/${ctx.instagram.id}`,
+    { fields: "username,name,biography,website,followers_count,follows_count,media_count" },
+    signal,
+  );
+  const until = Math.floor(Date.now() / 1000);
+  const since = until - Math.min(30, Math.max(1, days)) * 86_400;
+  const insights = await call<{ data?: Insight[] }>(
+    ctx,
+    "GET",
+    `/${ctx.instagram.id}/insights`,
+    { metric: "reach,views,accounts_engaged,total_interactions,profile_links_taps", period: "day", metric_type: "total_value", since, until },
+    signal,
+  )
+    .then((r) => Object.fromEntries((r.data ?? []).map((i) => [i.name, valueOf(i)])))
+    .catch((err: unknown) => ({ unavailable: err instanceof Error ? err.message : String(err) }));
+  return { profile, [`last${Math.min(30, Math.max(1, days))}Days`]: insights, publishing: await publishingRoom(ctx, signal) };
+}
+
+const MEDIA_FIELDS = "id,media_type,media_product_type,caption,permalink,timestamp,like_count,comments_count,thumbnail_url,media_url";
+
+export async function recentMedia(ctx: InstagramContext, limit: number, withInsights: boolean, signal?: AbortSignal) {
+  const r = await call<{ data?: Record<string, unknown>[] }>(ctx, "GET", `/${ctx.instagram.id}/media`, { fields: MEDIA_FIELDS, limit: Math.min(50, limit) }, signal);
+  const media = r.data ?? [];
+  if (!withInsights) return media.map(trimMedia);
+  return Promise.all(media.map(async (m) => ({ ...trimMedia(m), insights: await mediaInsights(ctx, String(m.id), String(m.media_product_type ?? ""), signal) })));
+}
+
+function trimMedia(m: Record<string, unknown>) {
+  const caption = typeof m.caption === "string" ? m.caption : "";
+  return {
+    id: m.id,
+    type: m.media_product_type === "REELS" ? "reel" : m.media_type === "CAROUSEL_ALBUM" ? "carousel" : m.media_product_type === "STORY" ? "story" : String(m.media_type ?? "").toLowerCase(),
+    at: m.timestamp,
+    link: m.permalink,
+    likes: m.like_count,
+    comments: m.comments_count,
+    caption: caption.length > 300 ? `${caption.slice(0, 297)}…` : caption,
+  };
+}
+
+export async function mediaInsights(ctx: InstagramContext, mediaId: string, productType: string, signal?: AbortSignal) {
+  const metric = productType === "STORY" ? "reach,views,replies,shares,total_interactions" : "reach,views,saved,shares,total_interactions";
+  return call<{ data?: Insight[] }>(ctx, "GET", `/${mediaId}/insights`, { metric }, signal)
+    .then((r) => Object.fromEntries((r.data ?? []).map((i) => [i.name, valueOf(i)])))
+    .catch((err: unknown) => ({ unavailable: err instanceof Error ? err.message : String(err) }));
+}
+
+export async function mediaOne(ctx: InstagramContext, mediaId: string, signal?: AbortSignal) {
+  const m = await call<Record<string, unknown>>(ctx, "GET", `/${mediaId}`, { fields: MEDIA_FIELDS }, signal);
+  return { ...trimMedia(m), insights: await mediaInsights(ctx, mediaId, String(m.media_product_type ?? ""), signal) };
+}
+
+export async function mediaComments(ctx: InstagramContext, mediaId: string, limit: number, signal?: AbortSignal) {
+  const r = await call<{ data?: { id: string; text?: string; username?: string; timestamp?: string; like_count?: number }[] }>(
+    ctx,
+    "GET",
+    `/${mediaId}/comments`,
+    { fields: "id,text,username,timestamp,like_count", limit: Math.min(50, limit) },
+    signal,
+  );
+  return (r.data ?? []).map((c) => ({ by: c.username, at: c.timestamp, text: c.text, likes: c.like_count }));
 }

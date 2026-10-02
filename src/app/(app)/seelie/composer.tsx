@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, Brain, ChevronDown, Music, Paperclip
 import { useEffect, useRef, useState } from "react";
 
 import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
+import { contextTokens, formatTokens } from "@/lib/seelie/context";
 import { ACTIVE_RUN } from "@/lib/seelie/types";
 import { MAX_DRAFT_CLIPS, MAX_DRAFT_IMAGES, useSeelie, type DraftClip, type DraftImage } from "@/lib/stores/seelie-store";
 import { cn } from "@/lib/utils";
@@ -74,6 +75,7 @@ export function Composer({
   const modelId = useSeelie((s) => s.model);
   const thinking = useSeelie((s) => s.thinking);
   const limits = useSeelie((s) => s.limits);
+  const messages = useSeelie((s) => s.messages);
   const { setDraft, addImages, removeImage, addClips, removeClip, send, stop, setModel, setThinking } = useSeelie.getState();
 
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -148,6 +150,7 @@ export function Composer({
   const thinkingOptions: DropdownOption[] = (model?.thinkingLevels ?? []).map((l) => ({ id: l, label: THINKING_LABEL[l] ?? l }));
 
   const usage = usageFor(limits, model?.provider ?? null);
+  const context = model ? contextFor(messages, model.contextWindow, model.name) : null;
 
   // Docked above the phone's nav bar (56px + the safe area), at the window's foot from `sm` up
   // and while the keyboard is up.
@@ -307,6 +310,8 @@ export function Composer({
 
           <div className="flex-1" />
 
+          {context ? <ContextMeter context={context} /> : null}
+
           {usage ? (
             <button
               type="button"
@@ -418,6 +423,43 @@ function Pill({ children }: { children: React.ReactNode }) {
       <span className="flex min-w-0 items-center gap-1 truncate">{children}</span>
       <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
     </span>
+  );
+}
+
+/** How full the chat is: its tokens against the model's window. */
+function contextFor(messages: ReturnType<typeof useSeelie.getState>["messages"], window: number, modelName: string) {
+  const tokens = contextTokens(messages);
+  if (tokens === null || !window) return null;
+  const used = Math.min(1, tokens / window);
+  const n = new Intl.NumberFormat("en-IN");
+  return {
+    used,
+    label: `${formatTokens(tokens)} / ${formatTokens(window)}`,
+    title: `Context: ${n.format(tokens)} of ${n.format(window)} tokens (${Math.round((tokens / window) * 100)}%) that ${modelName} can read at once. Everything said, done and attached in this chat counts; start a new chat for a new task.`,
+  };
+}
+
+/** A ring that fills as the chat's context does, with the count beside it (a tap shows it on narrow phones). */
+function ContextMeter({ context }: { context: NonNullable<ReturnType<typeof contextFor>> }) {
+  const [open, setOpen] = useState(false);
+  const r = 7;
+  const c = 2 * Math.PI * r;
+  const color = context.used > 0.85 ? "var(--danger)" : context.used > 0.6 ? "var(--warn)" : "var(--accent)";
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen((o) => !o)}
+      className="mr-0.5 flex h-9 items-center gap-1.5 rounded-lg px-1.5 text-[11px] tabular-nums hover:bg-[var(--tint-hover)] sm:h-auto sm:py-1"
+      style={{ color: context.used > 0.85 ? "var(--danger)" : "var(--muted-2)" }}
+      title={context.title}
+      aria-label={context.title}
+    >
+      <svg width="18" height="18" viewBox="0 0 18 18" className="shrink-0 -rotate-90">
+        <circle cx="9" cy="9" r={r} fill="none" stroke="var(--panel-2)" strokeWidth="2.5" />
+        <circle cx="9" cy="9" r={r} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${Math.max(0.02, context.used) * c} ${c}`} />
+      </svg>
+      <span className={cn(open ? "inline" : "hidden min-[400px]:inline")}>{context.label}</span>
+    </button>
   );
 }
 
