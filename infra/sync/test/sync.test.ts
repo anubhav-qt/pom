@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
+import pg from "pg";
+
 import { applyChanges } from "../src/apply.ts";
 import { tx } from "../src/db.ts";
 import { prune, reconcileAll, reseedCloud } from "../src/ops.ts";
 import { Pair } from "../src/pair.ts";
-import { assertConverged, close, cloudExtension, conflicts, pairConfig, rows, settle, setup, testSettings } from "./helpers.ts";
+import { LOCAL_URL, assertConverged, close, cloudExtension, conflicts, pairConfig, rows, settle, setup, testSettings } from "./helpers.ts";
 
 type Setup = Awaited<ReturnType<typeof setup>>;
 let current: Setup | null = null;
@@ -374,6 +376,101 @@ test("a replaced cloud database halts the sync instead of guessing", async () =>
   await again.exclusive(() => again.cycle());
   assert.match(again.status.halted ?? "", /not the one/);
   assert.equal(again.isReady(), false);
+});
+
+/** Lets a test retry at once instead of waiting out the backoff. */
+function retryNow(pair: Pair) {
+  (pair as unknown as { nextCloudTry: number }).nextCloudTry = 0;
+}
+
+test("a cloud check that errors is an outage, not a missing schema", async () => {
+  const { pair } = await fresh();
+  await settle(pair);
+  await pair.close();
+  const again = new Pair(pair.cfg, pair.settings);
+  current!.pair = again;
+  // What a timed-out push left in the pool on 2026-10-02: a connection inside an aborted transaction.
+  const c = await again.cloud.connect();
+  await c.query("begin");
+  await c.query("select 1/0").catch(() => {});
+  c.release();
+  await again.exclusive(() => again.cycle());
+  assert.equal(again.status.halted, null, "the schema is there: no halt");
+  assert.match(again.status.lastError ?? "", /aborted/);
+  assert.equal(again.cloud.totalCount, 0, "the connection is closed, not handed to the next check");
+  retryNow(again);
+  await settle(again);
+  assert.equal(again.isReady(), true);
+});
+
+test("a halt lifts once its cause is gone, and the ThinkPad catches up before serving", async () => {
+  const { pair, cloud } = await fresh();
+  await settle(pair);
+  const id = (await cloud.query(`select value from paribelle_sync.meta where key = 'instance'`)).rows[0].value;
+  await cloud.query(`update paribelle_sync.meta set value = gen_random_uuid()::text where key = 'instance'`);
+  (pair as unknown as { dropLocks(): void }).dropLocks(); // a lost connection: the next cycle checks the cloud again
+  await pair.exclusive(() => pair.cycle());
+  assert.match(pair.status.halted ?? "", /not the one/);
+  assert.equal(pair.isReady(), false);
+  assert.equal(pair.status.drained, false, "the fallback serves now, so the ThinkPad must catch up with it");
+
+  await cloud.query(`insert into orders (account_id, ext) values (2, 'f-halt')`); // the fallback took an order
+  await cloud.query(`update paribelle_sync.meta set value = $1 where key = 'instance'`, [id]);
+  retryNow(pair);
+  await pair.exclusive(() => pair.cycle());
+  assert.equal(pair.status.halted, null);
+  assert.equal(pair.isReady(), true);
+  const got = await pair.local.query(`select count(*)::int as n from orders where ext = 'f-halt'`);
+  assert.equal(got.rows[0].n, 1, "what the fallback took during the halt is home before serving");
+});
+
+test("pushes that keep failing say so, and what they were sending", async () => {
+  const { pair, local, cloud } = await fresh();
+  await settle(pair);
+  // Fails the whole push, like a statement outlasting the timeout did.
+  await cloud.query(`
+    create function stuck() returns trigger language plpgsql as $$ begin raise exception 'stuck' using errcode = '40001'; end $$;
+    create trigger stuck before insert or update on orders for each row execute function stuck();`);
+  await local.query(`insert into orders (account_id, ext) values (1, 'o-stuck')`);
+  await pair.exclusive(() => pair.cycle());
+  assert.ok(pair.status.pushFailingSince, "the status says since when");
+  assert.match((pair as unknown as { pushBatch: Record<string, string> }).pushBatch.orders ?? "", /^1 rows, /);
+  assert.equal(pair.isReady(), true, "the ThinkPad has everything, so it keeps serving");
+
+  await cloud.query(`drop trigger stuck on orders`);
+  retryNow(pair);
+  await settle(pair);
+  assert.equal(pair.status.pushFailingSince, null);
+  await assertConverged(pair);
+});
+
+test("a failed transaction's connection is closed, not handed out again mid-transaction", async () => {
+  const pool = new pg.Pool({ connectionString: LOCAL_URL, max: 1, query_timeout: 200 });
+  try {
+    await assert.rejects(tx(pool, {}, (c) => c.query("select 1/0")), /division by zero/);
+    assert.equal(pool.totalCount, 0);
+    // node-postgres gives up on the statement; the database is still running it.
+    await assert.rejects(tx(pool, {}, (c) => c.query("select pg_sleep(2)")), /Query read timeout/);
+    assert.equal(pool.totalCount, 0);
+    const r = await pool.query<{ fresh: boolean }>(`select now() = statement_timestamp() as fresh`);
+    assert.equal(r.rows[0].fresh, true, "the next query runs in a transaction of its own");
+  } finally {
+    await pool.end();
+  }
+});
+
+test("a conflict already open isn't recorded again", async () => {
+  const { pair } = await fresh();
+  await settle(pair);
+  const c = { tbl: "orders", pk: '{"id": 1}', kept: "none" as const, lostRow: '{"id": 1, "ext": "o-1"}', reason: "duplicate key (23505)" };
+  await pair.recordConflicts([c]);
+  await pair.recordConflicts([c]);
+  assert.equal((await conflicts(pair)).length, 1, "the same row failing the same way again");
+  await pair.recordConflicts([{ ...c, lostRow: '{"id": 1, "ext": "o-1b"}' }]);
+  assert.equal((await conflicts(pair)).length, 2, "a different losing version is a new conflict");
+  await pair.local.query(`update paribelle_sync.conflicts set resolved_at = now()`);
+  await pair.recordConflicts([c]);
+  assert.equal((await conflicts(pair)).length, 3, "once resolved, it can be recorded again");
 });
 
 test("reseed: a new, empty cloud database filled from the ThinkPad", async () => {

@@ -72,13 +72,30 @@ export async function tx<T>(pool: pg.Pool, opts: TxOptions, fn: (c: Client) => P
     if (opts.applying) await c.query("set local paribelle_sync.applying = 'on'");
     const out = await fn(c);
     await c.query("commit");
+    c.release();
     return out;
   } catch (e) {
-    await c.query("rollback").catch(() => {});
+    await discard(c, e);
     throw e;
-  } finally {
-    c.release();
   }
+}
+
+/**
+ * Gives up on a client whose transaction failed: rolls back if it can still be
+ * talked to, then closes it instead of returning it to the pool. After a
+ * `query_timeout` the statement may still be running in the database, so a
+ * rollback would queue behind it; and a client handed back mid-transaction
+ * fails every query of whoever borrows it next (on 2026-10-02 that was the
+ * cloud check, and the sync halted, sure the cloud had lost its schema).
+ */
+export async function discard(c: pg.PoolClient, e: unknown) {
+  if (!isClientTimeout(e)) await c.query("rollback").catch(() => {});
+  c.release(true);
+}
+
+/** node-postgres giving up on a statement (`query_timeout`); the database may still be running it. */
+export function isClientTimeout(e: unknown): boolean {
+  return errText(e) === "Query read timeout";
 }
 
 /** Double-quotes an identifier. */

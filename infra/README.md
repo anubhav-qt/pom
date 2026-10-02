@@ -272,8 +272,14 @@ When a Supabase database passes `PRUNE_AT_MB` (400), the sync deletes its oldest
 - **Supabase is down** while the ThinkPad is fine: the ThinkPad keeps serving and the sync
   catches the cloud up later. At boot it waits 2 minutes for the cloud, then serves anyway if
   the internet works (`degraded` in `status`).
-- **The sync halts** (`status` says why): usually a cloud database was replaced or reset. If
-  it was, point `.env` (and Render, and Vercel) at the new one, then:
+- **Pushes to the cloud keep failing** (`pushFailingSince` in `status`; the log says *pushes to
+  the cloud are failing* and what the push was sending, per table): the ThinkPad keeps serving
+  but the cloud copy falls behind, so a fallback would serve old data. A table whose rows are
+  too big to send within the 2-minute statement timeout (a rendered reel's video) belongs in
+  `localOnly` in `sync/policy.json`.
+- **The sync halts** (`status` says why; it lifts by itself once the check passes, and the
+  ThinkPad catches up before serving again): usually a cloud database was replaced or reset.
+  If it was, point `.env` (and Render, and Vercel) at the new one, then:
   ```sh
   docker compose stop sync
   docker compose run --rm sync node src/main.ts reseed-cloud shop   # fills an empty cloud database from the ThinkPad

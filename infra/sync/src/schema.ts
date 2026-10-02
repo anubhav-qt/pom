@@ -75,11 +75,20 @@ export async function installBase(c: Client | pg.Pool, side: "local" | "cloud") 
   if (side === "local") await c.query(LOCAL_DDL);
 }
 
+/**
+ * This database's instance id; null only when the sync's schema or table isn't
+ * there (a reset or replaced database). Anything else (a timeout, a dropped
+ * connection, an aborted transaction) is thrown: it says nothing about the schema.
+ */
 export async function instanceId(c: Client | pg.Pool): Promise<string | null> {
-  const r = await c.query(
-    `select value from paribelle_sync.meta where key = 'instance'`,
-  ).catch(() => null);
-  return r?.rows[0]?.value ?? null;
+  try {
+    const r = await c.query(`select value from paribelle_sync.meta where key = 'instance'`);
+    return r.rows[0]?.value ?? null;
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    if (code === "3F000" || code === "42P01") return null; // invalid_schema_name, undefined_table
+    throw e;
+  }
 }
 
 export interface Column {
