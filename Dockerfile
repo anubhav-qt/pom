@@ -13,6 +13,11 @@
 FROM node:24-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
+# The npm workspaces (Seelie's pi fork): npm ci needs each one's manifest to link it.
+COPY packages/pi-ai/package.json ./packages/pi-ai/
+COPY packages/pi-agent/package.json ./packages/pi-agent/
+# onnxruntime-node (Seelie's cut-outs) runs on the CPU; skip its optional CUDA download.
+ENV ONNXRUNTIME_NODE_INSTALL=skip
 RUN npm ci
 
 # ---- build ----
@@ -44,6 +49,19 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0
 
 RUN useradd --system --uid 10001 oms
+
+# Seelie's media (clips, renders, fonts, the cut-out model): the seelie-media volume in
+# infra/compose.yml. Made here so a fresh volume starts owned by the app's user.
+RUN mkdir -p /data/seelie && chown oms:oms /data/seelie
+ENV SEELIE_MEDIA_DIR=/data/seelie
+
+# yt-dlp, pinned and checksummed: YouTube search and song downloads for Seelie and the
+# songs script. The standalone build needs no Python; Node (here) solves YouTube's JS.
+ARG YTDLP_VERSION=2026.08.19
+ADD --chmod=755 --checksum=sha256:58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a \
+    https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_linux /usr/local/bin/yt-dlp
+ENV YTDLP_PATH=/usr/local/bin/yt-dlp
+
 # The commit, for /pom/api/health (CI passes it).
 ARG RELEASE=dev
 ENV RELEASE=$RELEASE

@@ -70,6 +70,35 @@ visitor ─► Cloudflare ─► paribelle-edge Worker ──(tunnel + edge key)
 
 `docker compose exec sync node src/main.ts status` shows each job's last run.
 
+### Seelie (the ThinkPad only)
+
+Seelie, the OMS's AI agent, reaches its models through CLIProxyAPI (the `cliproxy` service),
+which turns the owner's AI subscriptions into one API. Only the OMS reaches it, inside the
+stack's network; on Vercel `CLIPROXY_URL` is unset and Seelie shows offline.
+
+- **Keys.** `CLIPROXY_API_KEY` and `CLIPROXY_MANAGEMENT_KEY` in `.env` (`openssl rand -hex 24`
+  each). The service writes its config from them at every start; without them it waits,
+  unhealthy, and the rest of the stack carries on.
+- **Subscriptions.** Sign in from Seelie's settings (the gear): Antigravity, Codex or Claude
+  opens in a new tab, and you paste the address it ends on back into Seelie. The sign-ins
+  live in the `cliproxy` volume (not in the backups: sign in again after losing the disk).
+- **paribelle.in.** Seelie's store tools call the API straight (`http://api:3001/api/v1`),
+  with the owner's admin login saved, encrypted, in the OMS database.
+- **Chats stay here.** The `seelie_*` tables aren't synced to Supabase (`sync/policy.json`).
+- **Videos.** Seelie renders with the image's ffmpeg, one render at a time, at low priority.
+  Its media (uploaded clips, renders, fonts, generated images and the 115 MB cut-out model,
+  downloaded on first use) lives in the `seelie-media` volume at `/data/seelie`, not in the
+  database and not in the backups. yt-dlp is in the image, pinned (`YTDLP_VERSION` and its
+  checksum in the Dockerfile; bump both together when YouTube breaks it).
+- **Instagram.** Paste the shop account's long-lived token in Seelie's settings (the
+  Instagram panel); it's kept encrypted and renewed by itself. Instagram fetches each reel
+  from a signed two-hour link under `SEELIE_PUBLIC_URL` (default `https://www.paribelle.in`,
+  which the Worker forwards to `/pom` here), so publishing needs the tunnel up.
+- **paribelle.in product videos** go through the API's admin `POST /upload/product-video`
+  (Cloudinary), then last in the product's photos, where the storefront gallery plays them.
+- **Version.** The image is pinned to the release Seelie was tested with; to move it, set
+  `CLIPROXY_IMAGE` in `.env` and `docker compose up -d cliproxy`.
+
 ## Setting up
 
 In this order. Nothing changes for visitors until the last step of 2.
@@ -168,6 +197,7 @@ Render build as before, and each repo's workflow then calls the ThinkPad's deplo
 pulls this folder and the new images and restarts what changed straight away. A 5-minute
 check catches anything a call missed. The stock images (Postgres, Caddy, cloudflared) aren't
 updated that way; now and then: `docker compose pull db gate tunnel && docker compose up -d`.
+CLIProxyAPI is pinned (see Seelie above).
 
 ### The deploy hook
 

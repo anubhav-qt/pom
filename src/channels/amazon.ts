@@ -154,6 +154,33 @@ export class AmazonAdapter implements ChannelAdapter {
     return json.access_token;
   }
 
+  /**
+   * Any SP-API operation, for Seelie's `amazon_api` tool: the same signing,
+   * retries and endpoint as everything above. `marketplaceId` is offered for
+   * the queries that need it.
+   */
+  async call<T = unknown>(
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+    path: string,
+    opts: { query?: Record<string, string | undefined>; body?: unknown } = {},
+  ): Promise<T> {
+    return this.request<T>(path, {
+      method,
+      query: opts.query,
+      ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
+    });
+  }
+
+  /** The marketplace this account sells in (India unless set otherwise). */
+  get marketplace() {
+    return this.marketplaceId;
+  }
+
+  /** The seller id, where the account's credentials carry one (listings items need it). */
+  get sellerId(): string | null {
+    return this.creds.sellerId ?? null;
+  }
+
   /* ------------------------------------------------------------- request -- */
 
   /**

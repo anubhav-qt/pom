@@ -8,6 +8,17 @@
  */
 const basePath = "/pom";
 
+/** Seelie's ffmpeg and canvas, for the routes that render or read media. */
+const media = ["./node_modules/ffmpeg-static/ffmpeg*", "./node_modules/@napi-rs/canvas-linux-x64-gnu/**"];
+
+/**
+ * onnxruntime-node (Seelie's cut-outs) loads `bin/napi-v6/<platform>/<arch>/`'s binding,
+ * which pulls in its shared library by itself: tracing sees neither. Only the ThinkPad's
+ * Linux x64 build ships; on Vercel, where Seelie is offline, none of it does.
+ */
+const onVercel = !!process.env.VERCEL;
+const onnx = onVercel ? [] : ["./node_modules/onnxruntime-node/bin/napi-v6/linux/x64/**"];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   /**
@@ -44,6 +55,13 @@ const nextConfig = {
   },
 
   /**
+   * Seelie's agent harness, a fork of pi kept in packages/ as npm workspaces.
+   * They ship TypeScript source (with .ts import paths), so Next compiles them
+   * like the app's own code.
+   */
+  transpilePackages: ["@paribelle/pi-ai", "@paribelle/pi-agent"],
+
+  /**
    * These must stay out of the server bundle.
    *
    * pdfjs-dist in particular: when bundled, its fake-worker setup tries to
@@ -51,7 +69,7 @@ const nextConfig = {
    * external it resolves from node_modules normally, which is the only way
    * label splitting works inside a route handler.
    */
-  serverExternalPackages: ["pdf-lib", "xlsx", "pdfjs-dist", "@napi-rs/canvas", "ffmpeg-static"],
+  serverExternalPackages: ["pdf-lib", "xlsx", "pdfjs-dist", "@napi-rs/canvas", "ffmpeg-static", "onnxruntime-node"],
 
   /**
    * pdfjs loads its worker with a dynamic import it builds at runtime, which
@@ -72,6 +90,22 @@ const nextConfig = {
       "./node_modules/@napi-rs/canvas-linux-x64-gnu/**",
       "./src/lib/reels/assets/**",
     ],
+    /**
+     * Seelie's tools run inside the request that started the reply: reels, renders,
+     * cut-outs. Uploads are read by ffmpeg as they arrive.
+     */
+    "/api/seelie/runs": [...media, ...onnx, "./src/lib/reels/assets/**"],
+    "/api/seelie/assets": media,
+  },
+
+  outputFileTracingExcludes: {
+    "*": onVercel
+      ? ["./node_modules/onnxruntime-node/**"]
+      : [
+          "./node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
+          "./node_modules/onnxruntime-node/bin/napi-v6/win32/**",
+          "./node_modules/onnxruntime-node/bin/napi-v6/linux/arm64/**",
+        ],
   },
 };
 

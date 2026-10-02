@@ -97,7 +97,7 @@ export function AppHeader({
   // Orders and Returns have the rail band under the header with a search box in
   // it; Finance has the band too, but no search.
   const hasSearch = onOrders || onReturns;
-  const hasRail = hasSearch || effectiveScreen === "dashboard";
+  const hasRail = hasSearch || effectiveScreen === "dashboard" || effectiveScreen === "seelie";
 
   // Mirrored into a store so the mobile category dropdown (rendered in the
   // page body, below the header) can read the same real counts instead of
@@ -126,10 +126,10 @@ export function AppHeader({
         >
           PariBelle
         </Link>
-        {/* On the PDF printer and Reels there is no search to make room for, so
+        {/* On the PDF printer, Reels and Seelie there is no search to make room for, so
             mobile gets the same toggle as desktop instead of the hamburger. */}
         <div className="sm:hidden">
-          {effectiveScreen === "pdf-printer" || effectiveScreen === "reels" ? (
+          {effectiveScreen === "pdf-printer" || effectiveScreen === "reels" || effectiveScreen === "seelie" ? (
             <AppSwitch effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} hideTools />
           ) : (
             <MobileScreenMenu effectiveScreen={effectiveScreen} routeScreen={screenFromPath(pathname)} />
@@ -196,13 +196,14 @@ function hrefFor(screen: Screen): string {
   if (screen === "orders") return ordersHref();
   if (screen === "pdf-printer") return "/pdf-printer";
   if (screen === "reels") return "/reels";
+  if (screen === "seelie") return "/seelie";
   if (screen === "returns") return "/returns";
   return dashboardHref();
 }
 
 function targetIsCached(screen: Screen): boolean {
-  // Nothing to fetch for the printer or Reels: their state is client-side.
-  if (screen === "pdf-printer" || screen === "reels") return true;
+  // Nothing to fetch for the printer, Reels or Seelie: their state is client-side.
+  if (screen === "pdf-printer" || screen === "reels" || screen === "seelie") return true;
   if (screen === "orders") {
     return (
       useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null
@@ -278,7 +279,7 @@ function AppSwitch({
 }: {
   effectiveScreen: Screen | null;
   routeScreen: Screen | null;
-  /** Mobile reaches the printer and Reels from the bottom bar, not from here. */
+  /** Mobile reaches the printer, Reels and Seelie from the bottom bar, not from here. */
   hideTools?: boolean;
 }) {
   const items: { screen: Screen; label: string }[] = [
@@ -290,6 +291,7 @@ function AppSwitch({
       : [
           { screen: "pdf-printer" as Screen, label: "PDF printer" },
           { screen: "reels" as Screen, label: "Reels" },
+          { screen: "seelie" as Screen, label: "Seelie" },
         ]),
   ];
 

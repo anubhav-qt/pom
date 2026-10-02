@@ -26,6 +26,10 @@ const Reels = dynamic(
   () => import("@/app/(app)/reels/reels").then((m) => m.Reels),
   { ssr: false, loading: () => <PageLoader /> },
 );
+const Seelie = dynamic(
+  () => import("@/app/(app)/seelie/seelie").then((m) => m.Seelie),
+  { ssr: false, loading: () => <PageLoader /> },
+);
 const ReturnsDesk = dynamic(
   () => import("@/app/(app)/returns/returns-table").then((m) => m.ReturnsDesk),
   { ssr: false, loading: () => <PageLoader /> },
@@ -154,6 +158,7 @@ function ScreenBody({ children }: { children: React.ReactNode }) {
 
   if (override === "pdf-printer" && resolved === "pdf-printer") return fade(<PdfPrinter />);
   if (override === "reels" && resolved === "reels") return fade(<Reels />);
+  if (override === "seelie" && resolved === "seelie") return fade(<Seelie />);
 
   return fade(children);
 }

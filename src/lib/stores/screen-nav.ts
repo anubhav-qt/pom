@@ -10,7 +10,7 @@ import { peekCurrentReturns } from "./returns-cache";
  * The screens the top toggle switches between. Everything else in the app
  * ("/settings", "/pack", ...) is a normal route and never an override.
  */
-export type Screen = "dashboard" | "orders" | "returns" | "pdf-printer" | "reels";
+export type Screen = "dashboard" | "orders" | "returns" | "pdf-printer" | "reels" | "seelie";
 
 /** Which screen a real Next route corresponds to, or null for anything else. */
 export function screenFromPath(pathname: string): Screen | null {
@@ -19,6 +19,7 @@ export function screenFromPath(pathname: string): Screen | null {
   if (pathname === "/returns" || pathname.startsWith("/returns/")) return "returns";
   if (pathname === "/pdf-printer" || pathname.startsWith("/pdf-printer/")) return "pdf-printer";
   if (pathname === "/reels" || pathname.startsWith("/reels/")) return "reels";
+  if (pathname === "/seelie" || pathname.startsWith("/seelie/")) return "seelie";
   return null;
 }
 
@@ -29,6 +30,8 @@ export function screenHref(screen: Screen): string {
       ? "/pdf-printer"
       : screen === "reels"
         ? "/reels"
+        : screen === "seelie"
+          ? "/seelie"
         : screen === "returns"
           ? "/returns"
           : "/dashboard";
@@ -73,9 +76,9 @@ export function resolveScreen(pathname: string, override: Screen | null): Screen
   const route = screenFromPath(pathname);
   if (override === null || override === route) return route;
 
-  // The printer and Reels have no server data to wait for, so they can always be swapped in.
+  // The printer, Reels and Seelie have no server data to wait for, so they can always be swapped in.
   const cached =
-    override === "pdf-printer" || override === "reels"
+    override === "pdf-printer" || override === "reels" || override === "seelie"
       ? true
       : override === "orders"
         ? useOrdersCache.getState().peek(ordersViewKey(useOrdersNav.getState().params)) !== null

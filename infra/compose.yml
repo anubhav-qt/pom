@@ -187,13 +187,72 @@ services:
       GEMINI_API_KEYS: "${GEMINI_API_KEYS:-}"
       GEMINI_MODEL: "${GEMINI_MODEL:-}"
       GEMINI_REEL_MODELS: "${GEMINI_REEL_MODELS:-}"
-    volumes: ["./cluster.cjs:/cluster.cjs:ro"]
+      # Seelie: its models (the cliproxy service below) and paribelle.in, straight to the API.
+      # Without CLIPROXY_URL (Vercel) Seelie shows offline; without PARIBELLE_API_URL its
+      # store tools are hidden.
+      CLIPROXY_URL: http://cliproxy:8317
+      CLIPROXY_API_KEY: "${CLIPROXY_API_KEY:-}"
+      CLIPROXY_MANAGEMENT_KEY: "${CLIPROXY_MANAGEMENT_KEY:-}"
+      PARIBELLE_API_URL: http://api:3001/api/v1
+      PARIBELLE_STORE_VENDOR_ID: "${PARIBELLE_STORE_VENDOR_ID:-}"
+      # Seelie's videos: its media (clips, renders, fonts, the cut-out model) in the
+      # seelie-media volume, and the address Instagram fetches a reel from (signed links
+      # through the edge Worker, which forwards /pom here).
+      SEELIE_MEDIA_DIR: /data/seelie
+      SEELIE_PUBLIC_URL: "${SEELIE_PUBLIC_URL:-https://www.paribelle.in}"
+    volumes: ["./cluster.cjs:/cluster.cjs:ro", "seelie-media:/data/seelie"]
     depends_on:
       oms-migrate: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/pom/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 15s
       start_period: 60s
+
+  # Seelie's models: CLIProxyAPI turns the owner's AI subscriptions (Antigravity, Codex,
+  # Claude), signed in from Seelie's settings, into one API. Only the OMS reaches it, inside
+  # this network. Its config is written from infra/.env at every start (it hashes the
+  # management key in place); the sign-ins live in the cliproxy volume. Pinned to the
+  # version Seelie was tested with: change CLIPROXY_IMAGE to move it. Without its two keys
+  # it waits (unhealthy) instead of failing the whole stack's updates.
+  cliproxy:
+    image: ${CLIPROXY_IMAGE:-eceasy/cli-proxy-api:v8.0.10}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        if [ -z "$$CLIPROXY_API_KEY" ] || [ -z "$$CLIPROXY_MANAGEMENT_KEY" ]; then
+          echo "Set CLIPROXY_API_KEY and CLIPROXY_MANAGEMENT_KEY in infra/.env, then: docker compose up -d cliproxy"
+          exec sleep infinity
+        fi
+        mkdir -p /data/auths
+        cat > config.yaml <<EOF
+        config-version: 8
+        server:
+          host: ""
+          port: 8317
+        management:
+          allow-remote: true
+          secret-key: "$$CLIPROXY_MANAGEMENT_KEY"
+          disable-control-panel: true
+          disable-auto-update-panel: true
+        access:
+          api-keys:
+            - "$$CLIPROXY_API_KEY"
+        routing:
+          strategy: "fill-first"
+        oauth:
+          auth-dir: "/data/auths"
+        EOF
+        exec ./CLIProxyAPI
+    environment:
+      TZ: Asia/Kolkata
+      CLIPROXY_API_KEY: "${CLIPROXY_API_KEY:-}"
+      CLIPROXY_MANAGEMENT_KEY: "${CLIPROXY_MANAGEMENT_KEY:-}"
+    volumes: ["cliproxy:/data"]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8317"]
+      interval: 10s
+      start_period: 10s
+    restart: unless-stopped
 
   # The only door in (Caddyfile). Lets a request through when it carries the edge key (only
   # the Worker has it) and the sync says the ThinkPad has caught up; otherwise it answers so
@@ -252,5 +311,10 @@ volumes:
   db: {}
   backups: {}
   uploads: {}
+  cliproxy: {}
+  # Seelie's media. Not in the database and not synced to Supabase: back it up with the
+  # ThinkPad's other files if the renders matter (they can be rendered again from the
+  # library's recipes as long as their inputs are still there).
+  seelie-media: {}
   gate-data: {}
   gate-ca: {}

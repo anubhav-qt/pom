@@ -7,7 +7,6 @@ import { useState } from "react";
 import { ScanModal } from "@/app/(app)/orders/scan/scan-modal";
 import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
 import { withBasePath } from "@/lib/base-path";
-import { useAssistantUi } from "@/lib/stores/assistant-ui";
 import { ordersViewKey, paramsToQuery, useOrdersCache, useOrdersNav } from "@/lib/stores/orders-cache";
 import { resolveScreen, useScreenNav } from "@/lib/stores/screen-nav";
 import type { OrdersViewParams } from "@/app/(app)/orders/view-actions";
@@ -36,8 +35,8 @@ type NavSlot =
 
 /**
  * The mobile-only bottom bar, on every screen (Finance, Orders, Returns, PDF
- * printer, Reels): the order list, the planner, the scanner, the printer,
- * Reels and the assistant. It lives above the screens rather than inside one, so it stays
+ * printer, Reels, Seelie): the order list, the planner, the scanner, the printer,
+ * Reels and Seelie. It lives above the screens rather than inside one, so it stays
  * put while the screen underneath changes. Renders nothing at `sm` and up,
  * where the header carries all of this.
  *
@@ -49,7 +48,6 @@ export function MobileNav() {
   const pathname = usePathname();
   const override = useScreenNav((s) => s.override);
   const params = useOrdersNav((s) => s.params);
-  const setAssistantOpen = useAssistantUi((s) => s.setOpen);
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
 
@@ -61,7 +59,6 @@ export function MobileNav() {
 
   /** Open an Orders view, swapping in place when it is cached and navigating when it is not. */
   function openOrders(next: OrdersViewParams) {
-    setAssistantOpen(false);
     setScanning(false);
     if (onOrders) {
       useOrdersNav.getState().go(next);
@@ -111,8 +108,7 @@ export function MobileNav() {
       Icon: ScanLine,
       active: false,
       onClick: () => {
-        setAssistantOpen(false);
-        setScanning(true);
+            setScanning(true);
       },
     },
     {
@@ -122,8 +118,7 @@ export function MobileNav() {
       Icon: Printer,
       active: screen === "pdf-printer",
       onClick: () => {
-        setAssistantOpen(false);
-        setScanning(false);
+            setScanning(false);
         // Swap in place, like the header toggle does. A real navigation would
         // leave a screen override set, which keeps painting over the printer.
         window.history.pushState(null, "", withBasePath("/pdf-printer"));
@@ -137,13 +132,23 @@ export function MobileNav() {
       Icon: Clapperboard,
       active: screen === "reels",
       onClick: () => {
-        setAssistantOpen(false);
-        setScanning(false);
+            setScanning(false);
         window.history.pushState(null, "", withBasePath("/reels"));
         useScreenNav.getState().setOverride("reels");
       },
     },
-    { kind: "button", key: "ai", label: "AI", Icon: Sparkles, active: false, onClick: () => { setScanning(false); setAssistantOpen(true); } },
+    {
+      kind: "button",
+      key: "seelie",
+      label: "Seelie",
+      Icon: Sparkles,
+      active: screen === "seelie",
+      onClick: () => {
+        setScanning(false);
+        window.history.pushState(null, "", withBasePath("/seelie"));
+        useScreenNav.getState().setOverride("seelie");
+      },
+    },
   ];
 
   return (

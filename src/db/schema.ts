@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -859,6 +860,209 @@ export const restockPlanItems = pgTable(
   (t) => [uniqueIndex("restock_plan_variant_idx").on(t.baseKey, t.size, t.color)],
 );
 
+/* -------------------------------------------------------------------------- */
+/* Seelie                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Seelie, the OMS's agent. Its LLM runs through CLIProxyAPI on the ThinkPad,
+ * so these tables only ever fill there; the sync leaves them out
+ * (infra/sync/policy.json).
+ *
+ * One chat per conversation, listed in Seelie's sidebar. `model` and
+ * `thinking` are what the composer last used, so reopening a chat keeps them.
+ */
+export const seelieChats = pgTable(
+  "seelie_chats",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default(""),
+    model: text("model"),
+    thinking: text("thinking"),
+    /** Changes to the OMS run without an approval card. Changes to a marketplace or to paribelle.in still ask. */
+    autoApprove: boolean("auto_approve").notNull().default(false),
+    pinned: boolean("pinned").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Last activity, which orders the sidebar. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("seelie_chats_user_updated_idx").on(t.userId, t.updatedAt)],
+);
+
+/**
+ * One reply from Seelie: everything it did for one message, from the first
+ * token to the last tool. The process that starts a run keeps it in memory and
+ * mirrors it here, so any other process (the ThinkPad runs one per core) can
+ * show it, approve its changes or stop it.
+ */
+export const seelieRuns = pgTable(
+  "seelie_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    chatId: uuid("chat_id")
+      .notNull()
+      .references(() => seelieChats.id, { onDelete: "cascade" }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** running | waiting (on an approval) | done | error | aborted | interrupted */
+    status: text("status").notNull().default("running"),
+    model: text("model").notNull(),
+    thinking: text("thinking").notNull(),
+    /** The reply being streamed right now (an assistant message), for viewers in other processes. */
+    partial: jsonb("partial"),
+    error: text("error"),
+    /** Stop was pressed in a process that doesn't hold the run; the holder sees it and aborts. */
+    abortRequested: boolean("abort_requested").notNull().default(false),
+    /** Token totals across the run's turns. */
+    usage: jsonb("usage"),
+    /** hostname:pid of the process running it. */
+    owner: text("owner"),
+    /** Bumped while the run is alive. A stale one means its process died: the run reads as interrupted. */
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (t) => [index("seelie_runs_chat_idx").on(t.chatId, t.startedAt)],
+);
+
+/**
+ * A chat's transcript, in order: pi's messages (user, assistant with its
+ * thinking and tool calls, and tool results) exactly as the model saw them.
+ */
+export const seelieMessages = pgTable(
+  "seelie_messages",
+  {
+    id: serial("id").primaryKey(),
+    chatId: uuid("chat_id")
+      .notNull()
+      .references(() => seelieChats.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => seelieRuns.id, { onDelete: "set null" }),
+    seq: integer("seq").notNull(),
+    /** user | assistant | toolResult */
+    role: text("role").notNull(),
+    message: jsonb("message").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("seelie_messages_chat_seq_idx").on(t.chatId, t.seq)],
+);
+
+/**
+ * Every tool call Seelie makes, with what the transcript doesn't hold: when it
+ * ran, how long it took, and the approval a change waited on.
+ */
+export const seelieToolCalls = pgTable(
+  "seelie_tool_calls",
+  {
+    id: serial("id").primaryKey(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => seelieRuns.id, { onDelete: "cascade" }),
+    chatId: uuid("chat_id")
+      .notNull()
+      .references(() => seelieChats.id, { onDelete: "cascade" }),
+    /** The model's id for the call, which the transcript's tool result repeats. */
+    callId: text("call_id").notNull(),
+    tool: text("tool").notNull(),
+    /** read | write (the OMS) | market (changes a marketplace) | store (changes paribelle.in); the last two always ask */
+    kind: text("kind").notNull(),
+    args: jsonb("args"),
+    /** One line saying what the call does, for the approval card. */
+    summary: text("summary"),
+    /** awaiting | denied | running | done | error */
+    status: text("status").notNull(),
+    /** null for lookups; auto | approved | denied for changes */
+    approval: text("approval"),
+    decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("seelie_tool_calls_run_call_idx").on(t.runId, t.callId),
+    index("seelie_tool_calls_chat_idx").on(t.chatId),
+  ],
+);
+
+/**
+ * Seelie's own settings, one row per key. `store` is the paribelle.in admin
+ * login it signs in with (encrypted with AUTH_SECRET), entered once by the owner.
+ */
+export const seelieSettings = pgTable("seelie_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The pictures, clips and sounds Seelie's video tools work with that aren't already
+ * somewhere in the OMS: clips attached in a chat, images fetched from a URL, product
+ * cut-outs, generated scenes, frames saved from a video. The files are on the
+ * ThinkPad's media folder (SEELIE_MEDIA_DIR); this is their index. Tools name them
+ * `asset:<id>`.
+ */
+export const seelieAssets = pgTable(
+  "seelie_assets",
+  {
+    id: serial("id").primaryKey(),
+    chatId: uuid("chat_id").references(() => seelieChats.id, { onDelete: "set null" }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** image | video | audio | subtitles */
+    kind: text("kind").notNull(),
+    /** upload | url | cutout | generated | frame */
+    source: text("source").notNull(),
+    name: text("name").notNull(),
+    mime: text("mime").notNull(),
+    /** The file, relative to the media folder. */
+    file: text("file").notNull(),
+    bytes: integer("bytes").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    /** Seconds, for video and audio. */
+    duration: real("duration"),
+    hasAudio: boolean("has_audio"),
+    /** Where it came from: the URL, the prompt, the assets it was made from. */
+    meta: jsonb("meta"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("seelie_assets_chat_idx").on(t.chatId)],
+);
+
+/**
+ * Seelie's video library: every video it renders, with the filter graph and inputs
+ * that made each version, so any of them can be rendered again. The files are in the
+ * media folder (videos/<id>/v<version>.mp4). Tools name them `video:<id>`.
+ */
+export const seelieVideos = pgTable(
+  "seelie_videos",
+  {
+    id: serial("id").primaryKey(),
+    chatId: uuid("chat_id").references(() => seelieChats.id, { onDelete: "set null" }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    /** What was asked for, in the person's words. */
+    prompt: text("prompt"),
+    /** The latest version (0 before the first render). */
+    version: integer("version").notNull().default(0),
+    /** Every render, oldest first (`VideoVersion` in src/lib/seelie/media/library.ts). */
+    versions: jsonb("versions").notNull().default([]),
+    /** The library song it uses. Each song makes one video or reel. */
+    trackId: integer("track_id").references(() => reelTracks.id, { onDelete: "set null" }),
+    /** The owner's verdict and what they said about it, which Seelie learns from. */
+    liked: boolean("liked"),
+    notes: text("notes"),
+    /** Where it went: paribelle.in products and Instagram posts (`Published` in library.ts). */
+    published: jsonb("published").notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("seelie_videos_updated_idx").on(t.updatedAt)],
+);
+
 export type User = typeof users.$inferSelect;
 export type ChannelAccount = typeof channelAccounts.$inferSelect;
 export type RestockPlanItem = typeof restockPlanItems.$inferSelect;
@@ -875,3 +1079,6 @@ export type OrderFulfilment = typeof orderFulfilment.$inferSelect;
 export type FulfilmentState = (typeof fulfilmentStateEnum.enumValues)[number];
 export type ParcelScan = typeof parcelScans.$inferSelect;
 export type ScanStation = (typeof scanStationEnum.enumValues)[number];
+export type SeelieChat = typeof seelieChats.$inferSelect;
+export type SeelieRun = typeof seelieRuns.$inferSelect;
+export type SeelieToolCall = typeof seelieToolCalls.$inferSelect;
