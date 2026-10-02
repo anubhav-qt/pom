@@ -17,10 +17,11 @@ import {
 import { and, asc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { seelieAssets, seelieChats, seelieMessages, seelieRuns, seelieToolCalls, users, type User } from "@/db/schema";
+import { seelieAssets, seelieChats, seelieMessages, seelieRoutines, seelieRuns, seelieToolCalls, users, type User } from "@/db/schema";
 
 import { effectiveThinking, getCatalog, resolveModel } from "./catalog";
 import { DEFAULT_THINKING, requireSeelieConfig } from "./config";
+import { summarySection } from "./compact";
 import { assetSummary } from "./media/files";
 import { hydrateVideos } from "./media/watch";
 import { nameChat, provisionalTitle } from "./naming";
@@ -682,6 +683,16 @@ export async function reapStaleRuns(chatId: string) {
     .where(and(inArray(seelieToolCalls.runId, ids), inArray(seelieToolCalls.status, ["awaiting", "queued", "running"])));
 }
 
+/** What Seelie is told when a routine sends the message instead of the owner. */
+function routineSection(r: NonNullable<StartRunInput["routine"]>) {
+  return [
+    `This message is the routine "${r.name}" (${r.schedule}, India time), ${r.manual ? "started by hand from the routines list" : "sent on its schedule"}; nobody is watching as you reply, and earlier runs of it are above in this chat.`,
+    "- Do the job and report it the way the owner would want to read it later: lead with what matters or changed since the last run, with the numbers.",
+    "- Changes that ask (and, unless this routine auto-approves, changes to the OMS) wait as approval cards until the owner opens the chat; make the call anyway, don't hold the report back for it, and say in the reply what's waiting.",
+    "- If something stops the job (a tool failing, a missing connection), say so plainly so the owner can fix it before the next run.",
+  ].join("\n");
+}
+
 export interface StartedRun {
   chatId: string;
   runId: string;
@@ -708,11 +719,14 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
   let chatId = input.chatId ?? null;
   let autoApprove = false;
   let isNew = false;
+  // A compacted chat (compact.ts): Seelie reads the summary in place of the messages up to `through`.
+  let compacted: { summary: string; through: number } | null = null;
   if (chatId) {
     const [chat] = await db.select().from(seelieChats).where(eq(seelieChats.id, chatId)).limit(1);
     if (!chat || chat.userId !== user.id) throw new SeelieRunError("That chat doesn't exist.", 404);
     autoApprove = chat.autoApprove;
     isNew = !chat.title;
+    if (chat.summary && chat.summaryThrough !== null) compacted = { summary: chat.summary, through: chat.summaryThrough };
     await reapStaleRuns(chatId);
     const [active] = await db
       .select({ id: seelieRuns.id })
@@ -753,6 +767,8 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
     .orderBy(asc(seelieMessages.seq));
   const history = historyRows.map((r) => r.message as Message);
   const nextSeq = (historyRows.at(-1)?.seq ?? 0) + 1;
+  const keepAfter = compacted?.through ?? 0;
+  const modelHistory = historyRows.filter((r) => r.seq > keepAfter).map((r) => r.message as Message);
 
   const prompt: UserMessage = {
     role: "user",
@@ -796,13 +812,21 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
     naming: null,
   };
 
+  const systemPrompt = [
+    await buildSystemPrompt(user, seelieTools),
+    input.routine ? routineSection(input.routine) : "",
+    compacted ? summarySection(compacted.summary) : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
   run.agent = new Agent({
     initialState: {
-      systemPrompt: await buildSystemPrompt(user, seelieTools),
+      systemPrompt,
       model,
       thinkingLevel: thinking,
       tools: seelieTools.map((t) => agentTool(run, t)),
-      messages: history,
+      messages: modelHistory,
     },
     streamFn: streamSimple,
     getApiKey: () => config.apiKey,
@@ -924,6 +948,8 @@ export async function decideToolCall(
 
   if (input.approve && input.alwaysThisChat) {
     await db.update(seelieChats).set({ autoApprove: true }).where(eq(seelieChats.id, runRow.chatId));
+    // A routine's switch is its chat's.
+    await db.update(seelieRoutines).set({ autoApprove: true }).where(eq(seelieRoutines.chatId, runRow.chatId));
     const others = await db
       .update(seelieToolCalls)
       .set({ approval: "approved", status: "queued", decidedBy: user.id, decidedAt: now, updatedAt: now })

@@ -103,6 +103,12 @@ services:
       JOB_OMS_ORDERS_EVERY: 10m
       JOB_OMS_ORDERS_TOKEN: "${CRON_SECRET:?set CRON_SECRET in infra/.env}"
       JOB_OMS_ORDERS_WHEN: oms
+      # Start Seelie's routines that are due (Seelie runs only here, so nothing calls it on Vercel).
+      JOB_SEELIE_ROUTINES_URL: http://oms:3000/pom/api/cron/seelie
+      JOB_SEELIE_ROUTINES_EVERY: 1m
+      JOB_SEELIE_ROUTINES_TIMEOUT: 50s
+      JOB_SEELIE_ROUTINES_TOKEN: "${CRON_SECRET:?set CRON_SECRET in infra/.env}"
+      JOB_SEELIE_ROUTINES_WHEN: oms
       # Render's free plan sleeps after 15 idle minutes and takes most of a minute to wake;
       # while the ThinkPad serves, nothing else would wake it before it's needed.
       JOB_RENDER_AWAKE_URL: https://paribelle-backend.onrender.com/api/v1/health

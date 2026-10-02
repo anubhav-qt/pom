@@ -12,6 +12,7 @@ import { imageSpecs, photoEdit } from "./photo";
 import { photoshoot } from "./photoshoot";
 import { photoPublish, videoPublish } from "./publish";
 import { returnsDesk, returnsUpdate } from "./returns";
+import { routines } from "./routines";
 import { songs } from "./songs";
 import { sqlQuery, sqlSchema } from "./sql";
 import { videoAssets, videoLibrary, videoRender, videoWatch } from "./video";
@@ -90,6 +91,8 @@ const ALL = [
   webSearch,
   fetchUrl,
   youtube,
+  // Routines (scheduled runs)
+  routines,
   // Anything else
   sqlSchema,
   sqlQuery,

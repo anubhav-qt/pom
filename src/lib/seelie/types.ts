@@ -59,6 +59,8 @@ export interface ChatSummary {
   updatedAt: string;
   /** A run is going in it right now. */
   active: boolean;
+  /** A routine replies in it. */
+  routine: boolean;
 }
 
 export interface RunInfo {
@@ -115,4 +117,6 @@ export interface StartRunInput {
   assets?: number[];
   model?: string;
   thinking?: string;
+  /** Sent by a routine (its name and schedule in words), not typed by the owner. */
+  routine?: { name: string; schedule: string; manual: boolean };
 }

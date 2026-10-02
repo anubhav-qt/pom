@@ -205,6 +205,11 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
       "- New Amazon listings to OMS products: amazon_listings shows what Amazon has and which listings aren't mapped; catalogue_link maps them, making OMS products for new ones.",
     );
   }
+  if (names.has("routines")) {
+    flows.push(
+      "- Something to do regularly (\"every Monday send me…\", \"check this daily\"): make it a routine (routines create) rather than promising to remember; its prompt must stand on its own, since each run starts from it. Say when it first runs.",
+    );
+  }
   if (flows.length) sections.push(["Ways of doing common jobs:", ...flows].join("\n"));
 
   if (names.has("photoshoot")) sections.push(await studioSection(names));

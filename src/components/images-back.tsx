@@ -1,13 +1,12 @@
 "use client";
 
-import { Camera, X } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { Camera } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { imageResetAction } from "@/app/(app)/seelie/actions";
-import { withBasePath } from "@/lib/base-path";
-import { resolveScreen, screenFromPath, useScreenNav } from "@/lib/stores/screen-nav";
 import type { ImageReset } from "@/lib/seelie/studio/budget";
+
+import { CornerNote, useOpenSeelie } from "./corner-note";
 
 /**
  * A small note anywhere in the OMS when the image model's limit has reset: photoshoots
@@ -37,7 +36,7 @@ function markSeen(at: string) {
 }
 
 export function ImagesBack() {
-  const pathname = usePathname();
+  const openSeelie = useOpenSeelie();
   const [reset, setReset] = useState<ImageReset | null>(null);
   // The reset this page closed the note for (a later reset shows again).
   const [closed, setClosed] = useState<string | null>(null);
@@ -81,40 +80,14 @@ export function ImagesBack() {
 
   async function open() {
     close();
-    if (reset?.waitingChat) {
-      const { useSeelie } = await import("@/lib/stores/seelie-store");
-      void useSeelie.getState().openChat(reset.waitingChat);
-    }
-    // Seelie is a client-side screen: swapped in place, as the top switch does it.
-    const nav = useScreenNav.getState();
-    if (resolveScreen(pathname, nav.override) === "seelie") return;
-    window.history.pushState(null, "", withBasePath("/seelie"));
-    nav.setOverride(screenFromPath(pathname) === "seelie" ? null : "seelie");
+    await openSeelie(reset?.waitingChat ?? null);
   }
 
   const waiting = reset?.waiting ?? 0;
   return (
-    <div
-      role="status"
-      className="panel fixed right-4 z-40 w-[min(22rem,calc(100vw-2rem))] p-3.5 bottom-[calc(56px+env(safe-area-inset-bottom)+0.75rem)] sm:bottom-4"
-      style={{ boxShadow: "var(--shadow-md)" }}
-    >
-      <div className="flex items-start gap-3">
-        <Camera className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--accent)" }} />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">Photoshoots are back</p>
-          <p className="muted mt-0.5 text-xs">
-            The image limit has reset, so Seelie can make new photos again.
-            {waiting ? ` ${waiting === 1 ? "1 look is" : `${waiting} looks are`} waiting for it.` : ""}
-          </p>
-          <button type="button" className="btn btn-primary mt-2 px-2.5 py-1 text-xs" onClick={() => void open()}>
-            Open Seelie
-          </button>
-        </div>
-        <button type="button" className="btn -mr-1 -mt-1 p-1" aria-label="Dismiss" onClick={close}>
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </div>
+    <CornerNote icon={<Camera />} title="Photoshoots are back" action={{ label: "Open Seelie", onClick: () => void open() }} onClose={close}>
+      The image limit has reset, so Seelie can make new photos again.
+      {waiting ? ` ${waiting === 1 ? "1 look is" : `${waiting} looks are`} waiting for it.` : ""}
+    </CornerNote>
   );
 }

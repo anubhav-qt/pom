@@ -18,6 +18,18 @@ import { seelieConfig } from "@/lib/seelie/config";
 import { adsContext, capRoom } from "@/lib/seelie/ads";
 import { chooseMeta, connectMeta, disconnectMeta, metaStatus, refreshMeta, type MetaStatus } from "@/lib/seelie/meta";
 import { getLimits, type AccountLimits } from "@/lib/seelie/limits";
+import {
+  deleteRoutine,
+  listRoutines,
+  markRoutinesSeen,
+  routineNotes,
+  runRoutineNow,
+  saveRoutine,
+  setRoutineEnabled,
+  type RoutineInput,
+  type RoutineNotes,
+  type RoutineView,
+} from "@/lib/seelie/routines";
 import { signInStore, signOutStore, storeStatus, type StoreStatus } from "@/lib/seelie/store";
 import { imageBudget, imageReset, type ImageBudget, type ImageReset } from "@/lib/seelie/studio/budget";
 import type { ChatSummary, ChatView } from "@/lib/seelie/types";
@@ -111,6 +123,45 @@ export async function imageResetAction(): Promise<ImageReset | null> {
   const user = await requireUser();
   if (!seelieConfig()) return null;
   return imageReset(user.id);
+}
+
+/* Routines ---------------------------------------------------------------- */
+
+export async function routinesAction(): Promise<Result<RoutineView[]>> {
+  const user = await requireUser();
+  return attempt(() => listRoutines(user));
+}
+
+export async function saveRoutineAction(input: RoutineInput & { id?: number | null }): Promise<Result<RoutineView>> {
+  const user = await requireUser();
+  return attempt(() => saveRoutine(user, input));
+}
+
+export async function routineEnabledAction(id: number, enabled: boolean): Promise<Result<null>> {
+  const user = await requireUser();
+  return attempt(async () => (await setRoutineEnabled(user, id, enabled), null));
+}
+
+export async function deleteRoutineAction(id: number): Promise<Result<null>> {
+  const user = await requireUser();
+  return attempt(async () => (await deleteRoutine(user, id), null));
+}
+
+export async function runRoutineAction(id: number): Promise<Result<{ chatId: string; runId: string }>> {
+  const user = await requireUser();
+  return attempt(() => runRoutineNow(user, id));
+}
+
+/** For the OMS-wide notes (a routine ran, or waits on an approval); null when Seelie isn't set up here. */
+export async function routineNotesAction(): Promise<RoutineNotes | null> {
+  const user = await requireUser();
+  if (!seelieConfig()) return null;
+  return routineNotes(user);
+}
+
+export async function routineSeenAction(routineId: number): Promise<void> {
+  const user = await requireUser();
+  await markRoutinesSeen(user, { routineId });
 }
 
 /* Model accounts (owner) -------------------------------------------------- */
