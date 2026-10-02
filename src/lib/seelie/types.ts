@@ -2,7 +2,7 @@
  * What Seelie's screen and its server share: the shapes of a chat, a tool call and
  * the events a run streams. Types only, so client components can import them.
  */
-import type { AssistantMessage, Message } from "@paribelle/pi-ai";
+import type { AssistantMessage, Message, ToolResultMessage } from "@paribelle/pi-ai";
 
 /**
  * What a tool does, which decides whether it asks first.
@@ -43,6 +43,24 @@ export interface ToolRow {
   endedAt: string | null;
   /** The latest progress line while it runs (not kept once it ends). */
   progress?: string | null;
+  /** A helper's step: the helpers call that started the helper, and which helper (0-based). */
+  parent?: string | null;
+  helper?: number | null;
+  /** A helper's step: what the tool returned (helpers' messages aren't in the chat). */
+  result?: ToolResultMessage | null;
+  /** A helpers call: each helper as it goes. */
+  helpers?: HelperState[] | null;
+}
+
+/** One helper of a helpers call. */
+export interface HelperState {
+  title: string;
+  /** The model and thinking level it runs on. */
+  model: string;
+  thinking: string;
+  status: "working" | "done" | "error" | "stopped";
+  /** Its answer to Seelie, once it's done. */
+  answer: string | null;
 }
 
 /** A transcript entry: pi's message and where it sits. */

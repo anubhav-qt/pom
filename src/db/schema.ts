@@ -9,6 +9,7 @@ import {
   pgTable,
   real,
   serial,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -984,6 +985,13 @@ export const seelieToolCalls = pgTable(
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** A helper's step: the helpers call that started the helper, and which helper (0-based). */
+    parentCallId: text("parent_call_id"),
+    helper: smallint("helper"),
+    /** A helper's step: what the tool returned (helpers' messages aren't in the chat), without images. */
+    result: jsonb("result"),
+    /** A helpers call: each helper's title, model, state and answer. */
+    helpers: jsonb("helpers"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

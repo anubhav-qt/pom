@@ -60,6 +60,7 @@ it takes, its thinking and each tool's result. It asks before it changes anythin
 **How it works**
 - Reading never asks. Changes ask with Approve / Deny, unless you turn on auto-approve for a chat. Marketplace, paribelle.in, Instagram, ad spend and other paid changes always ask.
 - Models come from your own subscriptions (Google Antigravity, ChatGPT Codex or Claude) through [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). The composer has a model and thinking-level picker, and settings show each account's 5-hour and weekly limits.
+- Parts of a request that don't need each other go to up to 4 helpers that work at the same time. Each helper has Seelie's tools and runs on Gemini 3.8 Flash when Antigravity serves it, at a thinking level Seelie picks for its job. Each helper shows as a card with its steps and its answer, and its changes ask like any other.
 - Chats are saved and Seelie names them. The composer shows how much of the model's context the chat uses. A reply keeps running when you close the tab and picks up where it was when you come back.
 - Seelie runs on the ThinkPad, next to CLIProxyAPI. On the Vercel fallback it shows offline.
 

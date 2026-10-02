@@ -107,6 +107,6 @@ export function toolsFor(user: Pick<User, "role">): SeelieTool[] {
 
 /** Every tool's card label, by name (for rows read back from the database). */
 export function toolLabels(): Map<string, string> {
-  // Retired tools: older chats still show their cards.
-  return new Map([...ALL.map((t) => [t.name, t.label] as [string, string]), ["reels", "Reels"], ["image_studio", "Image studio"]]);
+  // Retired tools: older chats still show their cards. Helpers is the engine's own.
+  return new Map([...ALL.map((t) => [t.name, t.label] as [string, string]), ["reels", "Reels"], ["image_studio", "Image studio"], ["helpers", "Helpers"]]);
 }
