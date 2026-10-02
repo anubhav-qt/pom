@@ -5,8 +5,8 @@ import type { StartRunInput } from "@/lib/seelie/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// The reply streams for as long as Seelie works; the run itself doesn't depend on it.
-export const maxDuration = 800;
+// The reply streams for as long as the function lives (300s is the Hobby cap); the run itself doesn't depend on it, and `GET runs/[id]/stream` picks it up again.
+export const maxDuration = 300;
 
 /** Send a message: starts Seelie's reply and streams it (`GET runs/[id]/stream` picks it up again). */
 export async function POST(request: Request) {

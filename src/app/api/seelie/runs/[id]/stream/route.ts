@@ -4,7 +4,7 @@ import { failure, sse, unauthorized } from "@/lib/seelie/http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 /** Follow a reply: everything after transcript message `after`, then live until it ends. */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
