@@ -130,7 +130,8 @@ function Bar({ w, detail }: { w: LimitWindow; detail?: string }) {
   const color = w.used > 0.85 ? "var(--danger)" : w.used > 0.6 ? "var(--warn)" : "var(--accent)";
   return (
     <div>
-      <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
+      {/* The detail drops under the label when a phone has no room for both. */}
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-xs">
         <span className="min-w-0 truncate">
           <span className="font-medium">{w.label}</span>
           {w.scope ? <span className="muted"> · {w.scope}</span> : null}

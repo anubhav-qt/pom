@@ -1,6 +1,6 @@
 "use client";
 
-import { MoreHorizontal, Pin, Plus, Settings2, Sparkles } from "lucide-react";
+import { MoreHorizontal, Pin, Plus, Settings2, Sparkles, SquarePen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
@@ -50,20 +50,38 @@ export function Seelie() {
     }
   }, []);
 
-  // Follow the reply down as it comes in, unless the reader has scrolled up to read.
+  // On Android the keyboard shrinks the page instead of covering it, so the box sits right on
+  // it and the header stays put. Only here: other screens keep the bottom nav under the keyboard.
+  useEffect(() => {
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+    if (!meta || meta.content.includes("interactive-widget")) return;
+    const before = meta.content;
+    meta.content = `${before}, interactive-widget=resizes-content`;
+    return () => {
+      meta.content = before;
+    };
+  }, []);
+
+  // Follow the reply down as it comes in, unless the reader has scrolled up to read;
+  // then a button by the box takes them back down.
   const stick = useRef(true);
+  const [behind, setBehind] = useState(false);
   useEffect(() => {
     const onScroll = () => {
       stick.current = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 160;
+      setBehind(!stick.current);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
   useEffect(() => {
-    if (pending) stick.current = true;
+    if (!pending) return;
+    stick.current = true;
+    setBehind(false);
   }, [pending]);
   useEffect(() => {
     stick.current = true;
+    setBehind(false);
   }, [chatId]);
   useEffect(() => {
     if (stick.current) window.scrollTo({ top: document.documentElement.scrollHeight });
@@ -132,6 +150,17 @@ export function Seelie() {
                 label="Auto-approve OMS edits"
               />
             ) : null}
+            {/* Phones: a new chat one tap away (from `sm` up the chat list is close enough). */}
+            {!empty ? (
+              <button
+                type="button"
+                className="nav-icon-btn h-8 w-8 sm:hidden"
+                aria-label="New chat"
+                onClick={() => void useSeelie.getState().openChat(null)}
+              >
+                <SquarePen className="h-[17px] w-[17px]" />
+              </button>
+            ) : null}
             {chatId ? (
               <DropdownMenu
                 align="right"
@@ -190,7 +219,18 @@ export function Seelie() {
                 </button>
               </Notice>
             ) : null}
-            <Composer disabled={disabled} onOpenSettings={() => setSettings(true)} />
+            <Composer
+              disabled={disabled}
+              onOpenSettings={() => setSettings(true)}
+              onJump={
+                behind && !empty
+                  ? () => {
+                      stick.current = true;
+                      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+                    }
+                  : undefined
+              }
+            />
           </>
         )}
       </div>
@@ -212,7 +252,7 @@ function Welcome({ name, owner, canSend }: { name: string; owner: boolean; canSe
     ...(owner ? ["Which Amazon items aren't on paribelle.in yet?", "Make a reel from these photos"] : []),
   ];
   return (
-    <div className="flex flex-col items-center px-2 pb-6 pt-10 text-center sm:pt-16">
+    <div className="flex flex-col items-center px-1 pb-6 pt-6 text-center sm:px-2 sm:pt-16">
       <div
         className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
         style={{ background: "radial-gradient(circle at 35% 30%, var(--accent-soft), transparent 70%)", border: "1px solid var(--border)" }}
@@ -223,7 +263,7 @@ function Welcome({ name, owner, canSend }: { name: string; owner: boolean; canSe
       <p className="muted mt-1.5 max-w-md text-sm">
         Ask about orders, returns, money and stock, or tell Seelie what to change. It asks before it edits anything.
       </p>
-      <div className="mt-6 grid w-full max-w-xl gap-2 sm:grid-cols-2">
+      <div className="mt-5 grid w-full max-w-xl gap-2 sm:mt-6 sm:grid-cols-2">
         {ideas.map((idea) => (
           <button
             key={idea}

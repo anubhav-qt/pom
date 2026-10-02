@@ -153,7 +153,7 @@ export function MobileNav() {
 
   return (
     <nav
-      className="no-print fixed inset-x-0 bottom-0 z-40 flex sm:hidden"
+      className="mobile-nav no-print fixed inset-x-0 bottom-0 z-40 flex sm:hidden"
       style={{
         background: "var(--panel)",
         borderTop: "1px solid var(--border)",
