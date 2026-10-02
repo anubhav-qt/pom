@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { photoSrc } from "@/lib/photo-src";
 import { cn } from "@/lib/utils";
 
 /**
@@ -66,7 +67,7 @@ export function ImageLightbox({
 
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={src}
+        src={photoSrc(src)}
         alt={alt}
         className="max-h-full max-w-full rounded-xl object-contain"
         onClick={(e) => e.stopPropagation()}
@@ -83,11 +84,14 @@ export function ImageLightbox({
  */
 export function ZoomImg({
   src,
+  fullSrc,
   alt,
   className,
   style,
 }: {
   src: string;
+  /** A larger copy for full screen, when `src` is a small one. */
+  fullSrc?: string;
   alt: string;
   className?: string;
   style?: React.CSSProperties;
@@ -104,7 +108,7 @@ export function ZoomImg({
     <>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={src}
+        src={photoSrc(src)}
         alt={alt}
         className={cn(className, "cursor-zoom-in")}
         style={style}
@@ -116,7 +120,7 @@ export function ZoomImg({
           if (e.key === "Enter" || e.key === " ") show(e);
         }}
       />
-      {open ? <ImageLightbox src={src} alt={alt} onClose={() => setOpen(false)} /> : null}
+      {open ? <ImageLightbox src={fullSrc ?? src} alt={alt} onClose={() => setOpen(false)} /> : null}
     </>
   );
 }

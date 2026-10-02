@@ -1,0 +1,34 @@
+{% extends "base.njk" %}
+
+{#- Generative edits of an existing photograph (the source image): a different model,
+    the phone and mirror out of a selfie, flat lay to worn and back, a new setting. -#}
+
+{% block shot %}
+{% if change == "model" %}
+Change only the person in the source photograph: {{ model }} now wears the {{ garment.name }}, in the same pose, framing, setting and light as the source. Everything about the garment stays exactly as it is in the product images.
+{% elif change == "remove-phone" %}
+The source photograph is a mirror selfie. Remake it as a clean photograph taken by a photographer standing in front of her: the same woman in the same {{ garment.name }}, with no phone and no mirror, the arm that held the phone now relaxed at her side{% if garment.hasDupatta %} or lightly holding the dupatta{% endif %}, the camera at chest height and straight on.
+{% elif change == "to-on-model" %}
+The product images show the {{ garment.name }} laid flat or on a hanger. Photograph it worn: a {{ shot.framing }} of {{ model }}, wearing it{% if shot.angle %}, seen {{ shot.angle }}{% endif %}.
+{% elif change == "to-flat-lay" %}
+The source photograph shows the {{ garment.name }} worn. Photograph the same garment as a top-down flat lay, laid smooth and symmetrical on {{ setting }}, every piece of the set in view, with no person, hands or mannequin.
+{% else %}
+Keep the model, her pose, the {{ garment.name }} and the framing of the source photograph exactly; move the scene to {{ setting }}, with light and shadows on her and on the garment that belong to the new place.
+{% endif %}
+{% endblock %}
+
+{% block subject %}
+{% if shot.pose and change != "to-flat-lay" %}She {{ shot.pose }}.{% endif %}{% if change == "model" %} Keep her face, skin tone, hair and build from the model image exactly.{% elif change == "remove-phone" or change == "setting" %} Keep her face, skin tone, hair and build from the source photograph exactly.{% endif %}
+{% endblock %}
+
+{% block setting %}
+{% if setting and (change == "remove-phone" or change == "to-on-model") %}The setting is {{ setting }}.{% endif %}
+{% endblock %}
+
+{% block light %}
+{% if light %}The light is {{ light }}.{% endif %}{% if camera %} Shot on a full-frame camera with {{ camera }}.{% endif %}
+{% endblock %}
+
+{% block styling %}
+{% if styling %}Styling: {{ styling }}.{% endif %}{% if change != "to-flat-lay" %} Natural skin with visible texture; natural hands with five fingers each.{% endif %}
+{% endblock %}

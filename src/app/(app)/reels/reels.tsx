@@ -22,6 +22,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageLightbox, ZoomImg } from "@/components/image-lightbox";
 import { Segmented } from "@/components/segmented";
+import { Toggle } from "@/components/toggle";
 import { Spinner } from "@/components/ui";
 import { withBasePath } from "@/lib/base-path";
 import { transitionLabel } from "@/lib/reels/transitions";
@@ -746,28 +747,6 @@ const LAYOUTS = [
   { key: "portrait" as const, label: "Portrait", icon: <RectangleVertical className="h-3.5 w-3.5" /> },
   { key: "landscape" as const, label: "Landscape", icon: <RectangleHorizontal className="h-3.5 w-3.5" /> },
 ];
-
-function Toggle({ checked, onChange, label, hint, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }) {
-  return (
-    <label className={cn("flex items-start gap-3", disabled ? "opacity-50" : "cursor-pointer")}>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        disabled={disabled}
-        onClick={() => onChange(!checked)}
-        className="relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors"
-        style={{ background: checked ? "var(--accent)" : "var(--border-strong)" }}
-      >
-        <span className="absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left]" style={{ left: checked ? 18 : 2, boxShadow: "var(--shadow-xs)" }} />
-      </button>
-      <span className="min-w-0">
-        <span className="block text-sm font-medium">{label}</span>
-        {hint ? <span className="muted block text-xs">{hint}</span> : null}
-      </span>
-    </label>
-  );
-}
 
 function OptionsPanel({ s }: { s: Store }) {
   return (

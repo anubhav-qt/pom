@@ -1,0 +1,17 @@
+{% extends "base.njk" %}
+
+{% block shot %}
+A premium close-up detail photograph for Paribelle, an Indian women's ethnic wear label: a {{ shot.framing }} of the {{ shot.detail }} of the {{ garment.name }}, reproduced exactly from the close-up product image.
+{% endblock %}
+
+{% block subject %}
+The fabric's weave, the thread of the embroidery and the edges of the print are crisp enough to read; nothing outside the detail competes with it.{% if shot.pose %} {{ shot.pose }}.{% endif %}
+{% endblock %}
+
+{% block setting %}
+{% if setting %}Behind it: {{ setting }}, softly out of focus.{% endif %}
+{% endblock %}
+
+{% block light %}
+The light is {{ light }}, raking gently across the surface so the texture shows. Shot on a full-frame camera with {{ camera }}.
+{% endblock %}

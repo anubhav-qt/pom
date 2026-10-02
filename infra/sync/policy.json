@@ -7,7 +7,7 @@
     ]
   },
   "oms": {
-    "exclude": [],
+    "exclude": ["seelie_chats", "seelie_runs", "seelie_messages", "seelie_tool_calls", "seelie_settings", "seelie_assets", "seelie_videos", "seelie_garments", "seelie_personas", "seelie_shoots", "seelie_image_calls"],
     "localOnly": [],
     "prune": [
       { "table": "reel_job_files", "all": true },

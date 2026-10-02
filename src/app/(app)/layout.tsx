@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
 import { AppHeader } from "@/components/app-header";
-import { ChatWidget } from "@/components/assistant/chat-widget";
+import { ImagesBack } from "@/components/images-back";
 import { ScreenSwitcher } from "@/components/screen-switcher";
 import { ENABLED_CHANNELS } from "@/config/features";
 import { db } from "@/db";
@@ -72,8 +72,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="mx-auto max-w-7xl px-4 pb-8 pt-6 sm:px-6">
         <ScreenSwitcher>{children}</ScreenSwitcher>
       </main>
-
-      <ChatWidget />
+      <ImagesBack />
     </div>
   );
 }

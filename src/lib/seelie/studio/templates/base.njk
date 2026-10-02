@@ -1,0 +1,28 @@
+{#-
+  Every photoshoot prompt, in the order Google's guides for its image models advise:
+  what each image is, the shot, the subject, the place, the light and camera, the
+  styling, the owner's words, and last (what the model weighs most) the garment lock.
+  Full sentences in a photographer's words, never tag lists or "8k masterpiece" boosters.
+  Slots are filled by src/lib/seelie/studio/prompts.ts.
+-#}
+{% include "partials/references.njk" %}
+
+{% block shot %}{% endblock %}
+
+{% block subject %}{% endblock %}
+
+{% block setting %}{% endblock %}
+
+{% block light %}{% endblock %}
+
+{% block styling %}{% endblock %}
+
+{% if brand %}{% include "partials/brand.njk" %}{% endif %}
+
+{% if direction %}The brief, in the owner's own words: "{{ direction }}"{% endif %}
+
+{% if corrections.length %}The previous attempt got these wrong; this time: {% for c in corrections %}{{ c }}{% if not loop.last %}; {% endif %}{% endfor %}.{% endif %}
+
+{% include "partials/garment-lock.njk" %}
+
+{% include "partials/framing.njk" %}

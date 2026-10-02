@@ -13,6 +13,7 @@ import {
   type ChannelAccount,
 } from "@/db/schema";
 
+import { LOCAL_COPY_MARK } from "./photo-src";
 import { recomputeReserved } from "./sync";
 
 export interface LinkCatalogueResult {
@@ -135,9 +136,9 @@ export async function linkCatalogue(
       .onConflictDoUpdate({
         target: products.sku,
         set: {
-          // Only ever refresh what Amazon owns.
+          // Only ever refresh what Amazon owns (a photo published from Seelie stays).
           name: sql`excluded.name`,
-          imageUrl: sql`COALESCE(excluded.image_url, ${products.imageUrl})`,
+          imageUrl: sql`CASE WHEN ${products.imageUrl} LIKE ${`%${LOCAL_COPY_MARK}`} THEN ${products.imageUrl} ELSE COALESCE(excluded.image_url, ${products.imageUrl}) END`,
         },
       })
       .returning({ id: products.id, sku: products.sku });

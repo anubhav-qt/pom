@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { Toggle } from "@/components/toggle";
 import { Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -390,29 +391,6 @@ function FileList({
 /* -------------------------------------------------------------------------- */
 /* Action panel (desktop) + option toggles                                    */
 /* -------------------------------------------------------------------------- */
-
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
-  return (
-    <label className="flex cursor-pointer items-start gap-3">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className="relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors"
-        style={{ background: checked ? "var(--accent)" : "var(--border-strong)" }}
-      >
-        <span
-          className="absolute top-0.5 h-4 w-4 rounded-full bg-white transition-[left]"
-          style={{ left: checked ? 18 : 2, boxShadow: "var(--shadow-xs)" }}
-        />
-      </button>
-      <span className="min-w-0">
-        <span className="block text-sm font-medium">{label}</span>
-      </span>
-    </label>
-  );
-}
 
 function ActionPanel(props: PrinterViewProps & { total: number; canBuild: boolean; fill?: boolean }) {
   const { options, onOptions, total, fill } = props;

@@ -4,6 +4,7 @@
 *
 
 !src
+!packages
 !drizzle
 !scripts
 !package.json
@@ -16,3 +17,6 @@
 
 # Loose data files that live under scripts/ but aren't code.
 scripts/*.json
+
+# Workspace installs, if npm ever nests one, come from the deps stage instead.
+packages/*/node_modules

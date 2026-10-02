@@ -95,6 +95,7 @@ f:\oms\
 │   │   │   ├── dashboard/        # KPIs, sales analytics, multi-range client cache
 │   │   │   ├── inventory/        # Stock ledger, on-hand adjustments, SKU mappings
 │   │   │   ├── returns/          # Inbound returns check-in & condition assessment
+│   │   │   ├── seelie/           # Seelie, the AI agent: chats, timeline, composer, settings
 │   │   │   └── settings/         # Channel credentials, manual sync triggers
 │   │   ├── api/
 │   │   │   ├── cron/sync/        # Scheduled / triggered channel ingest route
@@ -111,8 +112,10 @@ f:\oms\
 │       ├── fulfilment.ts         # Bench state machine & queue predicates
 │       ├── profit.ts             # Finance: profit per marketplace, or all of them together
 │       ├── reels/                # Beat-matched reels: AI direction, songs, rendering, feedback
+│       ├── seelie/               # Seelie's engine, prompt, model accounts (CLIProxyAPI), tools
 │       ├── scan.ts               # Universal barcode match engine (order ID, AWB, return ID)
 │       └── stores/               # Zustand client caches for instant tab switching
+├── packages/                     # pi-ai and pi-agent: Seelie's harness, a vendored pi fork (npm workspaces)
 ├── docs/                         # Procedures for Claude Code / Antigravity, runbooks
 └── scripts/                      # DB seeding, reconciliation, portal import, songs, reel feedback CLI
 ```
@@ -168,6 +171,8 @@ npm run seed:demo
 npm run dev
 ```
 
+Seelie needs CLIProxyAPI next to the dev server (without `CLIPROXY_URL` it shows offline). Put the [release](https://github.com/router-for-me/CLIProxyAPI/releases) for your machine in `.cliproxy/bin/` (gitignored), set `CLIPROXY_URL=http://127.0.0.1:8317`, `CLIPROXY_API_KEY` and `CLIPROXY_MANAGEMENT_KEY` in `.env.local`, run `npm run cliproxy` in a second terminal, then connect a subscription in Seelie's settings (gear). Its store tools appear when `PARIBELLE_API_URL` points at a paribelle.in API (`…/api/v1`); test them against a local one only. Its video tools keep their media in `.seelie-media/` (gitignored; `SEELIE_MEDIA_DIR` moves it) and need yt-dlp on the PATH (or `YTDLP_PATH`) for YouTube and songs; the first background cut-out downloads its 115 MB model there, and the photo tools download theirs (LaMa, SlimSAM, Real-ESRGAN) on first use.
+
 Visit **http://localhost:3000/pom** (or configured port) and log in:
 
 | Account | Password | Role | Scope |
@@ -197,6 +202,9 @@ npm run reconcile:amazon                                  # Repair order statuse
 npm run songs -- known                                    # Every song the database knows, used or not
 npm run songs -- vet songs.json                           # Check a candidate batch before adding it
 npm run songs -- batch songs.json                         # Add songs (audio, beats, hook)
+
+# Seelie
+npm run cliproxy                                          # Run CLIProxyAPI from .cliproxy/ for local Seelie
 npm run reels:feedback                                    # "Do you like this reel?" answers, by prompt version
 
 # Verification & Test Suites
@@ -216,9 +224,10 @@ Marketplaces and features can be activated or parked without code removal in [`s
 | **Amazon SP-API** | ✅ Active | Live API | Full order sync, Easy Ship tracking, and inventory push. |
 | **Flipkart API** | ⏸️ Parked | Live API (v3) | Built and tested. Re-enabled by adding to `ENABLED_CHANNELS`. |
 | **Meesho Ingest** | ⏸️ Parked | File Parser | Excel order sheet and PDF label splitter ready in UI. |
-| **Flipkart & Meesho data** | ✅ Active | Seller-portal procedure | Orders, returns and payments read off the portals in Claude's browser ([`docs/portals/procedure.md`](docs/portals/procedure.md)), counted in Finance and the assistant. Not on the Orders screen. |
+| **Flipkart & Meesho data** | ✅ Active | Seller-portal procedure | Orders, returns and payments read off the portals in Claude's browser ([`docs/portals/procedure.md`](docs/portals/procedure.md)), counted in Finance and by Seelie. Not on the Orders screen. |
 | **Finance** | ✅ Active | Settlement lines | Real profit per order, for one marketplace or all of them (switch at the rail's right end). |
 | **Reels** | ✅ Active | Gemini + ffmpeg | Beat-matched reels from a shoot or a supplier video; "Do you like this reel?" feedback tunes the AI director. |
+| **Seelie** | ✅ Active (ThinkPad) | AI agent | The OMS's agent on its own screen: orders, returns, money, catalogue, sync, reels, read-only SQL and paribelle.in, with every step shown and Approve/Deny on changes. Makes videos of the products (its own ffmpeg graphs, watched and fixed draft by draft), product photoshoots (the only thing that uses the image model's limited budget) and photo edits in code, searches the web and YouTube, and publishes to paribelle.in, the OMS catalogue, Amazon's image slots and Instagram when asked. Models through CLIProxyAPI on the ThinkPad only; offline on Vercel. |
 | **Outbound Scanner** | ✅ Active | ZXing WebCam / HID | Barcode lookup, stock decrement, and dispatch transition. |
 | **Label Crop Engine** | ⏸️ Parked | PDF-Lib | Crops shipping label from tax invoice to save thermal paper. |
 
@@ -248,6 +257,11 @@ Recurring jobs are written as procedures an agent follows with the owner. Each o
 
 The version lives in `package.json` and shows at the foot of Settings.
 
+### Unreleased
+
+- **Seelie** replaces the assistant popup: an AI agent on its own screen (after Reels in the switcher; the AI button on phones) that can do what the site does, with every step, its thinking and each tool's result shown, and Approve / Deny on changes (paribelle.in and marketplace changes always ask). Chats are saved and listed in the header rail; a model and thinking-level picker and each subscription's 5-hour and weekly limits sit in the composer and settings. It runs on the ThinkPad, through CLIProxyAPI (the `cliproxy` service); on Vercel it shows offline.
+- **Seelie's video suite.** Seelie edits videos itself: it writes an ffmpeg filter graph (any filter, sandboxed to its own media), renders a draft, watches it with sound, fixes it and renders a final (up to 35 s and 1080p, any shape). Every version is kept in a video library with its recipe, and the owner's likes and notes guide the next ones. Around it: background removal (BiRefNet, on the CPU), Google-grounded web search, page reading, YouTube search and watching, and adding library songs. Clips up to 300 MB can be attached in the composer (uploaded in pieces with a progress chip); finished videos have Download and Share, and go to a paribelle.in product's gallery or to Instagram as a reel, each after an Approve.
+- **Seelie's product studio.** Product photoshoots with Gemini 3.1 Flash Image: Seelie gathers every photo of a product (the OMS, Amazon's catalogue, paribelle.in, the chat), studies them up close, writes a garment spec, plans a shot list from Nunjucks prompt templates (free to check), and shoots after an Approve that shows each look and what it costs. Recurring models (personas) keep a set to one person. Every result comes with a compare sheet and colour check (CIEDE2000) against our own photo, and is fixed in code before any retake. Everything else is code, not generation: cut-outs and backgrounds, catalogue white, crops and marketplace sizes (presets checked against the official docs), grading and light, retouching (LaMa), selections (SlimSAM), upscaling (Real-ESRGAN) and removing Gemini's visible watermark. The image model's hidden cap (about 9 images per 5 hours per account) is kept in a ledger: Seelie plans around it, looks that hit it wait for the owner's "continue", Seelie's settings show an Image generation bar, and a note anywhere in the OMS says when photoshoots are back. Pictures Seelie makes show in the chat with Download, and go to paribelle.in, the OMS catalogue photo (on paribelle.in's image host, with a copy kept on the ThinkPad) or Amazon's image slots (the main slot only for a real photo on pure white), each after an Approve. Unchosen attempts are cleared after 30 days.
 ### 1.0.0 (2026-09-27)
 
 - **Every marketplace in Finance.** Flipkart and Meesho orders, returns and payments are read off their seller portals by Claude in its browser (the owner logs in; `docs/portals/procedure.md`) and written in the same shape as Amazon's settlement lines. Finance adds all marketplaces together, with a switch for one at a time; the assistant's sales figures count them all too.

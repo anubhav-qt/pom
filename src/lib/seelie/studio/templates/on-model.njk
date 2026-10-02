@@ -1,0 +1,21 @@
+{% extends "base.njk" %}
+
+{% block shot %}
+A premium fashion catalogue photograph for Paribelle, an Indian women's ethnic wear label: a {{ shot.framing }} of {{ model }}, wearing the {{ garment.name }} from the product images{% if shot.angle %}, seen {{ shot.angle }}{% endif %}.
+{% endblock %}
+
+{% block subject %}
+{% if shot.pose %}She {{ shot.pose }}.{% endif %}{% if shot.expression %} Her expression is {{ shot.expression }}.{% endif %} The pose shows the garment: its full length{% if garment.hasDupatta %}, the fall of the fabric and the dupatta's border{% else %} and the fall of the fabric{% endif %} stay visible and uncreased, and her hands never cover the print.
+{% endblock %}
+
+{% block setting %}
+The setting is {{ setting }}{% if mood %}, with a {{ mood }} mood{% endif %}. It stays quiet behind her, soft enough that the garment is the sharpest, brightest thing in the frame.
+{% endblock %}
+
+{% block light %}
+The light is {{ light }}. Shot on a full-frame camera with {{ camera }}.
+{% endblock %}
+
+{% block styling %}
+{% if styling %}Styling: {{ styling }}.{% endif %} Natural skin with visible texture, no airbrushed or plastic look; natural hands with five fingers each.
+{% endblock %}

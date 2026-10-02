@@ -9,6 +9,8 @@ export interface DropdownOption {
   disabled?: boolean;
   /** Draw a thin rule above this option, to split a long list into groups. */
   dividerBefore?: boolean;
+  /** A small icon before the label (Seelie's pinned and running chats). */
+  icon?: React.ReactNode;
 }
 
 /**
@@ -91,7 +93,10 @@ export function DropdownMenu({
                     fontWeight: active ? 600 : 500,
                   }}
                 >
-                  <span>{o.label}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    {o.icon}
+                    <span className="min-w-0">{o.label}</span>
+                  </span>
                   {o.count !== undefined ? (
                     <span
                       className="shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-semibold tabular-nums"
