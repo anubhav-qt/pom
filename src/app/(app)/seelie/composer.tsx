@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowUp, Brain, ChevronDown, Music, Paperclip, Square, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Brain, ChevronDown, Music, Paperclip, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * Where a message is written: the text, the photos, clips and sounds going with it, and
- * the model and how hard it thinks. Docked to the bottom of the screen, above the phone's nav bar.
+ * the model and how hard it thinks. Docked to the bottom of the screen, above the phone's nav bar;
+ * while it is written in on a phone, the nav bar steps aside and it sits on the keyboard.
  */
 
 const MAX_SIDE = 1600;
@@ -52,7 +53,18 @@ async function toDraftImage(file: File): Promise<DraftImage | null> {
   return { data, mimeType: "image/jpeg", preview: URL.createObjectURL(blob) };
 }
 
-export function Composer({ disabled, onOpenSettings }: { disabled?: string | null; onOpenSettings: () => void }) {
+const coarse = () => window.matchMedia("(pointer: coarse)").matches;
+
+export function Composer({
+  disabled,
+  onOpenSettings,
+  onJump,
+}: {
+  disabled?: string | null;
+  onOpenSettings: () => void;
+  /** Set while the reader has scrolled up: a button back down to the latest. */
+  onJump?: () => void;
+}) {
   const draft = useSeelie((s) => s.draft);
   const images = useSeelie((s) => s.draftImages);
   const clips = useSeelie((s) => s.draftClips);
@@ -68,6 +80,16 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
   const fileRef = useRef<HTMLInputElement>(null);
   const [reading, setReading] = useState(0);
   const [dragging, setDragging] = useState(false);
+  // Being written in on a phone, so the keyboard is up.
+  const [typing, setTyping] = useState(false);
+
+  // The bottom nav hides while the keyboard is up (`html[data-typing]` in globals.css).
+  useEffect(() => {
+    if (!typing) return;
+    const root = document.documentElement;
+    root.setAttribute("data-typing", "");
+    return () => root.removeAttribute("data-typing");
+  }, [typing]);
 
   const running = !!run && ACTIVE_RUN.includes(run.status);
   const model = catalog?.models.find((m) => m.id === modelId) ?? null;
@@ -93,7 +115,7 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
   // A fresh chat, or a switch to another, puts the cursor in the box (not on phones,
   // where it would pop the keyboard over the chat).
   useEffect(() => {
-    if (!window.matchMedia("(pointer: coarse)").matches) textRef.current?.focus();
+    if (!coarse()) textRef.current?.focus();
   }, [chatId]);
 
   async function take(files: File[]) {
@@ -111,7 +133,10 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
   }
 
   function submit() {
-    if (canSend) void send();
+    if (!canSend) return;
+    void send();
+    // On a phone the keyboard goes down, so the reply has the screen.
+    if (coarse()) textRef.current?.blur();
   }
 
   const modelOptions: DropdownOption[] =
@@ -124,12 +149,29 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
 
   const usage = usageFor(limits, model?.provider ?? null);
 
-  // Docked above the phone's nav bar (56px + the safe area), at the window's foot from `sm` up.
+  // Docked above the phone's nav bar (56px + the safe area), at the window's foot from `sm` up
+  // and while the keyboard is up.
   return (
     <div
-      className="sticky bottom-[calc(56px+env(safe-area-inset-bottom))] z-20 -mx-1 px-1 pb-3 pt-3 sm:bottom-0 sm:pb-5"
+      className={cn(
+        "sticky z-20 -mx-1 px-1 pb-3 pt-3 sm:bottom-0 sm:pb-5",
+        typing ? "bottom-0" : "bottom-[calc(56px+env(safe-area-inset-bottom))]",
+      )}
       style={{ background: "linear-gradient(to top, var(--bg) 72%, transparent)" }}
     >
+      {onJump ? (
+        <div className="pointer-events-none absolute inset-x-0 -top-8 flex justify-center">
+          <button
+            type="button"
+            onClick={onJump}
+            aria-label="Down to the latest"
+            className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border transition-transform active:scale-95"
+            style={{ background: "var(--panel)", borderColor: "var(--border-strong)", boxShadow: "var(--shadow-md)", color: "var(--muted)", animation: "rise-in 0.28s var(--ease-apple)" }}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
       <div
         className={cn(
           "rounded-[22px] border transition-[border-color,box-shadow] duration-200 focus-within:border-[var(--accent)] focus-within:shadow-[0_0_0_3px_var(--accent-ring),var(--shadow-md)]",
@@ -193,10 +235,12 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
           rows={1}
           disabled={!!disabled}
           onChange={(e) => setDraft(e.target.value)}
+          onFocus={() => setTyping(coarse())}
+          onBlur={() => setTyping(false)}
           onKeyDown={(e) => {
             if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
             // On a phone Enter is a new line; the arrow button sends.
-            if (window.matchMedia("(pointer: coarse)").matches) return;
+            if (coarse()) return;
             e.preventDefault();
             submit();
           }}
@@ -210,7 +254,9 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
           className="block max-h-[40vh] w-full resize-none bg-transparent px-4 pb-1 pt-3.5 text-base leading-relaxed outline-none placeholder:text-[var(--muted-2)] sm:text-[15px]"
         />
 
-        <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+        {/* A tap on these leaves the cursor in the box, so a phone's keyboard stays up and
+            nothing moves under the finger before the tap lands. */}
+        <div className="flex items-center gap-1 px-2 pb-2 pt-1" onMouseDown={(e) => e.preventDefault()}>
           <input
             ref={fileRef}
             type="file"
@@ -226,7 +272,7 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={!!disabled || full}
-            className="nav-icon-btn h-8 w-8 disabled:opacity-40"
+            className="nav-icon-btn h-9 w-9 disabled:opacity-40 sm:h-8 sm:w-8"
             style={{ color: "var(--muted)" }}
             aria-label="Add photos, clips or sounds"
             title={`${seesImages ? `Photos (up to ${MAX_DRAFT_IMAGES}), clips` : "Clips"} and sounds (up to ${MAX_DRAFT_CLIPS}, 300 MB each)`}
@@ -365,7 +411,10 @@ const megabytes = (bytes: number) => (bytes >= 1048576 ? `${(bytes / 1048576).to
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
-    <span className="flex max-w-[11rem] items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--tint-hover)]" style={{ color: "var(--muted)" }}>
+    <span
+      className="flex max-w-[8.5rem] items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--tint-hover)] min-[400px]:max-w-[11rem]"
+      style={{ color: "var(--muted)" }}
+    >
       <span className="flex min-w-0 items-center gap-1 truncate">{children}</span>
       <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
     </span>

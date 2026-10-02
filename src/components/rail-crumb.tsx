@@ -54,7 +54,9 @@ export function RailCrumb({
 
   const crumb = (
     <>
+      {/* Shrinks before the buttons do: a long label (a Seelie chat's title) ends in "…". */}
       <DropdownMenu
+        className="relative min-w-0"
         trigger={
           <span className="flex items-center gap-1.5">
             <span className="truncate text-[13px]" style={{ fontWeight: 600, color: "var(--text)" }}>

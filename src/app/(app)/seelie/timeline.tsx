@@ -132,10 +132,10 @@ function UserBubble({ entry, pending, chatId }: { entry?: ChatMessage; pending?:
             a.kind === "video" && a.src ? (
               <video key={i} src={a.src} controls playsInline preload="metadata" title={a.name} className="max-h-60 w-auto max-w-full rounded-xl bg-black" />
             ) : a.kind === "audio" && a.src ? (
-              <div key={i} className="surface-2 flex max-w-full items-center gap-2 px-2.5 py-1.5">
+              <div key={i} className="surface-2 flex max-w-full flex-wrap items-center gap-2 px-2.5 py-1.5 sm:flex-nowrap">
                 <Music className="h-4 w-4 shrink-0" style={{ color: "var(--muted)" }} />
-                <span className="max-w-[10rem] truncate text-xs">{a.name}</span>
-                <audio src={a.src} controls preload="none" className="h-8 max-w-[14rem]" />
+                <span className="min-w-0 max-w-[10rem] truncate text-xs">{a.name}</span>
+                <audio src={a.src} controls preload="none" className="h-8 w-full max-w-full sm:w-auto sm:max-w-[14rem]" />
               </div>
             ) : (
               <span key={i} className="surface-2 flex items-center gap-1.5 px-2.5 py-1.5 text-xs">
@@ -325,10 +325,13 @@ function ToolCard({ call, row: maybeRow, result, chatId }: { call: ToolCall; row
 
   return (
     <div className="surface-2 overflow-hidden" style={awaiting ? { borderColor: "color-mix(in srgb, var(--warn) 45%, transparent)" } : undefined}>
+      {/* On a phone the summary goes under the name; from `sm` up, beside it. */}
       <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left">
         <Icon className="h-4 w-4 shrink-0" style={{ color: row.kind === "read" ? "var(--muted)" : "var(--accent-ink)" }} />
-        <span className="shrink-0 text-[13px] font-medium">{row.label}</span>
-        <span className="muted min-w-0 flex-1 truncate text-xs">{row.status === "running" && row.progress ? row.progress : row.summary}</span>
+        <span className="min-w-0 flex-1 sm:flex sm:items-center sm:gap-2.5">
+          <span className="block truncate text-[13px] font-medium sm:shrink-0 sm:overflow-visible">{row.label}</span>
+          <span className="muted block truncate text-xs sm:min-w-0 sm:flex-1">{row.status === "running" && row.progress ? row.progress : row.summary}</span>
+        </span>
         {took ? <span className="shrink-0 text-[11px] tabular-nums" style={{ color: "var(--muted-2)" }}>{took}</span> : null}
         <span className="flex h-4 w-4 shrink-0 items-center justify-center">
           <StatusIcon row={row} />
@@ -404,21 +407,22 @@ const assetUrl = (id: number, query: string) => withBasePath(`/api/seelie/assets
 /** What a photo tool made, each with Download (the full file). */
 function Pictures({ pictures }: { pictures: CardPicture[] }) {
   return (
-    <div className="flex flex-wrap gap-2.5 px-3 pb-3">
+    // Three across a phone's width; fixed-size tiles from `sm` up.
+    <div className="grid grid-cols-3 gap-2 px-3 pb-3 sm:flex sm:flex-wrap sm:gap-2.5">
       {pictures.map((p) => (
-        <figure key={p.id} className="w-28 space-y-1">
+        <figure key={p.id} className="min-w-0 space-y-1 sm:w-28">
           <ZoomImg
             src={assetUrl(p.id, "w=480")}
             fullSrc={assetUrl(p.id, "w=1280")}
             alt={p.name}
-            className="h-36 w-28 rounded-lg object-cover"
+            className="aspect-[7/9] w-full rounded-lg object-cover sm:h-36 sm:w-28"
             style={{ border: "1px solid var(--border)", background: "var(--panel)" }}
           />
           <figcaption className="flex items-center gap-1">
             <span className="muted min-w-0 flex-1 truncate text-[11px]" title={p.name}>
               {p.size ?? p.name}
             </span>
-            <a href={assetUrl(p.id, "download=1")} download className="btn shrink-0 p-1" aria-label={`Download ${p.name}`} title="Download">
+            <a href={assetUrl(p.id, "download=1")} download className="btn shrink-0 p-1.5 sm:p-1" aria-label={`Download ${p.name}`} title="Download">
               <Download className="h-3.5 w-3.5" />
             </a>
           </figcaption>
@@ -505,20 +509,21 @@ function VideoActions({ video }: { video: CardVideo }) {
 function Approval({ row }: { row: ToolRow }) {
   const decide = useSeelie((s) => s.decide);
   return (
+    // On a phone Deny and Approve share the card's width, big enough for a thumb.
     <div className="flex flex-wrap items-center gap-2 border-t px-3 py-2.5" style={{ borderColor: "var(--border)", background: "var(--warn-soft)" }}>
-      <p className="min-w-0 flex-1 text-[13px]">
+      <p className="min-w-0 basis-full text-[13px] sm:flex-1">
         <span className="font-medium">Seelie is asking first.</span> <span className="muted">{KIND[row.kind].asks}</span>
       </p>
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0 sm:flex-wrap">
         {row.kind === "write" ? (
-          <button type="button" className="btn px-2.5 py-1.5 text-xs" onClick={() => void decide(row, true, true)}>
+          <button type="button" className="btn shrink-0 px-2.5 py-2 text-xs sm:py-1.5" onClick={() => void decide(row, true, true)}>
             Always in this chat
           </button>
         ) : null}
-        <button type="button" className="btn btn-white px-3 py-1.5 text-[13px]" onClick={() => void decide(row, false)}>
+        <button type="button" className="btn btn-white flex-1 px-3 py-2 text-[13px] sm:flex-none sm:py-1.5" onClick={() => void decide(row, false)}>
           Deny
         </button>
-        <button type="button" className="btn btn-blue px-3 py-1.5 text-[13px]" onClick={() => void decide(row, true)}>
+        <button type="button" className="btn btn-blue flex-1 px-3 py-2 text-[13px] sm:flex-none sm:py-1.5" onClick={() => void decide(row, true)}>
           Approve
         </button>
       </div>
