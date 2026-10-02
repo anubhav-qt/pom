@@ -13,7 +13,7 @@ import {
   type ReadResult,
 } from "./apply.ts";
 import type { PairConfig, Settings } from "./config.ts";
-import { errText, isAuthError, lit, log, makePool, q, redact, sleep, tx, type Client } from "./db.ts";
+import { discard, errText, isAuthError, lit, log, makePool, q, redact, sleep, tx, type Client } from "./db.ts";
 import { ensureTriggers, installBase, instanceId, loadMeta, topoOrder, type Meta, type Table } from "./schema.ts";
 
 const LOCK_KEY = "hashtext('paribelle_sync')";
@@ -35,6 +35,8 @@ export interface PairStatus {
   pushed: number;
   pullBacklog: boolean;
   pushBacklog: boolean;
+  /** Since when pushes to the cloud have been failing: its copy falls further behind meanwhile. */
+  pushFailingSince: string | null;
   openConflicts: number;
   lastError: string | null;
   cloudSizeMb: number | null;
@@ -85,6 +87,9 @@ export class Pair {
   private lastSeqCheck = 0;
   private lastTrim = 0;
   private lastConflictCount = 0;
+  private lastPushWarning = 0;
+  /** What the push being attempted sends, per table, for the warning when pushes keep failing. */
+  private pushBatch: Record<string, string> = {};
   private appsUp: boolean;
   /** Bumped whenever the ThinkPad stops counting as caught up; only a pull begun after that counts. */
   private undrains = 0;
@@ -114,6 +119,7 @@ export class Pair {
       pushed: 0,
       pullBacklog: false,
       pushBacklog: false,
+      pushFailingSince: null,
       openConflicts: 0,
       lastError: null,
       cloudSizeMb: null,
@@ -272,7 +278,10 @@ export class Pair {
     if (!this.localLock) {
       await installBase(this.local, "local");
       const c = await this.local.connect();
-      const got = await c.query<{ ok: boolean }>(`select pg_try_advisory_lock(${LOCK_KEY}) as ok`);
+      const got = await c.query<{ ok: boolean }>(`select pg_try_advisory_lock(${LOCK_KEY}) as ok`).catch((e) => {
+        c.release(true);
+        throw e;
+      });
       if (!got.rows[0].ok) {
         c.release();
         throw new Halt("another sync is running against the ThinkPad's database");
@@ -312,7 +321,8 @@ export class Pair {
       const got = await c.query<{ ok: boolean }>(`select pg_try_advisory_lock(${LOCK_KEY}) as ok`);
       if (!got.rows[0].ok) throw new Halt("another ThinkPad (or a second stack) is syncing this cloud database");
     } catch (e) {
-      c.release();
+      // Not back into the pool: if this client is what failed, the next check would get it again.
+      c.release(true);
       throw e;
     }
     this.cloudLock = c;
@@ -450,6 +460,11 @@ export class Pair {
     } catch (e) {
       return this.failed(e);
     }
+    // Both checks pass: whatever halted the sync is gone. It still catches up before serving (see failed).
+    if (this.status.halted) {
+      log("info", "the sync's checks pass again; catching up before serving", { pair: this.name, was: this.status.halted });
+      this.status.halted = null;
+    }
 
     let shape: Shape;
     let cloudRead: ReadResult;
@@ -502,11 +517,10 @@ export class Pair {
         }
         await cc.query("commit");
       } catch (e) {
-        await cc.query("rollback").catch(() => {});
+        await discard(cc, e);
         throw e;
-      } finally {
-        cc.release();
       }
+      cc.release();
       this.cloudOk();
     } catch (e) {
       return this.failed(e);
@@ -549,6 +563,8 @@ export class Pair {
 
     // 5. Out to the cloud, reading the ThinkPad's rows as they are now.
     let pushed = 0;
+    let pushDone = false;
+    this.pushBatch = {};
     try {
       if (size(L) > 0) {
         const res = await this.pushKeys(shape, L, cloudRead.xmin);
@@ -556,6 +572,8 @@ export class Pair {
         pushed = size(L);
       }
       await Pair.setState(this.local, "push", localRead.next);
+      pushDone = true;
+      this.pushOk();
       this.status.pushBacklog = localRead.full;
 
       if (pulled || pushed || Date.now() - this.lastSeqCheck > 10_000) {
@@ -568,6 +586,7 @@ export class Pair {
       }
     } catch (e) {
       await this.recordConflicts(conflicts);
+      if (!pushDone) this.pushFailed(e);
       return this.failed(e);
     }
 
@@ -604,6 +623,8 @@ export class Pair {
   /** Writes the ThinkPad's current version of each changed key into the cloud. */
   async pushKeys(shape: Shape, L: Changeset, cloudPendingFrom: string): Promise<Conflict[]> {
     const lc = await this.local.connect();
+    const rehydrated: { tbl: string; key: string }[] = [];
+    let conflicts: Conflict[];
     try {
       await lc.query("begin isolation level repeatable read read only");
       await lc.query("set local timezone = 'UTC'");
@@ -613,8 +634,10 @@ export class Pair {
           rows.set(tbl, await fetchRows(lc, shape.local.tables.get(tbl)!, [...keys.keys()]));
         }
       }
+      this.pushBatch = Object.fromEntries(
+        [...rows].map(([tbl, m]) => [tbl, `${m.size} rows, ${(sumLength(m.values()) / 1048576).toFixed(1)} MB`]),
+      );
       const changedAt = new Map([...L.keys].filter(([t]) => !this.cfg.localOnly.includes(t)));
-      const rehydrated: { tbl: string; key: string }[] = [];
 
       const res = await tx(this.cloud, { applying: true }, async (cc) => {
         const ensureParents = async (tbl: string, childRows: string[], seen = new Set<string>()): Promise<void> => {
@@ -673,18 +696,16 @@ export class Pair {
         });
       });
       await lc.query("commit");
-      if (rehydrated.length) {
-        for (const { tbl, key } of rehydrated) {
-          await this.local.query(`delete from paribelle_sync.pruned where tbl = $1 and pk = $2::jsonb`, [tbl, key]);
-        }
-      }
-      return res.conflicts;
+      conflicts = res.conflicts;
     } catch (e) {
-      await lc.query("rollback").catch(() => {});
+      await discard(lc, e);
       throw e;
-    } finally {
-      lc.release();
     }
+    lc.release();
+    for (const { tbl, key } of rehydrated) {
+      await this.local.query(`delete from paribelle_sync.pruned where tbl = $1 and pk = $2::jsonb`, [tbl, key]);
+    }
+    return conflicts;
   }
 
   /**
@@ -756,23 +777,60 @@ export class Pair {
     this.status.cloudSizeMb = sz.rows[0].mb;
   }
 
+  /**
+   * Records conflicts for someone to look at. One already open with the same
+   * row, outcome and reason isn't recorded again: a row that can't be applied
+   * fails the same way at every reconcile and every retried push.
+   */
   async recordConflicts(conflicts: Conflict[]) {
     if (!conflicts.length) return;
     try {
-      await this.local.query(
+      const r = await this.local.query(
         `insert into paribelle_sync.conflicts (tbl, pk, kept, lost_row, reason)
          select x.tbl, x.pk::jsonb, x.kept, x.lost_row::jsonb, x.reason
-         from jsonb_to_recordset($1::jsonb) as x(tbl text, pk text, kept text, lost_row text, reason text)`,
+         from jsonb_to_recordset($1::jsonb) as x(tbl text, pk text, kept text, lost_row text, reason text)
+         where not exists (
+           select 1 from paribelle_sync.conflicts o
+           where o.resolved_at is null and o.tbl = x.tbl and o.pk = x.pk::jsonb and o.kept = x.kept
+             and o.reason = x.reason and o.lost_row is not distinct from x.lost_row::jsonb
+         )`,
         [JSON.stringify(conflicts.map((c) => ({ tbl: c.tbl, pk: c.pk, kept: c.kept, lost_row: c.lostRow, reason: c.reason })))],
       );
-      this.status.openConflicts += conflicts.length;
+      const added = r.rowCount ?? 0;
+      this.status.openConflicts += added;
       if (this.status.openConflicts !== this.lastConflictCount) {
-        log("warn", "conflicts recorded", { pair: this.name, new: conflicts.length, open: this.status.openConflicts });
+        log("warn", "conflicts recorded", { pair: this.name, new: added, open: this.status.openConflicts });
         this.lastConflictCount = this.status.openConflicts;
       }
     } catch (e) {
       log("error", "could not record conflicts", { pair: this.name, error: errText(e), conflicts });
     }
+  }
+
+  private pushOk() {
+    if (this.status.pushFailingSince) {
+      log("info", "pushing to the cloud again", { pair: this.name, failingSince: this.status.pushFailingSince });
+    }
+    this.status.pushFailingSince = null;
+    this.lastPushWarning = 0;
+  }
+
+  /**
+   * A push that failed. Each failure also shows as "cycle failed", next to the
+   * pull that worked; this names what is stuck, and repeats every 10 minutes
+   * while it stays stuck. (The heartbeat stops too: no cycle completes.)
+   */
+  private pushFailed(e: unknown) {
+    const now = Date.now();
+    this.status.pushFailingSince ??= new Date(now).toISOString();
+    if (now - this.lastPushWarning < 10 * 60_000) return;
+    this.lastPushWarning = now;
+    log("warn", "pushes to the cloud are failing; its copy is falling behind", {
+      pair: this.name,
+      since: this.status.pushFailingSince,
+      error: errText(e),
+      batch: this.pushBatch,
+    });
   }
 
   private cloudOk() {
@@ -789,10 +847,12 @@ export class Pair {
     if (e instanceof Halt) {
       if (this.status.halted !== msg) log("error", "sync halted", { pair: this.name, reason: msg });
       this.status.halted = msg;
+      // The fallback serves meanwhile; once the halt lifts (cycle), the ThinkPad catches up with it first.
+      this.undrain();
       this.nextCloudTry = Date.now() + 30_000;
       return false;
     }
-    this.status.halted = null;
+    // A halt stays until its checks pass (cycle): an outage meanwhile says nothing about its cause.
     this.status.lastError = msg;
     const local = this.localFailingSince !== null;
     if (!local) {
@@ -890,6 +950,12 @@ async function raiseSeq(c: pg.Pool, name: string, to: bigint) {
      where $1::bigint > coalesce((select last_value from pg_sequences where schemaname = 'public' and sequencename = $2), 0)`,
     [to.toString(), name],
   );
+}
+
+function sumLength(xs: Iterable<string>): number {
+  let n = 0;
+  for (const x of xs) n += x.length;
+  return n;
 }
 
 function minOf(a: bigint | null, b: bigint | null): bigint | null {
