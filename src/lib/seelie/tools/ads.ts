@@ -18,6 +18,7 @@ import {
   managerLink,
   money,
   OBJECTIVES,
+  prepaidOf,
   type Change,
   type CreativeSource,
   type Level,
@@ -54,6 +55,16 @@ const currencyNow = async () => {
   return { currency: s?.adAccount?.currency ?? "INR", cap: s?.monthlyCap ?? null };
 };
 
+/** For an approval card: the prepaid balance, and whether `upTo` more fits in it ("" when the account pays as it goes, or Meta is slow). */
+async function fundsNote(upTo?: number) {
+  const ads = await adsContext().catch(() => null);
+  if (!ads) return "";
+  const p = await prepaidOf(ads, AbortSignal.timeout(5_000));
+  if (!p || p.balance === null) return "";
+  const m = (n: number) => money(n, ads.adAccount.currency);
+  return upTo !== undefined && p.balance < upTo ? `. Only ${m(p.balance)} is left on the prepaid balance, so it stops early unless you add money` : `. ${m(p.balance)} prepaid left`;
+}
+
 /* -------------------------------------------------------------------------- */
 /* ads_report                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -63,7 +74,8 @@ export const adsReport = defineTool({
   label: "Ads report",
   description: [
     "Read the shop's Meta ads (Instagram and Facebook). action 'overview': the ad account, the monthly cap and how much of it is spent or held by what's running",
-    "(room = what a new ad may spend), and every live or paused campaign with its budget and last 30 days.",
+    "(room = what a new ad may spend), the prepaid balance when the account runs on prepaid funds (only the owner can add money, at the topUp link; Seelie can't pay),",
+    "and every live or paused campaign with its budget and last 30 days.",
     "'insights': results by level (account, campaign, adset, ad; ids to narrow), datePreset or since/until (YYYY-MM-DD), breakdowns (age, gender, publisher_platform,",
     "platform_position, region, device_platform), daily: true for a row per day. Spend is in the account's currency; ctr in %; thruplays are 15 s+ video plays.",
     "'ad': one ad (id) with its review status, issues, a preview link and its last 7 days.",
@@ -103,6 +115,14 @@ export const adsReport = defineTool({
               room: m(room.room),
               running: room.committed.map((c) => ({ ...c, upTo: m(c.upTo) })),
             },
+            funds: room.prepaid
+              ? {
+                  prepaidBalance: room.prepaid.balance === null ? "Meta didn't say" : m(room.prepaid.balance),
+                  metaSays: room.prepaid.meta,
+                  low: room.fundsLow,
+                  topUp: room.prepaid.topUp,
+                }
+              : "pays as it goes (no prepaid balance)",
             campaigns,
           },
         };
@@ -256,7 +276,7 @@ export const adsCreate = defineTool({
           .filter(Boolean)
           .join(", ")
       : "India";
-    return `Spend up to ${money(a.budget, currency)} over ${how} on "${a.name}": ${a.objective.replace("_", " ")} ad from ${what}, for ${who}${cap !== null ? ` (monthly cap ${money(cap, currency)})` : ""}`;
+    return `Spend up to ${money(a.budget, currency)} over ${how} on "${a.name}": ${a.objective.replace("_", " ")} ad from ${what}, for ${who}${cap !== null ? ` (monthly cap ${money(cap, currency)})` : ""}${await fundsNote(a.budget)}`;
   },
   async execute(a, ctx) {
     const ads = await adsContext().catch(wrap);
@@ -288,7 +308,7 @@ export const adsCreate = defineTool({
       ctx.signal,
     ).catch(wrap);
     return {
-      text: "The ad is made and switched on; Meta reviews it before it shows.",
+      text: `The ad is made and switched on; Meta reviews it before it shows.${made.funds ? ` ${made.funds}` : ""}`,
       data: {
         ...made,
         name,
@@ -330,11 +350,11 @@ export const adsManage = defineTool({
       case "pause":
         return `Pause ${what}`;
       case "resume":
-        return `Switch ${what} back on (it can spend again)`;
+        return `Switch ${what} back on (it can spend again)${await fundsNote()}`;
       case "lower_budget":
         return `Lower ${what}'s budget to ${a.budget !== undefined ? money(a.budget, currency) : "?"}`;
       case "raise_budget":
-        return `Raise ${what}'s budget to ${a.budget !== undefined ? money(a.budget, currency) : "?"}`;
+        return `Raise ${what}'s budget to ${a.budget !== undefined ? money(a.budget, currency) : "?"}${await fundsNote()}`;
       case "extend":
         return `Run ${what} until ${a.end ?? "?"}`;
       case "archive":

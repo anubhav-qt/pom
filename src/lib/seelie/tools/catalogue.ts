@@ -22,7 +22,7 @@ import { linkCatalogue } from "@/lib/catalogue";
 import { freezeOrderCosts, productFamilyKey } from "@/lib/finance-queries";
 import { adjustStock, pushInventoryToChannels, sellableQuantity } from "@/lib/inventory";
 import { recomputeReserved } from "@/lib/sync";
-import { getRestockPlan, markRestockInStock, resetRestockPlan, updateRestockItems } from "@/app/(app)/orders/planner-actions";
+import { editRestockItems, fillRestockItems, rebuildRestockPlan, restockPlan as currentRestockPlan } from "@/app/(app)/orders/planner";
 
 import { defineTool, ToolError } from "./types";
 import { accountsFor, ist, listRefs, num, plural, StringEnum } from "./util";
@@ -459,12 +459,12 @@ export const restockPlan = defineTool({
     if (a.action === "update" || a.action === "mark_in_stock") {
       if (!a.cellIds?.length) throw new ToolError("Name the cells (cellIds from view).");
       if (a.action === "update") {
-        await updateRestockItems(a.cellIds, { have: a.have, buyOverride: a.buyOverride, excluded: a.excluded });
+        await editRestockItems(a.cellIds, { have: a.have, buyOverride: a.buyOverride, excluded: a.excluded });
       } else {
-        await markRestockInStock(a.cellIds);
+        await fillRestockItems(a.cellIds);
       }
     }
-    const plan = a.action === "rebuild" ? await resetRestockPlan() : await getRestockPlan();
+    const plan = a.action === "rebuild" ? await rebuildRestockPlan() : await currentRestockPlan();
     const list = plan.products.filter((p) => !a.onlyToBuy || p.buy > 0).slice(0, a.limit ?? 80);
     return {
       data: {

@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { seelieShoots, seelieVideos, type User } from "@/db/schema";
 import { ENABLED_CHANNELS, FEATURES } from "@/config/features";
 
+import { listMemories, memorySection } from "./memories";
 import { metaStatus } from "./meta";
 import { storeApiUrl, storeStatus } from "./store";
 import { budgetLine, imageBudget } from "./studio/budget";
@@ -118,8 +119,9 @@ async function metaSection(names: Set<string>) {
     "- Objectives: traffic to a paribelle.in product or collection page (there's no Meta Pixel on the shop yet, so purchases can't be optimised for or counted), engagement for a post, video_views for reels, reach for launches. Audience: India by default, women for women's wear, Advantage+ audience on unless the owner wants it narrow.",
     "- Look after running ads: pause (ads_manage pause, no approval needed) an ad that spends without results or does far worse than the others, and tell the owner what you paused and why. Restarting, raising a budget or running longer asks, and must fit under the monthly cap; if it doesn't, say how much room is left.",
     "- Meta reviews every new ad (minutes to a day); a rejected one comes back with Meta's reason in ads_report ad.",
+    "- Money in the account: on prepaid funds, ads stop when the balance runs out, and only the owner can add money (in Meta's Billing, with their OTP or UPI app); you can't pay or top up. ads_report overview shows the balance (funds). When it's low, or can't cover what's running plus what you suggest, say so with the amount and the topUp link, before or with the suggestion.",
   ];
-  if (!names.has("ads_create")) lines.splice(4, 4);
+  if (!names.has("ads_create")) lines.splice(4, 5);
   return lines.join("\n");
 }
 
@@ -145,11 +147,15 @@ async function studioSection(names: Set<string>) {
 }
 
 export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promise<string> {
-  const [lastSync, store] = await Promise.all([lastOrdersSync().catch(() => null), storeLine(user, tools)]);
+  const names = new Set(tools.map((t) => t.name));
+  const [lastSync, store, memories] = await Promise.all([
+    lastOrdersSync().catch(() => null),
+    storeLine(user, tools),
+    names.has("memory") ? listMemories(user) : null,
+  ]);
   const off = Object.entries(FEATURES)
     .filter(([key, on]) => !on && SWITCHED_OFF[key])
     .map(([key]) => SWITCHED_OFF[key]);
-  const names = new Set(tools.map((t) => t.name));
 
   const sections: string[] = [];
 
@@ -183,6 +189,8 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
     ].join("\n"),
   );
 
+  if (memories) sections.push(memorySection(user, memories));
+
   const flows: string[] = [];
   if (names.has("store_amazon_gap") && names.has("store_create_products")) {
     flows.push(
@@ -202,6 +210,11 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
   if (names.has("catalogue_link")) {
     flows.push(
       "- New Amazon listings to OMS products: amazon_listings shows what Amazon has and which listings aren't mapped; catalogue_link maps them, making OMS products for new ones.",
+    );
+  }
+  if (names.has("routines")) {
+    flows.push(
+      "- Something to do regularly (\"every Monday send me…\", \"check this daily\"): make it a routine (routines create) rather than promising to remember; its prompt must stand on its own, since each run starts from it. Say when it first runs.",
     );
   }
   if (flows.length) sections.push(["Ways of doing common jobs:", ...flows].join("\n"));

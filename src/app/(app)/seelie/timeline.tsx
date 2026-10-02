@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Database,
   Download,
+  Eraser,
   Globe,
   Hand,
   Megaphone,
@@ -19,6 +20,7 @@ import {
   Share2,
   ShoppingBag,
   Sparkles,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -27,7 +29,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import { ZoomImg } from "@/components/image-lightbox";
 import { Spinner } from "@/components/ui";
 import { BASE_PATH, withBasePath } from "@/lib/base-path";
-import { ACTIVE_RUN, type ChatMessage, type ToolKind, type ToolRow } from "@/lib/seelie/types";
+import { ACTIVE_RUN, type ChatMessage, type HelperState, type ToolKind, type ToolRow } from "@/lib/seelie/types";
 import { useSeelie, type DraftClip, type DraftImage } from "@/lib/stores/seelie-store";
 import { cn } from "@/lib/utils";
 
@@ -193,6 +195,9 @@ const Reply = memo(function Reply({
           return <Thinking key={i} text={block.thinking} live={streaming && i === last} />;
         }
         if (block.type === "text") return block.text.trim() ? <Markdown key={i} text={block.text} /> : null;
+        if (block.name === "helpers") {
+          return <HelpersCard key={block.id} call={block} row={tools[block.id]} result={results.get(block.id)} tools={tools} chatId={chatId} />;
+        }
         return <ToolCard key={block.id} call={block} row={tools[block.id]} result={results.get(block.id)} chatId={chatId} />;
       })}
       {message.stopReason === "error" ? (
@@ -252,6 +257,7 @@ const KIND: Record<ToolKind, { Icon: LucideIcon; asks: string }> = {
   publish: { Icon: Send, asks: "This posts publicly." },
   spend: { Icon: Camera, asks: "This uses the image model's limited budget." },
   ads: { Icon: Megaphone, asks: "This can spend money on Meta ads." },
+  forget: { Icon: Eraser, asks: "This deletes something Seelie remembers for you." },
 };
 
 function humanize(name: string) {
@@ -371,6 +377,117 @@ function ToolCard({ call, row: maybeRow, result, chatId }: { call: ToolCall; row
               ) : null}
             </Section>
           ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Helpers: parts of a request worked on at the same time                      */
+/* -------------------------------------------------------------------------- */
+
+const HELPER_ICON: Record<HelperState["status"], React.ReactNode> = {
+  working: <Spinner size="0.95rem" />,
+  done: <Check className="h-4 w-4" style={{ color: "var(--ok)" }} />,
+  error: <X className="h-4 w-4" style={{ color: "var(--danger)" }} />,
+  stopped: <Ban className="h-4 w-4" style={{ color: "var(--muted-2)" }} />,
+};
+
+/** A helpers call: each helper with its model, how it's doing, its steps (asking like any other) and its answer. */
+function HelpersCard({
+  call,
+  row,
+  result,
+  tools,
+  chatId,
+}: {
+  call: ToolCall;
+  row?: ToolRow;
+  result?: { result: ToolResultMessage; seq: number };
+  tools: Record<string, ToolRow>;
+  chatId: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const live = !result && (!row || row.status === "running" || row.status === "queued");
+  const jobs = ((call.arguments as { jobs?: { title?: string; thinking?: string }[] }).jobs ?? []).filter(Boolean);
+  const fromResult = (result?.result.details as { helpers?: HelperState[] } | undefined)?.helpers;
+  const helpers: HelperState[] =
+    row?.helpers ??
+    fromResult ??
+    jobs.map((j) => ({ title: j.title ?? "Helper", model: "", thinking: j.thinking ?? "", status: live ? "working" : "stopped", answer: null }));
+  const steps = Object.values(tools).filter((t) => t.parent === call.id);
+  const shown = row ?? { status: result ? (result.result.isError ? "error" : "done") : "queued", summary: null, progress: null };
+  const took = row ? duration(row) : null;
+
+  return (
+    <div className="surface-2 overflow-hidden">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left">
+        <Users className="h-4 w-4 shrink-0" style={{ color: "var(--accent-ink)" }} />
+        <span className="min-w-0 flex-1 sm:flex sm:items-center sm:gap-2.5">
+          <span className="block truncate text-[13px] font-medium sm:shrink-0 sm:overflow-visible">Helpers</span>
+          <span className="muted block truncate text-xs sm:min-w-0 sm:flex-1">
+            {live && shown.progress ? shown.progress : `${helpers.length} at once: ${helpers.map((h) => h.title).join(", ")}`}
+          </span>
+        </span>
+        {took ? <span className="shrink-0 text-[11px] tabular-nums" style={{ color: "var(--muted-2)" }}>{took}</span> : null}
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center">{row ? <StatusIcon row={row} /> : live ? <Spinner size="0.95rem" /> : null}</span>
+        <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-180")} style={{ color: "var(--muted-2)" }} />
+      </button>
+      <div className="space-y-3 border-t px-3 py-2.5" style={{ borderColor: "var(--border)" }}>
+        {helpers.map((h, i) => (
+          <Helper
+            key={i}
+            helper={h.status === "working" && !live ? { ...h, status: "stopped" } : h}
+            steps={steps.filter((t) => t.helper === i)}
+            open={open}
+            chatId={chatId}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Helper({ helper: h, steps, open, chatId }: { helper: HelperState; steps: ToolRow[]; open: boolean; chatId: string | null }) {
+  const [answer, setAnswer] = useState(false);
+  // Steps show while it works, when one waits for an answer, and when the card is opened.
+  const showSteps = open || h.status === "working" || steps.some((t) => t.status === "awaiting");
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center">{HELPER_ICON[h.status]}</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{h.title}</span>
+        {h.model ? (
+          <span className="muted hidden shrink-0 text-[11px] sm:inline">
+            {h.model}
+            {h.thinking ? ` · ${h.thinking}` : ""}
+          </span>
+        ) : null}
+        {!showSteps && steps.length ? <span className="muted shrink-0 text-[11px]">{steps.length === 1 ? "1 step" : `${steps.length} steps`}</span> : null}
+        {h.answer ? (
+          <button type="button" onClick={() => setAnswer((v) => !v)} className="muted flex shrink-0 items-center gap-0.5 text-xs hover:text-[var(--text)]">
+            Answer
+            <ChevronDown className={cn("h-3 w-3 transition-transform", answer && "rotate-180")} />
+          </button>
+        ) : null}
+      </div>
+      {showSteps && steps.length ? (
+        <div className="ml-[7px] mt-1.5 space-y-1.5 border-l-2 pl-3" style={{ borderColor: "var(--border)" }}>
+          {steps.map((t) => (
+            <ToolCard
+              key={t.callId}
+              call={{ type: "toolCall", id: t.callId, name: t.tool, arguments: (t.args ?? {}) as ToolCall["arguments"] }}
+              row={t}
+              result={t.result ? { result: t.result, seq: -1 } : undefined}
+              chatId={chatId}
+            />
+          ))}
+        </div>
+      ) : null}
+      {answer && h.answer ? (
+        <div className="muted ml-[7px] mt-1.5 border-l-2 pl-3" style={{ borderColor: "var(--border-strong)" }}>
+          <Markdown text={h.answer} className="text-[13px]" />
         </div>
       ) : null}
     </div>

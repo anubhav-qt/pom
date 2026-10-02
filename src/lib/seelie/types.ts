@@ -2,7 +2,7 @@
  * What Seelie's screen and its server share: the shapes of a chat, a tool call and
  * the events a run streams. Types only, so client components can import them.
  */
-import type { AssistantMessage, Message } from "@paribelle/pi-ai";
+import type { AssistantMessage, Message, ToolResultMessage } from "@paribelle/pi-ai";
 
 /**
  * What a tool does, which decides whether it asks first.
@@ -13,11 +13,12 @@ import type { AssistantMessage, Message } from "@paribelle/pi-ai";
  *  - publish: posts to a social account (Instagram); always asks.
  *  - spend:  uses the image model's capped budget (a photoshoot); always asks.
  *  - ads:    can spend money on Meta ads (start, restart, a bigger budget); always asks.
+ *  - forget: deletes something the user told Seelie to remember; always asks.
  */
-export type ToolKind = "read" | "write" | "market" | "store" | "publish" | "spend" | "ads";
+export type ToolKind = "read" | "write" | "market" | "store" | "publish" | "spend" | "ads" | "forget";
 
 /** Kinds that ask even when the chat auto-approves. */
-export const ALWAYS_ASK: readonly ToolKind[] = ["market", "store", "publish", "spend", "ads"];
+export const ALWAYS_ASK: readonly ToolKind[] = ["market", "store", "publish", "spend", "ads", "forget"];
 
 export type ToolStatus = "queued" | "awaiting" | "denied" | "running" | "done" | "error";
 export type Approval = "auto" | "approved" | "denied";
@@ -42,6 +43,24 @@ export interface ToolRow {
   endedAt: string | null;
   /** The latest progress line while it runs (not kept once it ends). */
   progress?: string | null;
+  /** A helper's step: the helpers call that started the helper, and which helper (0-based). */
+  parent?: string | null;
+  helper?: number | null;
+  /** A helper's step: what the tool returned (helpers' messages aren't in the chat). */
+  result?: ToolResultMessage | null;
+  /** A helpers call: each helper as it goes. */
+  helpers?: HelperState[] | null;
+}
+
+/** One helper of a helpers call. */
+export interface HelperState {
+  title: string;
+  /** The model and thinking level it runs on. */
+  model: string;
+  thinking: string;
+  status: "working" | "done" | "error" | "stopped";
+  /** Its answer to Seelie, once it's done. */
+  answer: string | null;
 }
 
 /** A transcript entry: pi's message and where it sits. */
@@ -59,6 +78,8 @@ export interface ChatSummary {
   updatedAt: string;
   /** A run is going in it right now. */
   active: boolean;
+  /** A routine replies in it. */
+  routine: boolean;
 }
 
 export interface RunInfo {
@@ -115,4 +136,6 @@ export interface StartRunInput {
   assets?: number[];
   model?: string;
   thinking?: string;
+  /** Sent by a routine (its name and schedule in words), not typed by the owner. */
+  routine?: { name: string; schedule: string; manual: boolean };
 }

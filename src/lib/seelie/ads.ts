@@ -132,6 +132,71 @@ function stillToSpend(row: BudgetRow, ctx: AdsContext) {
   return 0;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Prepaid funds                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * An account on prepaid funds spends what the owner has added and stops when it runs out.
+ * Only the owner can add money (in Billing, with their OTP or UPI app): Meta has no API
+ * for it, so Seelie reads the balance, warns, and links to the top-up page.
+ */
+export interface Prepaid {
+  /** What's left to spend (null when Meta doesn't say). */
+  balance: number | null;
+  /** Meta's own words for the payment method, e.g. "Available balance (₹1,000.00 INR)". */
+  meta: string | null;
+  /** Where to add money. */
+  topUp: string;
+}
+
+export const topUpLink = (ctx: AdsContext) => `https://business.facebook.com/billing_hub/payment_settings/?asset_id=${ctx.adAccount.id.replace(/^act_/, "")}`;
+
+/** The first amount in a display string: "₹1,00,000.50 INR" → 100000.5, "R$ 1.234,56" → 1234.56. */
+export function amountIn(text: string): number | null {
+  const m = /\d[\d.,]*/.exec(text);
+  if (!m) return null;
+  let s = m[0].replace(/[.,]+$/, "");
+  const dot = s.lastIndexOf(".");
+  const comma = s.lastIndexOf(",");
+  if (comma > dot && /,\d{1,2}$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+  else s = s.replace(/,/g, "");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+type FundingRow = {
+  is_prepay_account?: boolean;
+  spend_cap?: string;
+  amount_spent?: string;
+  funding_source_details?: { id?: string; display_string?: string; type?: number };
+};
+
+/** The prepaid balance, or null when the account pays as it goes (or Meta won't say how it pays). */
+export async function prepaidOf(ctx: AdsContext, signal?: AbortSignal): Promise<Prepaid | null> {
+  const row = await adsCall<FundingRow>(ctx, "GET", `/${ctx.adAccount.id}`, { fields: "is_prepay_account,spend_cap,amount_spent,funding_source_details" }, signal).catch(
+    () => null,
+  );
+  if (!row) return null;
+  const words = row.funding_source_details?.display_string?.trim() || null;
+  const saysBalance = !!words && /balance/i.test(words);
+  if (!row.is_prepay_account && !saysBalance) return null;
+  const cur = ctx.adAccount.currency;
+  let balance = saysBalance ? amountIn(words!) : null;
+  // Otherwise Meta keeps a prepaid account's funds as its spend cap.
+  if (balance === null && Number(row.spend_cap ?? 0) > 0) balance = Math.max(0, fromMinor(row.spend_cap, cur) - fromMinor(row.amount_spent, cur));
+  return { balance, meta: words, topUp: topUpLink(ctx) };
+}
+
+/** A warning when the prepaid funds can't cover `upTo` (what could be spent), else null. */
+export function fundsWarning(prepaid: Prepaid | null, upTo: number, currency: string): string | null {
+  if (!prepaid) return null;
+  const m = (n: number) => money(n, currency);
+  if (prepaid.balance === null) return `The account runs on prepaid funds and Meta didn't say how much is left; the owner can check (and add money) at ${prepaid.topUp}.`;
+  if (prepaid.balance >= upTo - 0.005) return null;
+  return `Only ${m(prepaid.balance)} is left on the prepaid balance, and up to ${m(upTo)} could be spent: Meta stops the ads when it runs out. Only the owner can add money (Seelie can't pay): ${prepaid.topUp}`;
+}
+
 export interface CapRoom {
   currency: string;
   accountStatus: string;
@@ -143,16 +208,21 @@ export interface CapRoom {
   committedTotal: number;
   /** What a new or bigger budget may be, at most (0 when there's no cap). */
   room: number;
+  /** Prepaid funds left, when the account runs on them. */
+  prepaid: Prepaid | null;
+  /** The prepaid balance can't cover what's running, or is under a tenth of the cap. */
+  fundsLow: boolean;
 }
 
 export async function capRoom(ctx: AdsContext, signal?: AbortSignal): Promise<CapRoom> {
   const act = ctx.adAccount.id;
   const cur = ctx.adAccount.currency;
-  const [account, spend, campaigns, adsets] = await Promise.all([
+  const [account, spend, campaigns, adsets, prepaid] = await Promise.all([
     adsCall<{ account_status?: number }>(ctx, "GET", `/${act}`, { fields: "account_status" }, signal),
     adsCall<{ data?: { spend?: string }[] }>(ctx, "GET", `/${act}/insights`, { date_preset: "this_month", level: "account", fields: "spend" }, signal),
     graphList<BudgetRow>(`/${act}/campaigns`, { fields: "id,name,effective_status,daily_budget,lifetime_budget,budget_remaining,stop_time", effective_status: LIVE }, ctx.token, 500, signal),
     graphList<BudgetRow>(`/${act}/adsets`, { fields: "id,name,campaign_id,effective_status,daily_budget,lifetime_budget,budget_remaining,end_time", effective_status: LIVE }, ctx.token, 1000, signal),
+    prepaidOf(ctx, signal),
   ]).catch((err: unknown) => {
     if (err instanceof MetaError) throw new AdsError(err.message);
     throw err;
@@ -174,6 +244,7 @@ export async function capRoom(ctx: AdsContext, signal?: AbortSignal): Promise<Ca
   }
   const committedTotal = committed.reduce((sum, c) => sum + c.upTo, 0);
   const cap = ctx.monthlyCap;
+  const balance = prepaid?.balance ?? null;
   return {
     currency: cur,
     accountStatus: ACCOUNT_STATUS[status] ?? `status ${status}`,
@@ -183,6 +254,8 @@ export async function capRoom(ctx: AdsContext, signal?: AbortSignal): Promise<Ca
     committed: committed.filter((c) => c.upTo > 0),
     committedTotal,
     room: cap === null ? 0 : Math.max(0, cap - spentThisMonth - committedTotal),
+    prepaid,
+    fundsLow: balance !== null && (balance <= 0 || balance < committedTotal - 0.005 || (cap !== null && cap > 0 && balance < cap / 10)),
   };
 }
 
@@ -340,7 +413,8 @@ export async function createAd(ctx: AdsContext, ad: NewAd, progress: (t: string)
   const act = ctx.adAccount.id;
   const o = OBJECTIVE[ad.objective];
   if (ad.objective === "traffic" && !ad.link) throw new AdsError("A traffic ad needs a link (link: the paribelle.in page it sends people to).");
-  await checkCap(ctx, ad.budget, `"${ad.name}"`, signal);
+  const room = await checkCap(ctx, ad.budget, `"${ad.name}"`, signal);
+  const funds = fundsWarning(room.prepaid, room.committedTotal + ad.budget, ctx.adAccount.currency);
 
   const creative = await creativeOf(ctx, ad, progress, signal);
   progress("Making the campaign…");
@@ -383,7 +457,15 @@ export async function createAd(ctx: AdsContext, ad: NewAd, progress: (t: string)
     const state = await adsCall<{ effective_status?: string; preview_shareable_link?: string }>(ctx, "GET", `/${adRow.id}`, { fields: "effective_status,preview_shareable_link" }).catch(
       () => ({}) as { effective_status?: string; preview_shareable_link?: string },
     );
-    return { campaignId: campaign.id, adsetId: adset.id, creativeId: made.id, adId: adRow.id, status: state.effective_status ?? null, preview: state.preview_shareable_link ?? null };
+    return {
+      campaignId: campaign.id,
+      adsetId: adset.id,
+      creativeId: made.id,
+      adId: adRow.id,
+      status: state.effective_status ?? null,
+      preview: state.preview_shareable_link ?? null,
+      ...(funds ? { funds } : {}),
+    };
   } catch (err) {
     // Nothing half-made is left behind: deleting the campaign takes its ad set and ad with it.
     await adsCall(ctx, "DELETE", `/${campaign.id}`).catch(() => {});
@@ -461,10 +543,11 @@ export async function changeAd(ctx: AdsContext, level: Level, id: string, change
     case "resume": {
       if (live) return { [level]: row.name, now: row.effective_status, note: "It's already on." };
       const cost = await resumeCost(ctx, level, row, signal);
-      if (cost > 0) await checkCap(ctx, cost, `Switching "${row.name}" back on`, signal);
+      const room = cost > 0 ? await checkCap(ctx, cost, `Switching "${row.name}" back on`, signal) : null;
+      const funds = room ? fundsWarning(room.prepaid, room.committedTotal + cost, cur) : null;
       await adsCall(ctx, "POST", `/${id}`, { status: "ACTIVE" }, signal);
       const after = await adsCall<{ effective_status?: string }>(ctx, "GET", `/${id}`, { fields: "effective_status" }).catch(() => ({ effective_status: undefined }));
-      return { [level]: row.name, was: row.effective_status, now: after.effective_status ?? "ACTIVE", canSpendUpTo: m(cost) };
+      return { [level]: row.name, was: row.effective_status, now: after.effective_status ?? "ACTIVE", canSpendUpTo: m(cost), ...(funds ? { funds } : {}) };
     }
     case "lower_budget":
     case "raise_budget": {
@@ -475,22 +558,29 @@ export async function changeAd(ctx: AdsContext, level: Level, id: string, change
       const next = change.budget;
       if (change.action === "lower_budget" && next >= before) throw new AdsError(`${m(next)} isn't lower than the current ${m(before)}; that's a raise, which asks first.`);
       if (change.action === "raise_budget" && next <= before) throw new AdsError(`${m(next)} isn't higher than the current ${m(before)}.`);
+      let funds: string | null = null;
       if (change.action === "raise_budget" && live) {
         const extra = field === "lifetime_budget" ? next - before : (next - before) * daysLeftThisMonth(ctx.adAccount.timezone, row.end_time ?? row.stop_time);
-        await checkCap(ctx, extra, `Raising "${row.name}"`, signal);
+        const room = await checkCap(ctx, extra, `Raising "${row.name}"`, signal);
+        funds = fundsWarning(room.prepaid, room.committedTotal + extra, cur);
       }
       await adsCall(ctx, "POST", `/${id}`, { [field]: toMinor(next, cur) }, signal);
-      return { [level]: row.name, budget: field === "lifetime_budget" ? "lifetime" : "daily", was: m(before), now: m(next) };
+      return { [level]: row.name, budget: field === "lifetime_budget" ? "lifetime" : "daily", was: m(before), now: m(next), ...(funds ? { funds } : {}) };
     }
     case "extend": {
       if (level !== "adset") throw new AdsError("End dates belong to ad sets.");
       if (change.end.getTime() <= Date.now()) throw new AdsError("The new end is in the past.");
+      let funds: string | null = null;
       if (Number(row.daily_budget ?? 0) > 0 && live) {
         const extraDays = daysLeftThisMonth(ctx.adAccount.timezone, change.end.toISOString()) - daysLeftThisMonth(ctx.adAccount.timezone, row.end_time);
-        if (extraDays > 0) await checkCap(ctx, fromMinor(row.daily_budget, cur) * extraDays, `Running "${row.name}" longer`, signal);
+        if (extraDays > 0) {
+          const extra = fromMinor(row.daily_budget, cur) * extraDays;
+          const room = await checkCap(ctx, extra, `Running "${row.name}" longer`, signal);
+          funds = fundsWarning(room.prepaid, room.committedTotal + extra, cur);
+        }
       }
       await adsCall(ctx, "POST", `/${id}`, { end_time: metaTime(change.end) }, signal);
-      return { adset: row.name, was: row.end_time ?? null, now: change.end.toISOString() };
+      return { adset: row.name, was: row.end_time ?? null, now: change.end.toISOString(), ...(funds ? { funds } : {}) };
     }
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { MoreHorizontal, Pin, Plus, Settings2, Sparkles, SquarePen } from "lucide-react";
+import { CalendarClock, MoreHorizontal, Pin, Plus, Settings2, Sparkles, SquarePen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
@@ -11,6 +11,7 @@ import { CenteredSpinner, Empty } from "@/components/ui";
 import { lastChatId, useSeelie } from "@/lib/stores/seelie-store";
 
 import { Composer } from "./composer";
+import { RoutinesModal } from "./routines";
 import { SettingsModal } from "./settings";
 import { Notice, Timeline } from "./timeline";
 
@@ -37,6 +38,7 @@ export function Seelie() {
   const error = useSeelie((s) => s.error);
 
   const [settings, setSettings] = useState(false);
+  const [routines, setRoutines] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -108,6 +110,8 @@ export function Seelie() {
         <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full" style={{ background: "var(--accent)" }} title="Replying" />
       ) : c.pinned ? (
         <Pin className="h-3 w-3 shrink-0" style={{ color: "var(--muted-2)" }} />
+      ) : c.routine ? (
+        <CalendarClock className="h-3 w-3 shrink-0" style={{ color: "var(--muted-2)" }} />
       ) : undefined,
     })),
   ];
@@ -174,6 +178,9 @@ export function Seelie() {
                 onSelect={onChatMenu}
               />
             ) : null}
+            <button type="button" className="nav-icon-btn h-8 w-8" aria-label="Routines" title="Routines" onClick={() => setRoutines(true)}>
+              <CalendarClock className="h-[18px] w-[18px]" />
+            </button>
             <button type="button" className="nav-icon-btn h-8 w-8" aria-label="Seelie settings" onClick={() => setSettings(true)}>
               <Settings2 className="h-[18px] w-[18px]" />
             </button>
@@ -236,6 +243,7 @@ export function Seelie() {
       </div>
 
       {settings ? <SettingsModal onClose={() => setSettings(false)} /> : null}
+      {routines ? <RoutinesModal onClose={() => setRoutines(false)} /> : null}
       {renaming && chatId ? <RenameModal chatId={chatId} title={title} onClose={() => setRenaming(false)} /> : null}
       {deleting && chatId ? <DeleteModal chatId={chatId} title={title} onClose={() => setDeleting(false)} /> : null}
     </>

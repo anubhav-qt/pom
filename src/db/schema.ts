@@ -9,6 +9,7 @@ import {
   pgTable,
   real,
   serial,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -885,6 +886,12 @@ export const seelieChats = pgTable(
     /** Changes to the OMS run without an approval card. Changes to a marketplace or to paribelle.in still ask. */
     autoApprove: boolean("auto_approve").notNull().default(false),
     pinned: boolean("pinned").notNull().default(false),
+    /**
+     * A long chat compacted (routines.ts): what Seelie reads in place of the messages up to
+     * and including `summaryThrough`. The screen still shows every message.
+     */
+    summary: text("summary"),
+    summaryThrough: integer("summary_through"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     /** Last activity, which orders the sidebar. */
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -978,6 +985,13 @@ export const seelieToolCalls = pgTable(
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** A helper's step: the helpers call that started the helper, and which helper (0-based). */
+    parentCallId: text("parent_call_id"),
+    helper: smallint("helper"),
+    /** A helper's step: what the tool returned (helpers' messages aren't in the chat), without images. */
+    result: jsonb("result"),
+    /** A helpers call: each helper's title, model, state and answer. */
+    helpers: jsonb("helpers"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1145,6 +1159,63 @@ export const seelieImageCalls = pgTable(
     error: text("error"),
   },
   (t) => [index("seelie_image_calls_at_idx").on(t.at)],
+);
+
+/**
+ * Seelie's routines: a message it gets on a schedule (India time), each run replying in
+ * the routine's own chat. The ThinkPad's sync service asks /api/cron/seelie every minute
+ * for the ones due.
+ */
+export const seelieRoutines = pgTable(
+  "seelie_routines",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Made at the first run (and again if the chat was deleted). */
+    chatId: uuid("chat_id").references(() => seelieChats.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    prompt: text("prompt").notNull(),
+    /** RoutineSchedule (lib/seelie/schedule.ts). */
+    schedule: jsonb("schedule").notNull(),
+    model: text("model"),
+    thinking: text("thinking"),
+    /** Ordinary writes run without asking; ads, posts, marketplaces and paribelle.in still wait. Kept in step with the chat's switch. */
+    autoApprove: boolean("auto_approve").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    /** Null while switched off. */
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastRunId: uuid("last_run_id").references(() => seelieRuns.id, { onDelete: "set null" }),
+    /** Why the last time didn't run (missed, still waiting on an approval, an error). */
+    lastNote: text("last_note"),
+    /** The last run the owner has seen (opened, or closed its note). */
+    seenRunId: uuid("seen_run_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("seelie_routines_due_idx").on(t.enabled, t.nextRunAt), index("seelie_routines_user_idx").on(t.userId)],
+);
+
+/**
+ * What a user told Seelie to remember ("remember that…"): in every chat of theirs, routines
+ * included, until they delete it (in Seelie's settings, or by asking, which asks first).
+ */
+export const seelieMemories = pgTable(
+  "seelie_memories",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    /** The chat it was said in. */
+    chatId: uuid("chat_id").references(() => seelieChats.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("seelie_memories_user_idx").on(t.userId, t.createdAt)],
 );
 
 export type User = typeof users.$inferSelect;

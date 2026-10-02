@@ -6,12 +6,14 @@ import { amazonApi, amazonListings, catalogueLink, inventoryTool, productsTool, 
 import { adsCreate, adsManage, adsReport } from "./ads";
 import { viewImages } from "./images";
 import { instagram, instagramPost } from "./instagram";
+import { memory } from "./memory";
 import { finance, orderNotes } from "./money";
 import { cancellations, findOrders, fulfilment, orderDetails, ordersOverview, scanLookup } from "./orders";
 import { imageSpecs, photoEdit } from "./photo";
 import { photoshoot } from "./photoshoot";
 import { photoPublish, videoPublish } from "./publish";
 import { returnsDesk, returnsUpdate } from "./returns";
+import { routines } from "./routines";
 import { songs } from "./songs";
 import { sqlQuery, sqlSchema } from "./sql";
 import { videoAssets, videoLibrary, videoRender, videoWatch } from "./video";
@@ -90,6 +92,9 @@ const ALL = [
   webSearch,
   fetchUrl,
   youtube,
+  // Memory (what the person asked Seelie to keep) and routines (scheduled runs)
+  memory,
+  routines,
   // Anything else
   sqlSchema,
   sqlQuery,
@@ -102,6 +107,6 @@ export function toolsFor(user: Pick<User, "role">): SeelieTool[] {
 
 /** Every tool's card label, by name (for rows read back from the database). */
 export function toolLabels(): Map<string, string> {
-  // Retired tools: older chats still show their cards.
-  return new Map([...ALL.map((t) => [t.name, t.label] as [string, string]), ["reels", "Reels"], ["image_studio", "Image studio"]]);
+  // Retired tools: older chats still show their cards. Helpers is the engine's own.
+  return new Map([...ALL.map((t) => [t.name, t.label] as [string, string]), ["reels", "Reels"], ["image_studio", "Image studio"], ["helpers", "Helpers"]]);
 }

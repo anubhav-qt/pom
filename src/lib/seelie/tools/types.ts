@@ -47,7 +47,7 @@ export interface SeelieTool<P extends TSchema = TSchema> {
   /** Off when its feature is switched off or what it needs isn't set up. */
   enabled?: () => boolean;
   /** One line saying what this call will do, for the approval card (it may look things up, e.g. what a shoot costs). */
-  summary: (args: Static<P>) => string | Promise<string>;
+  summary: (args: Static<P>, who: { user: User }) => string | Promise<string>;
   execute: (args: Static<P>, ctx: ToolContext) => Promise<ToolOutput>;
 }
 

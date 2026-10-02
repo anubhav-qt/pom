@@ -141,13 +141,6 @@ export function Composer({
     if (coarse()) textRef.current?.blur();
   }
 
-  const modelOptions: DropdownOption[] =
-    catalog?.models.map((m, i, all) => ({
-      id: m.id,
-      label: m.name,
-      dividerBefore: i > 0 && all[i - 1].provider !== m.provider,
-    })) ?? [];
-  const thinkingOptions: DropdownOption[] = (model?.thinkingLevels ?? []).map((l) => ({ id: l, label: THINKING_LABEL[l] ?? l }));
 
   const usage = usageFor(limits, model?.provider ?? null);
   const context = model ? contextFor(messages, model.contextWindow, model.name) : null;
@@ -283,30 +276,8 @@ export function Composer({
             <Paperclip className="h-[18px] w-[18px]" />
           </button>
 
-          {modelOptions.length ? (
-            <DropdownMenu
-              side="up"
-              trigger={<Pill>{model?.name ?? "Model"}</Pill>}
-              options={modelOptions}
-              activeId={modelId ?? ""}
-              onSelect={setModel}
-            />
-          ) : null}
-
-          {thinkingOptions.length > 1 ? (
-            <DropdownMenu
-              side="up"
-              trigger={
-                <Pill>
-                  <Brain className="h-3.5 w-3.5" />
-                  <span className="hidden min-[400px]:inline">{THINKING_LABEL[thinking ?? ""] ?? thinking}</span>
-                </Pill>
-              }
-              options={thinkingOptions}
-              activeId={thinking ?? ""}
-              onSelect={setThinking}
-            />
-          ) : null}
+          <ModelPicker value={modelId} onChange={setModel} side="up" />
+          <ThinkingPicker model={modelId} value={thinking} onChange={setThinking} side="up" />
 
           <div className="flex-1" />
 
@@ -413,6 +384,51 @@ function ClipChip({ clip, onRemove }: { clip: DraftClip; onRemove: () => void })
 }
 
 const megabytes = (bytes: number) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(bytes >= 10 * 1048576 ? 0 : 1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+
+/** The model picker under the box, also used for a routine's model. */
+export function ModelPicker({ value, onChange, side = "down" }: { value: string | null; onChange: (id: string) => void; side?: "up" | "down" }) {
+  const catalog = useSeelie((s) => s.status?.catalog ?? null);
+  const options: DropdownOption[] =
+    catalog?.models.map((m, i, all) => ({
+      id: m.id,
+      label: m.name,
+      dividerBefore: i > 0 && all[i - 1].provider !== m.provider,
+    })) ?? [];
+  if (!options.length) return null;
+  const model = catalog?.models.find((m) => m.id === value) ?? null;
+  return <DropdownMenu side={side} trigger={<Pill>{model?.name ?? "Model"}</Pill>} options={options} activeId={value ?? ""} onSelect={onChange} />;
+}
+
+/** How hard the model thinks, for the levels `model` offers. */
+export function ThinkingPicker({
+  model: modelId,
+  value,
+  onChange,
+  side = "down",
+}: {
+  model: string | null;
+  value: string | null;
+  onChange: (level: string) => void;
+  side?: "up" | "down";
+}) {
+  const model = useSeelie((s) => s.status?.catalog?.models.find((m) => m.id === modelId) ?? null);
+  const options: DropdownOption[] = (model?.thinkingLevels ?? []).map((l) => ({ id: l, label: THINKING_LABEL[l] ?? l }));
+  if (options.length < 2) return null;
+  return (
+    <DropdownMenu
+      side={side}
+      trigger={
+        <Pill>
+          <Brain className="h-3.5 w-3.5" />
+          <span className="hidden min-[400px]:inline">{THINKING_LABEL[value ?? ""] ?? value}</span>
+        </Pill>
+      }
+      options={options}
+      activeId={value ?? ""}
+      onSelect={onChange}
+    />
+  );
+}
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (

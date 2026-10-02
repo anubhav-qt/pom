@@ -3,10 +3,11 @@ import "server-only";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { seelieChats, seelieMessages, seelieRuns, seelieToolCalls, users, type User } from "@/db/schema";
+import { seelieChats, seelieMessages, seelieRoutines, seelieRuns, seelieToolCalls, users, type User } from "@/db/schema";
 import type { AssistantMessage, Message } from "@paribelle/pi-ai";
 
 import { leanEntry, reapStaleRuns, SeelieRunError, setLiveAutoApprove, toolRowFrom } from "./engine";
+import { markRoutinesSeen, routineAutoApprove } from "./routines";
 import { toolLabels } from "./tools";
 import { ACTIVE_RUN, type ChatSummary, type ChatView, type RunInfo, type RunStatus } from "./types";
 
@@ -29,10 +30,12 @@ export async function listChats(user: User): Promise<ChatSummary[]> {
       updatedAt: seelieChats.updatedAt,
       active: sql<boolean>`EXISTS (
         SELECT 1 FROM ${seelieRuns} r
-        WHERE r.chat_id = ${seelieChats.id}
+        WHERE r.chat_id = "seelie_chats"."id"
           AND r.status IN ('running', 'waiting')
           AND r.heartbeat_at > now() - interval '30 seconds'
       )`,
+      // Spelled out: inside the subquery a bare "id" would be its own table's.
+      routine: sql<boolean>`EXISTS (SELECT 1 FROM ${seelieRoutines} x WHERE x.chat_id = "seelie_chats"."id")`,
     })
     .from(seelieChats)
     .where(eq(seelieChats.userId, user.id))
@@ -44,6 +47,8 @@ export async function listChats(user: User): Promise<ChatSummary[]> {
 export async function getChatView(user: User, chatId: string): Promise<ChatView> {
   const chat = await ownChat(user, chatId);
   await reapStaleRuns(chatId);
+  // Opening a routine's chat is seeing its last run (its note goes away).
+  await markRoutinesSeen(user, { chatId }).catch(() => {});
 
   const [messages, runs, tools] = await Promise.all([
     db.select().from(seelieMessages).where(eq(seelieMessages.chatId, chatId)).orderBy(asc(seelieMessages.seq)),
@@ -100,6 +105,7 @@ export async function pinChat(user: User, chatId: string, pinned: boolean) {
 export async function setAutoApprove(user: User, chatId: string, on: boolean) {
   await ownChat(user, chatId);
   await db.update(seelieChats).set({ autoApprove: on }).where(eq(seelieChats.id, chatId));
+  await routineAutoApprove(chatId, on);
   setLiveAutoApprove(chatId, on);
 }
 

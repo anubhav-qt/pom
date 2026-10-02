@@ -48,9 +48,19 @@ it takes, its thinking and each tool's result. It asks before it changes anythin
 **Researches**
 - Searches the web with Google grounding, reads pages, and searches and watches YouTube.
 
+**Runs routines**
+- A routine is a message Seelie gets on a schedule (every few hours, daily, chosen weekdays or a day of the month, India time) and answers in the routine's own chat. Make them in Routines on Seelie's screen, or ask in a chat ("every Monday at 9, send me the ads report").
+- Ad spend, posts, marketplace and paribelle.in changes still wait for you; each routine can auto-approve changes to the OMS. A note anywhere in the OMS says when a routine ran, and whenever one waits for your approval.
+- A routine's chat compacts itself when it passes 60% of the model's context: older runs are summed up for Seelie, the last three stay word for word, and you still see everything.
+
+**Remembers what you ask**
+- Say "remember…", "from now on…" or "don't forget…" and Seelie keeps it, in every chat, until you delete it. Each person's memories are their own.
+- See, edit, add and delete them under Memories in Seelie's settings, or say "forget that" in a chat (it asks first).
+
 **How it works**
 - Reading never asks. Changes ask with Approve / Deny, unless you turn on auto-approve for a chat. Marketplace, paribelle.in, Instagram, ad spend and other paid changes always ask.
 - Models come from your own subscriptions (Google Antigravity, ChatGPT Codex or Claude) through [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). The composer has a model and thinking-level picker, and settings show each account's 5-hour and weekly limits.
+- Parts of a request that don't need each other go to up to 4 helpers that work at the same time. Each helper has Seelie's tools and runs on Gemini 3.8 Flash when Antigravity serves it, at a thinking level Seelie picks for its job. Each helper shows as a card with its steps and its answer, and its changes ask like any other.
 - Chats are saved and Seelie names them. The composer shows how much of the model's context the chat uses. A reply keeps running when you close the tab and picks up where it was when you come back.
 - Seelie runs on the ThinkPad, next to CLIProxyAPI. On the Vercel fallback it shows offline.
 

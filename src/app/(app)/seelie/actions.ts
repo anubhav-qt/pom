@@ -18,6 +18,19 @@ import { seelieConfig } from "@/lib/seelie/config";
 import { adsContext, capRoom } from "@/lib/seelie/ads";
 import { chooseMeta, connectMeta, disconnectMeta, metaStatus, refreshMeta, type MetaStatus } from "@/lib/seelie/meta";
 import { getLimits, type AccountLimits } from "@/lib/seelie/limits";
+import { addMemory, deleteMemories, listMemories, updateMemory, type MemoryView } from "@/lib/seelie/memories";
+import {
+  deleteRoutine,
+  listRoutines,
+  markRoutinesSeen,
+  routineNotes,
+  runRoutineNow,
+  saveRoutine,
+  setRoutineEnabled,
+  type RoutineInput,
+  type RoutineNotes,
+  type RoutineView,
+} from "@/lib/seelie/routines";
 import { signInStore, signOutStore, storeStatus, type StoreStatus } from "@/lib/seelie/store";
 import { imageBudget, imageReset, type ImageBudget, type ImageReset } from "@/lib/seelie/studio/budget";
 import type { ChatSummary, ChatView } from "@/lib/seelie/types";
@@ -111,6 +124,67 @@ export async function imageResetAction(): Promise<ImageReset | null> {
   const user = await requireUser();
   if (!seelieConfig()) return null;
   return imageReset(user.id);
+}
+
+/* Routines ---------------------------------------------------------------- */
+
+export async function routinesAction(): Promise<Result<RoutineView[]>> {
+  const user = await requireUser();
+  return attempt(() => listRoutines(user));
+}
+
+export async function saveRoutineAction(input: RoutineInput & { id?: number | null }): Promise<Result<RoutineView>> {
+  const user = await requireUser();
+  return attempt(() => saveRoutine(user, input));
+}
+
+export async function routineEnabledAction(id: number, enabled: boolean): Promise<Result<null>> {
+  const user = await requireUser();
+  return attempt(async () => (await setRoutineEnabled(user, id, enabled), null));
+}
+
+export async function deleteRoutineAction(id: number): Promise<Result<null>> {
+  const user = await requireUser();
+  return attempt(async () => (await deleteRoutine(user, id), null));
+}
+
+export async function runRoutineAction(id: number): Promise<Result<{ chatId: string; runId: string }>> {
+  const user = await requireUser();
+  return attempt(() => runRoutineNow(user, id));
+}
+
+/** For the OMS-wide notes (a routine ran, or waits on an approval); null when Seelie isn't set up here. */
+export async function routineNotesAction(): Promise<RoutineNotes | null> {
+  const user = await requireUser();
+  if (!seelieConfig()) return null;
+  return routineNotes(user);
+}
+
+export async function routineSeenAction(routineId: number): Promise<void> {
+  const user = await requireUser();
+  await markRoutinesSeen(user, { routineId });
+}
+
+/* Memories ---------------------------------------------------------------- */
+
+export async function memoriesAction(): Promise<Result<MemoryView[]>> {
+  const user = await requireUser();
+  return attempt(() => listMemories(user));
+}
+
+export async function addMemoryAction(text: string): Promise<Result<MemoryView>> {
+  const user = await requireUser();
+  return attempt(async () => (await addMemory(user, text)).memory);
+}
+
+export async function updateMemoryAction(id: number, text: string): Promise<Result<MemoryView>> {
+  const user = await requireUser();
+  return attempt(() => updateMemory(user, id, text));
+}
+
+export async function deleteMemoryAction(id: number): Promise<Result<null>> {
+  const user = await requireUser();
+  return attempt(async () => (await deleteMemories(user, [id]), null));
 }
 
 /* Model accounts (owner) -------------------------------------------------- */
@@ -211,6 +285,8 @@ export interface MetaMonth {
   spent: number;
   heldByRunning: number;
   room: number;
+  /** Prepaid funds, when the account runs on them (balance null: Meta didn't say). */
+  prepaid: { balance: number | null; low: boolean; topUp: string } | null;
 }
 
 /** This month's ad spend against the cap (null without an ad account). */
@@ -220,7 +296,14 @@ export async function metaMonthAction(): Promise<Result<MetaMonth | null>> {
     const ctx = await adsContext().catch(() => null);
     if (!ctx) return null;
     const room = await capRoom(ctx);
-    return { currency: room.currency, accountStatus: room.accountStatus, spent: room.spentThisMonth, heldByRunning: room.committedTotal, room: room.room };
+    return {
+      currency: room.currency,
+      accountStatus: room.accountStatus,
+      spent: room.spentThisMonth,
+      heldByRunning: room.committedTotal,
+      room: room.room,
+      prepaid: room.prepaid ? { balance: room.prepaid.balance, low: room.fundsLow, topUp: room.prepaid.topUp } : null,
+    };
   });
 }
 

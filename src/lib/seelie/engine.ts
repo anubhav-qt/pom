@@ -5,8 +5,10 @@ import os from "node:os";
 import { Agent, type AgentEvent, type AgentTool, type BeforeToolCallResult } from "@paribelle/pi-agent";
 import {
   streamSimple,
+  type Api,
   type AssistantMessage,
   type ImageContent,
+  type Model,
   type Message,
   type TextContent,
   type ToolResultMessage,
@@ -17,10 +19,12 @@ import {
 import { and, asc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { seelieAssets, seelieChats, seelieMessages, seelieRuns, seelieToolCalls, users, type User } from "@/db/schema";
+import { seelieAssets, seelieChats, seelieMessages, seelieRoutines, seelieRuns, seelieToolCalls, users, type User } from "@/db/schema";
 
 import { effectiveThinking, getCatalog, resolveModel } from "./catalog";
 import { DEFAULT_THINKING, requireSeelieConfig } from "./config";
+import { summarySection } from "./compact";
+import { HELPER_MAX_CALLS, helperModel, helperSection, helpersReport, helpersSection, helpersTool, type HelperJob } from "./helpers";
 import { assetSummary } from "./media/files";
 import { hydrateVideos } from "./media/watch";
 import { nameChat, provisionalTitle } from "./naming";
@@ -32,6 +36,7 @@ import {
   ALWAYS_ASK,
   type Approval,
   type ChatMessage,
+  type HelperState,
   type RunInfo,
   type RunStatus,
   type StartRunInput,
@@ -97,7 +102,21 @@ interface LiveRun {
   canWatch: boolean;
   /** A new chat being named: the title it shows now and the first naming under way. */
   naming: { title: string; message: string; attachments: string | null; first: Promise<string | null> } | null;
+  /** What helpers start from: Seelie's system prompt (without this run's own parts), its tools, and the model to fall back on. */
+  basePrompt: string;
+  seelieTools: SeelieTool[];
+  toolMap: Map<string, SeelieTool>;
+  model: Model<Api>;
 }
+
+/** A helper's place: the helpers call that started it, and which helper it is there. */
+interface Scope {
+  parent: string;
+  helper: number;
+}
+
+/** A helper's calls get ids of their own: models number calls per reply, so two helpers can name theirs alike. */
+const scopedId = (scope: Scope | undefined, callId: string) => (scope ? `${scope.parent}~${scope.helper}~${callId}` : callId);
 
 const registry: Map<string, LiveRun> = ((globalThis as { __seelieRuns?: Map<string, LiveRun> }).__seelieRuns ??= new Map());
 
@@ -149,6 +168,8 @@ export function toolRowFrom(
     decidedAt: iso(row.decidedAt),
     startedAt: iso(row.startedAt),
     endedAt: iso(row.endedAt),
+    ...(row.parentCallId ? { parent: row.parentCallId, helper: row.helper, result: (row.result as ToolResultMessage | null) ?? null } : {}),
+    ...(row.helpers ? { helpers: row.helpers as HelperState[] } : {}),
   };
 }
 
@@ -194,6 +215,8 @@ async function saveTool(run: LiveRun, row: ToolRow, extra: { decidedBy?: number 
       decidedAt: row.decidedAt ? new Date(row.decidedAt) : null,
       startedAt: row.startedAt ? new Date(row.startedAt) : null,
       endedAt: row.endedAt ? new Date(row.endedAt) : null,
+      ...(row.result !== undefined ? { result: row.result } : {}),
+      ...(row.helpers !== undefined ? { helpers: row.helpers } : {}),
       updatedAt: new Date(),
     })
     .where(and(eq(seelieToolCalls.runId, run.id), eq(seelieToolCalls.callId, row.callId)))
@@ -277,8 +300,16 @@ function anyAwaiting(run: LiveRun) {
   return false;
 }
 
-async function beforeToolCall(run: LiveRun, callId: string, signal?: AbortSignal): Promise<BeforeToolCallResult | undefined> {
-  if (run.tools.size > MAX_TOOL_CALLS) {
+async function beforeToolCall(run: LiveRun, callId: string, signal?: AbortSignal, scope?: Scope): Promise<BeforeToolCallResult | undefined> {
+  let made = 0;
+  for (const r of run.tools.values()) if (scope ? r.parent === scope.parent && r.helper === scope.helper : !r.parent) made++;
+  if (scope && made > HELPER_MAX_CALLS) {
+    return {
+      block: true,
+      reason: `You have made ${HELPER_MAX_CALLS} tool calls, the most a helper may. Answer with what you have and say what's left.`,
+    };
+  }
+  if (!scope && made > MAX_TOOL_CALLS) {
     return {
       block: true,
       reason: `This reply has already made ${MAX_TOOL_CALLS} tool calls, the most one reply may. Answer with what you have and say what's left; the user can ask you to carry on.`,
@@ -327,7 +358,7 @@ function chatImages(run: LiveRun): ImageContent[] {
   return images;
 }
 
-function agentTool(run: LiveRun, tool: SeelieTool): AgentTool {
+function agentTool(run: LiveRun, tool: SeelieTool, scope?: Scope): AgentTool {
   const sequential = tool.kind !== "read";
   return {
     name: tool.name,
@@ -335,7 +366,8 @@ function agentTool(run: LiveRun, tool: SeelieTool): AgentTool {
     description: tool.description,
     parameters: tool.parameters,
     ...(sequential ? { executionMode: "sequential" as const } : {}),
-    execute: async (toolCallId, params, signal, onUpdate) => {
+    execute: async (modelCallId, params, signal, onUpdate) => {
+      const toolCallId = scopedId(scope, modelCallId);
       const row = run.tools.get(toolCallId);
       if (row) {
         const next: ToolRow = {
@@ -383,7 +415,7 @@ function agentTool(run: LiveRun, tool: SeelieTool): AgentTool {
 }
 
 /** Tool rows for every call in a finished assistant message, so every card shows at once. */
-async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: Map<string, SeelieTool>) {
+async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: Map<string, SeelieTool>, scope?: Scope) {
   const calls = message.content.filter((c) => c.type === "toolCall");
   if (calls.length === 0) return;
   const rows: ToolRow[] = [];
@@ -398,7 +430,7 @@ async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: M
         kind = typeof tool.kind === "string" ? tool.kind : "write";
       }
       try {
-        summary = (await tool.summary(call.arguments as never)) || null;
+        summary = (await tool.summary(call.arguments as never, { user: run.user })) || null;
       } catch {
         // Arguments it can't summarise: the card shows them as they are.
       }
@@ -406,7 +438,7 @@ async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: M
     const asks = needsApproval(kind, run.autoApprove);
     rows.push({
       runId: run.id,
-      callId: call.id,
+      callId: scopedId(scope, call.id),
       tool: call.name,
       label: tool?.label ?? call.name,
       kind,
@@ -418,6 +450,7 @@ async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: M
       decidedAt: null,
       startedAt: null,
       endedAt: null,
+      ...(scope ? { parent: scope.parent, helper: scope.helper } : {}),
     });
   }
   await db
@@ -433,6 +466,8 @@ async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: M
         summary: r.summary,
         status: r.status,
         approval: r.approval,
+        parentCallId: r.parent ?? null,
+        helper: r.helper ?? null,
       })),
     )
     .onConflictDoNothing();
@@ -497,26 +532,29 @@ function onEvent(run: LiveRun, tools: Map<string, SeelieTool>, prompt: UserMessa
         if (message.role === "assistant") await recordToolCalls(run, message, tools);
         return;
       }
-      case "tool_execution_end": {
-        const row = run.tools.get(event.toolCallId);
-        if (!row) return;
-        const now = new Date().toISOString();
-        const status: ToolStatus = row.status === "denied" ? "denied" : event.isError ? "error" : "done";
-        const next: ToolRow = { ...row, status, endedAt: now, startedAt: row.startedAt ?? now, progress: null };
-        run.tools.set(row.callId, next);
-        await saveTool(run, next);
-        return;
-      }
+      case "tool_execution_end":
+        return endTool(run, event.toolCallId, event.isError);
       default:
         return;
     }
   };
 }
 
-function sumUsage(messages: ChatMessage[]): Usage | null {
+async function endTool(run: LiveRun, callId: string, isError: boolean) {
+  const row = run.tools.get(callId);
+  if (!row) return;
+  const now = new Date().toISOString();
+  const status: ToolStatus = row.status === "denied" ? "denied" : isError ? "error" : "done";
+  const next: ToolRow = { ...row, status, endedAt: now, startedAt: row.startedAt ?? now, progress: null };
+  run.tools.set(row.callId, next);
+  await saveTool(run, next);
+}
+
+function sumUsage(messages: Message[]): Usage | null {
   let total: Usage | null = null;
-  for (const { message } of messages) {
-    if (message.role !== "assistant") continue;
+  for (const message of messages) {
+    // A helpers call's result carries what its helpers used.
+    if (message.role !== "assistant" && message.role !== "toolResult") continue;
     const u = message.usage;
     if (!u) continue;
     total ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -565,7 +603,7 @@ async function finish(run: LiveRun, failure?: unknown) {
   run.info = { ...run.info, status, error, endedAt: now };
   await db
     .update(seelieRuns)
-    .set({ status, error, partial: null, endedAt: new Date(now), usage: sumUsage(run.messages), heartbeatAt: new Date() })
+    .set({ status, error, partial: null, endedAt: new Date(now), usage: sumUsage(run.messages.map((m) => m.message)), heartbeatAt: new Date() })
     .where(eq(seelieRuns.id, run.id))
     .catch(() => {});
   await db.update(seelieChats).set({ updatedAt: new Date() }).where(eq(seelieChats.id, run.chatId)).catch(() => {});
@@ -655,6 +693,137 @@ function startTimers(run: LiveRun) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** The helpers tool as the reply's agent runs it. */
+function helpersAgentTool(run: LiveRun): AgentTool {
+  return {
+    name: helpersTool.name,
+    label: helpersTool.label,
+    description: helpersTool.description,
+    parameters: helpersTool.parameters,
+    execute: async (toolCallId, params, signal) => {
+      const row = run.tools.get(toolCallId);
+      if (row) {
+        const next: ToolRow = { ...row, status: "running", startedAt: new Date().toISOString(), progress: null };
+        run.tools.set(toolCallId, next);
+        await saveTool(run, next);
+      }
+      return runHelpers(run, toolCallId, (params as { jobs: HelperJob[] }).jobs, signal ?? new AbortController().signal);
+    },
+  };
+}
+
+/** Run every job at once, each as a helper; the reply reads back their answers. */
+async function runHelpers(run: LiveRun, callId: string, jobs: HelperJob[], signal: AbortSignal) {
+  const picked = await Promise.all(jobs.map((job) => helperModel(job.thinking, run.model)));
+  const states: HelperState[] = jobs.map((job, i) => ({
+    title: job.title,
+    model: picked[i].model.name,
+    thinking: picked[i].thinking,
+    status: "working",
+    answer: null,
+  }));
+  const publish = async () => {
+    const row = run.tools.get(callId);
+    if (!row) return;
+    const done = states.filter((h) => h.status !== "working").length;
+    const next: ToolRow = { ...row, helpers: states.map((h) => ({ ...h })), progress: done ? `${done} of ${states.length} done` : null };
+    run.tools.set(callId, next);
+    await saveTool(run, next);
+  };
+  await publish();
+
+  const used: Message[] = [];
+  await Promise.all(
+    jobs.map(async (job, i) => {
+      const out = await runHelper(run, { parent: callId, helper: i }, job, jobs.length, picked[i], signal).catch((err: unknown) => {
+        console.error("[seelie] helper failed", err);
+        return { status: "error" as const, answer: `It failed: ${err instanceof Error ? err.message : String(err)}`, messages: [] as Message[] };
+      });
+      states[i] = { ...states[i], status: out.status, answer: out.answer };
+      used.push(...out.messages);
+      await publish();
+    }),
+  );
+
+  const content: TextContent[] = [{ type: "text", text: capText(helpersReport(states)) }];
+  return {
+    content,
+    details: { helpers: states },
+    usage: sumUsage(used) ?? undefined,
+    isError: states.every((h) => h.status === "error"),
+  };
+}
+
+/** One helper: its own agent with Seelie's tools (not helpers), its steps shown under the helpers call. */
+async function runHelper(
+  run: LiveRun,
+  scope: Scope,
+  job: HelperJob,
+  total: number,
+  pick: { model: Model<Api>; thinking: string },
+  signal: AbortSignal,
+): Promise<{ status: HelperState["status"]; answer: string | null; messages: Message[] }> {
+  if (signal.aborted) return { status: "stopped", answer: null, messages: [] };
+  const config = requireSeelieConfig();
+  const agent = new Agent({
+    initialState: {
+      systemPrompt: [run.basePrompt, helperSection(job, scope.helper, total)].join("\n\n"),
+      model: pick.model,
+      thinkingLevel: pick.thinking as never,
+      tools: run.seelieTools.map((t) => agentTool(run, t, scope)),
+      messages: [],
+    },
+    streamFn: streamSimple,
+    getApiKey: () => config.apiKey,
+    sessionId: `${run.chatId}:${scope.parent}:${scope.helper}`,
+    toolExecution: "parallel",
+    beforeToolCall: (ctx, s) => beforeToolCall(run, scopedId(scope, ctx.toolCall.id), s, scope),
+    transformContext: (messages) => hydrateVideos(messages, run.watchCache),
+  });
+  agent.subscribe(async (event) => {
+    if (event.type === "message_end") {
+      const message = event.message as Message;
+      if (message.role === "assistant") await recordToolCalls(run, message, run.toolMap, scope);
+      if (message.role === "toolResult") {
+        // Its result stays on its row: a helper's messages aren't part of the chat.
+        const id = scopedId(scope, message.toolCallId);
+        const row = run.tools.get(id);
+        if (row) {
+          const next: ToolRow = { ...row, result: { ...message, content: message.content.filter((c) => c.type === "text") } };
+          run.tools.set(id, next);
+          await saveTool(run, next);
+        }
+      }
+    } else if (event.type === "tool_execution_end") {
+      await endTool(run, scopedId(scope, event.toolCallId), event.isError);
+    }
+  });
+
+  const stop = () => agent.abort();
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    await agent.prompt({ role: "user", content: [{ type: "text", text: job.task }], timestamp: Date.now() });
+  } finally {
+    signal.removeEventListener("abort", stop);
+  }
+
+  const messages = agent.state.messages as Message[];
+  const last = [...messages].reverse().find((m): m is AssistantMessage => m.role === "assistant");
+  const text =
+    last?.content
+      .filter((c): c is TextContent => c.type === "text")
+      .map((c) => c.text)
+      .join("\n")
+      .trim() || null;
+  if (signal.aborted || last?.stopReason === "aborted") return { status: "stopped", answer: text, messages };
+  if (!last || last.stopReason === "error") return { status: "error", answer: text ?? last?.errorMessage ?? "The model answered with an error.", messages };
+  return { status: "done", answer: text, messages };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Starting a run                                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -680,6 +849,16 @@ export async function reapStaleRuns(chatId: string) {
     .update(seelieToolCalls)
     .set({ status: "error", endedAt: new Date(), updatedAt: new Date() })
     .where(and(inArray(seelieToolCalls.runId, ids), inArray(seelieToolCalls.status, ["awaiting", "queued", "running"])));
+}
+
+/** What Seelie is told when a routine sends the message instead of the owner. */
+function routineSection(r: NonNullable<StartRunInput["routine"]>) {
+  return [
+    `This message is the routine "${r.name}" (${r.schedule}, India time), ${r.manual ? "started by hand from the routines list" : "sent on its schedule"}; nobody is watching as you reply, and earlier runs of it are above in this chat.`,
+    "- Do the job and report it the way the owner would want to read it later: lead with what matters or changed since the last run, with the numbers.",
+    "- Changes that ask (and, unless this routine auto-approves, changes to the OMS) wait as approval cards until the owner opens the chat; make the call anyway, don't hold the report back for it, and say in the reply what's waiting.",
+    "- If something stops the job (a tool failing, a missing connection), say so plainly so the owner can fix it before the next run.",
+  ].join("\n");
 }
 
 export interface StartedRun {
@@ -708,11 +887,14 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
   let chatId = input.chatId ?? null;
   let autoApprove = false;
   let isNew = false;
+  // A compacted chat (compact.ts): Seelie reads the summary in place of the messages up to `through`.
+  let compacted: { summary: string; through: number } | null = null;
   if (chatId) {
     const [chat] = await db.select().from(seelieChats).where(eq(seelieChats.id, chatId)).limit(1);
     if (!chat || chat.userId !== user.id) throw new SeelieRunError("That chat doesn't exist.", 404);
     autoApprove = chat.autoApprove;
     isNew = !chat.title;
+    if (chat.summary && chat.summaryThrough !== null) compacted = { summary: chat.summary, through: chat.summaryThrough };
     await reapStaleRuns(chatId);
     const [active] = await db
       .select({ id: seelieRuns.id })
@@ -753,6 +935,8 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
     .orderBy(asc(seelieMessages.seq));
   const history = historyRows.map((r) => r.message as Message);
   const nextSeq = (historyRows.at(-1)?.seq ?? 0) + 1;
+  const keepAfter = compacted?.through ?? 0;
+  const modelHistory = historyRows.filter((r) => r.seq > keepAfter).map((r) => r.message as Message);
 
   const prompt: UserMessage = {
     role: "user",
@@ -770,7 +954,8 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
   };
 
   const seelieTools = toolsFor(user);
-  const toolMap = new Map(seelieTools.map((t) => [t.name, t]));
+  const toolMap = new Map<string, SeelieTool>([...seelieTools, helpersTool as unknown as SeelieTool].map((t) => [t.name, t]));
+  const basePrompt = await buildSystemPrompt(user, seelieTools);
 
   const run: LiveRun = {
     id: runRow.id,
@@ -794,15 +979,28 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
     watchCache: new Map(),
     canWatch: model.input.includes("video"),
     naming: null,
+    basePrompt,
+    seelieTools,
+    toolMap,
+    model,
   };
+
+  const systemPrompt = [
+    basePrompt,
+    helpersSection(),
+    input.routine ? routineSection(input.routine) : "",
+    compacted ? summarySection(compacted.summary) : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   run.agent = new Agent({
     initialState: {
-      systemPrompt: await buildSystemPrompt(user, seelieTools),
+      systemPrompt,
       model,
       thinkingLevel: thinking,
-      tools: seelieTools.map((t) => agentTool(run, t)),
-      messages: history,
+      tools: [...seelieTools.map((t) => agentTool(run, t)), helpersAgentTool(run)],
+      messages: modelHistory,
     },
     streamFn: streamSimple,
     getApiKey: () => config.apiKey,
@@ -924,6 +1122,8 @@ export async function decideToolCall(
 
   if (input.approve && input.alwaysThisChat) {
     await db.update(seelieChats).set({ autoApprove: true }).where(eq(seelieChats.id, runRow.chatId));
+    // A routine's switch is its chat's.
+    await db.update(seelieRoutines).set({ autoApprove: true }).where(eq(seelieRoutines.chatId, runRow.chatId));
     const others = await db
       .update(seelieToolCalls)
       .set({ approval: "approved", status: "queued", decidedBy: user.id, decidedAt: now, updatedAt: now })
