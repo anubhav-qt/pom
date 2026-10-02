@@ -36,16 +36,22 @@ it takes, its thinking and each tool's result. It asks before it changes anythin
 - Plans around the image model's limit (about 9 images per 5 hours per account), which settings show as a bar.
 
 **Publishes**
-- Videos to a paribelle.in product's gallery or to Instagram as a reel.
+- Videos to a paribelle.in product's gallery.
 - Photos to paribelle.in, the OMS catalogue or Amazon's image slots. The main slot only takes a real photo on pure white.
+- Instagram posts on Paribelle's account: reels, photos, carousels and stories, captions written in the brand's voice. Every post asks.
+
+**Runs Meta ads**
+- Reads what posts and ads reach, then suggests an ad: promote a post, a reel or a photo, for traffic to paribelle.in, engagement, video views or reach.
+- Every new ad, restart or bigger budget asks, and must fit under the monthly cap set in settings. Seelie may pause an ad or lower its budget on its own.
+- Ads are built paused and switched on last, with an end date. One Meta system-user token, pasted in settings, covers posting and ads.
 
 **Researches**
 - Searches the web with Google grounding, reads pages, and searches and watches YouTube.
 
 **How it works**
-- Reading never asks. Changes ask with Approve / Deny, unless you turn on auto-approve for a chat. Marketplace, paribelle.in, publishing and paid changes always ask.
+- Reading never asks. Changes ask with Approve / Deny, unless you turn on auto-approve for a chat. Marketplace, paribelle.in, Instagram, ad spend and other paid changes always ask.
 - Models come from your own subscriptions (Google Antigravity, ChatGPT Codex or Claude) through [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). The composer has a model and thinking-level picker, and settings show each account's 5-hour and weekly limits.
-- Chats are saved. A reply keeps running when you close the tab and picks up where it was when you come back.
+- Chats are saved and Seelie names them. The composer shows how much of the model's context the chat uses. A reply keeps running when you close the tab and picks up where it was when you come back.
 - Seelie runs on the ThinkPad, next to CLIProxyAPI. On the Vercel fallback it shows offline.
 
 ## The rest of POM

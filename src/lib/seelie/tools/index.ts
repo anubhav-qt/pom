@@ -3,7 +3,9 @@ import "server-only";
 import type { User } from "@/db/schema";
 
 import { amazonApi, amazonListings, catalogueLink, inventoryTool, productsTool, productUpdate, pushStock, restockPlan } from "./catalogue";
+import { adsCreate, adsManage, adsReport } from "./ads";
 import { viewImages } from "./images";
+import { instagram, instagramPost } from "./instagram";
 import { finance, orderNotes } from "./money";
 import { cancellations, findOrders, fulfilment, orderDetails, ordersOverview, scanLookup } from "./orders";
 import { imageSpecs, photoEdit } from "./photo";
@@ -78,6 +80,12 @@ const ALL = [
   photoEdit,
   imageSpecs,
   photoPublish,
+  // Instagram and Meta ads (the Meta connection in Seelie's settings)
+  instagram,
+  instagramPost,
+  adsReport,
+  adsCreate,
+  adsManage,
   // The web
   webSearch,
   fetchUrl,

@@ -23,6 +23,7 @@ import { effectiveThinking, getCatalog, resolveModel } from "./catalog";
 import { DEFAULT_THINKING, requireSeelieConfig } from "./config";
 import { assetSummary } from "./media/files";
 import { hydrateVideos } from "./media/watch";
+import { nameChat, provisionalTitle } from "./naming";
 import { buildSystemPrompt } from "./prompt";
 import { toolsFor } from "./tools";
 import { kindOf, ToolError, type SeelieTool, type ToolContext } from "./tools/types";
@@ -60,6 +61,8 @@ const CONTROL_MS = 1_000;
 const TOOL_TEXT_MAX = 60_000;
 /** The most tool calls one reply may make; past it, calls are refused and the model wraps up. */
 const MAX_TOOL_CALLS = 80;
+/** How long a reply's end waits for the chat's name. */
+const NAMING_WAIT_MS = 6_000;
 /** How long a finished run stays in memory for followers that arrive late. */
 const LINGER_MS = 60_000;
 
@@ -92,6 +95,8 @@ interface LiveRun {
   watchCache: Map<string, string>;
   /** The model takes video and sound. */
   canWatch: boolean;
+  /** A new chat being named: the title it shows now and the first naming under way. */
+  naming: { title: string; message: string; attachments: string | null; first: Promise<string | null> } | null;
 }
 
 const registry: Map<string, LiveRun> = ((globalThis as { __seelieRuns?: Map<string, LiveRun> }).__seelieRuns ??= new Map());
@@ -565,11 +570,30 @@ async function finish(run: LiveRun, failure?: unknown) {
     .catch(() => {});
   await db.update(seelieChats).set({ updatedAt: new Date() }).where(eq(seelieChats.id, run.chatId)).catch(() => {});
 
+  // The name is usually there long before; a slow one lands in the database and the chat list picks it up.
+  await Promise.race([renameFromReply(run, last), new Promise((r) => setTimeout(r, NAMING_WAIT_MS))]);
+
   emit(run, { t: "end", status, error });
   run.listeners.clear();
   setTimeout(() => {
     if (registry.get(run.id) === run) registry.delete(run.id);
   }, LINGER_MS).unref?.();
+}
+
+/** A new chat its first message couldn't name ("hi") is named from the reply. */
+async function renameFromReply(run: LiveRun, last: AssistantMessage | undefined) {
+  const naming = run.naming;
+  if (!naming) return;
+  run.naming = null;
+  if (await naming.first) return;
+  const reply = last?.content
+    .filter((c) => c.type === "text")
+    .map((c) => c.text)
+    .join("\n")
+    .trim();
+  if (!reply) return;
+  const title = await nameChat(run.chatId, naming.title, { message: naming.message, attachments: naming.attachments, reply });
+  if (title) emit(run, { t: "title", title });
 }
 
 /** Mirror the reply being written, keep the heartbeat, and pick up what other processes decided. */
@@ -656,12 +680,6 @@ export async function reapStaleRuns(chatId: string) {
     .update(seelieToolCalls)
     .set({ status: "error", endedAt: new Date(), updatedAt: new Date() })
     .where(and(inArray(seelieToolCalls.runId, ids), inArray(seelieToolCalls.status, ["awaiting", "queued", "running"])));
-}
-
-function titleFrom(text: string, fallback: string) {
-  const line = text.replace(/\s+/g, " ").trim();
-  if (!line) return fallback;
-  return line.length > 60 ? `${line.slice(0, 57).trimEnd()}…` : line;
 }
 
 export interface StartedRun {
@@ -775,6 +793,7 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
     lastToolSnapshot: 0,
     watchCache: new Map(),
     canWatch: model.input.includes("video"),
+    naming: null,
   };
 
   run.agent = new Agent({
@@ -798,7 +817,7 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
 
   // The message first, so the screen has it before anything streams.
   const entry = await saveMessage(run, prompt);
-  const title = titleFrom(text, images.length ? "Photos" : "Clips");
+  const title = provisionalTitle(text, images.length ? "Photos" : "Clips");
   await db
     .update(seelieChats)
     .set({
@@ -808,7 +827,25 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
       ...(isNew ? { title } : {}),
     })
     .where(eq(seelieChats.id, chatId));
-  if (isNew) queueMicrotask(() => emit(run, { t: "title", title }));
+  if (isNew) {
+    queueMicrotask(() => emit(run, { t: "title", title }));
+    // Seelie names the chat while it replies; the start of the message stands in meanwhile.
+    const attachments =
+      [
+        images.length ? `${images.length} photo${images.length > 1 ? "s" : ""}` : null,
+        ...assets.map((a) => `a ${a.kind === "audio" ? "sound" : a.kind} "${a.name}"`),
+      ]
+        .filter(Boolean)
+        .join(", ") || null;
+    const naming = { title, message: text, attachments };
+    run.naming = {
+      ...naming,
+      first: nameChat(chatId, title, naming).then((named) => {
+        if (named) emit(run, { t: "title", title: named });
+        return named;
+      }),
+    };
+  }
   void entry;
 
   startTimers(run);

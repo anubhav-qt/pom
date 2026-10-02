@@ -15,7 +15,8 @@ import {
   type LoginStatus,
 } from "@/lib/seelie/cliproxy";
 import { seelieConfig } from "@/lib/seelie/config";
-import { connectInstagram, disconnectInstagram, instagramStatus, type InstagramStatus } from "@/lib/seelie/instagram";
+import { adsContext, capRoom } from "@/lib/seelie/ads";
+import { chooseMeta, connectMeta, disconnectMeta, metaStatus, refreshMeta, type MetaStatus } from "@/lib/seelie/meta";
 import { getLimits, type AccountLimits } from "@/lib/seelie/limits";
 import { signInStore, signOutStore, storeStatus, type StoreStatus } from "@/lib/seelie/store";
 import { imageBudget, imageReset, type ImageBudget, type ImageReset } from "@/lib/seelie/studio/budget";
@@ -181,22 +182,52 @@ export async function storeSignOutAction(): Promise<Result<StoreStatus>> {
   });
 }
 
-/* Instagram (owner) ------------------------------------------------------- */
+/* Meta: Instagram and ads (owner) ----------------------------------------- */
 
-export async function instagramStatusAction(): Promise<Result<InstagramStatus>> {
+export async function metaStatusAction(): Promise<Result<MetaStatus>> {
   await requireOwner();
-  return attempt(() => instagramStatus());
+  return attempt(() => metaStatus());
 }
 
-export async function instagramConnectAction(token: string): Promise<Result<InstagramStatus>> {
+export async function metaConnectAction(token: string): Promise<Result<MetaStatus>> {
   const user = await requireOwner();
-  return attempt(() => connectInstagram(user, token));
+  return attempt(() => connectMeta(user, token));
 }
 
-export async function instagramDisconnectAction(): Promise<Result<InstagramStatus>> {
+/** Look again for Pages and ad accounts the system user was given. */
+export async function metaRefreshAction(): Promise<Result<MetaStatus>> {
+  const user = await requireOwner();
+  return attempt(() => refreshMeta(user));
+}
+
+export async function metaChooseAction(input: { pageId?: string; adAccountId?: string; monthlyCap?: number | null }): Promise<Result<MetaStatus>> {
+  const user = await requireOwner();
+  return attempt(() => chooseMeta(user, input));
+}
+
+export interface MetaMonth {
+  currency: string;
+  accountStatus: string;
+  spent: number;
+  heldByRunning: number;
+  room: number;
+}
+
+/** This month's ad spend against the cap (null without an ad account). */
+export async function metaMonthAction(): Promise<Result<MetaMonth | null>> {
   await requireOwner();
   return attempt(async () => {
-    await disconnectInstagram();
-    return instagramStatus();
+    const ctx = await adsContext().catch(() => null);
+    if (!ctx) return null;
+    const room = await capRoom(ctx);
+    return { currency: room.currency, accountStatus: room.accountStatus, spent: room.spentThisMonth, heldByRunning: room.committedTotal, room: room.room };
+  });
+}
+
+export async function metaDisconnectAction(): Promise<Result<MetaStatus>> {
+  await requireOwner();
+  return attempt(async () => {
+    await disconnectMeta();
+    return metaStatus();
   });
 }

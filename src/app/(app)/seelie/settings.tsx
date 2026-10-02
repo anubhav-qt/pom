@@ -6,8 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/modal";
 import { Toggle } from "@/components/toggle";
 import { CenteredSpinner, Spinner } from "@/components/ui";
-import type { InstagramStatus } from "@/lib/seelie/instagram";
 import type { AccountLimits, LimitWindow } from "@/lib/seelie/limits";
+import type { MetaStatus } from "@/lib/seelie/meta";
 import type { StoreStatus } from "@/lib/seelie/store";
 import type { ImageBudget } from "@/lib/seelie/studio/budget";
 import { useSeelie } from "@/lib/stores/seelie-store";
@@ -17,10 +17,14 @@ import {
   cancelLoginAction,
   finishLoginAction,
   imageBudgetAction,
-  instagramConnectAction,
-  instagramDisconnectAction,
-  instagramStatusAction,
   loginStatusAction,
+  metaChooseAction,
+  metaConnectAction,
+  metaDisconnectAction,
+  metaMonthAction,
+  metaRefreshAction,
+  metaStatusAction,
+  type MetaMonth,
   removeAccountAction,
   startLoginAction,
   storeSignInAction,
@@ -53,7 +57,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         {online ? <Accounts owner={owner} /> : null}
         {online ? <ImageGeneration /> : null}
         {owner ? <Store /> : null}
-        {owner ? <Instagram /> : null}
+        {owner ? <Meta /> : null}
       </div>
     </Modal>
   );
@@ -479,94 +483,233 @@ function Store() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Instagram                                                                  */
+/* Meta: Instagram and ads                                                    */
 /* -------------------------------------------------------------------------- */
 
-const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+const META_STEPS = [
+  "In Meta Business Settings (business.facebook.com/settings), add the Paribelle Page and its Instagram account to the business.",
+  "Create an app at developers.facebook.com (type Business) and add it to the business.",
+  "Business Settings → Users → System users: add an admin system user and assign it the Page, the Instagram account and (once there is one) the ad account, with full control.",
+  "Generate token on the system user for that app, expiry Never, with: business_management, pages_show_list, pages_read_engagement, instagram_basic, instagram_content_publish, instagram_manage_insights, ads_management, ads_read.",
+];
 
-function Instagram() {
-  const [status, setStatus] = useState<InstagramStatus | null>(null);
+const formatMoney = (n: number, currency: string) => {
+  try {
+    return new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
+  } catch {
+    return `${Math.round(n)} ${currency}`;
+  }
+};
+
+type MetaResult = { ok: true; data: MetaStatus } | { ok: false; error: string };
+
+function Meta() {
+  const [status, setStatus] = useState<MetaStatus | null>(null);
+  const [month, setMonth] = useState<MetaMonth | null>(null);
   const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [cap, setCap] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  function show(next: MetaStatus) {
+    setStatus(next);
+    setCap(next.monthlyCap === null ? "" : String(next.monthlyCap));
+    if (next.connected && next.adAccount) void metaMonthAction().then((res) => setMonth(res.ok ? res.data : null));
+    else setMonth(null);
+  }
+
   useEffect(() => {
-    void instagramStatusAction().then((res) => (res.ok ? setStatus(res.data) : setError(res.error)));
+    void metaStatusAction().then((res) => (res.ok ? show(res.data) : setError(res.error)));
   }, []);
+
+  async function run(what: string, action: () => Promise<MetaResult>) {
+    setBusy(what);
+    setError(null);
+    const res = await action();
+    setBusy(null);
+    if (res.ok) show(res.data);
+    else setError(res.error);
+    return res.ok;
+  }
 
   async function connect(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true);
-    setError(null);
-    const res = await instagramConnectAction(token);
-    setBusy(false);
-    if (res.ok) {
-      setToken("");
-      setStatus(res.data);
-    } else setError(res.error);
+    if (await run("connect", () => metaConnectAction(token))) setToken("");
   }
 
-  async function disconnect() {
-    setBusy(true);
-    setError(null);
-    const res = await instagramDisconnectAction();
-    setBusy(false);
-    if (res.ok) setStatus(res.data);
-    else setError(res.error);
-  }
+  const currency = status?.adAccount?.currency ?? "INR";
+  const capValue = cap.trim() === "" ? null : Number(cap);
+  const capValid = capValue === null || (Number.isFinite(capValue) && capValue >= 0);
+  const capChanged = !!status && capValue !== status.monthlyCap;
 
   return (
     <section>
-      <Heading>Instagram</Heading>
+      <Heading
+        action={
+          status?.connected ? (
+            <button
+              type="button"
+              className="nav-icon-btn h-7 w-7"
+              title="Look again for Pages and ad accounts"
+              aria-label="Look again for Pages and ad accounts"
+              disabled={busy !== null}
+              onClick={() => void run("refresh", metaRefreshAction)}
+            >
+              {busy === "refresh" ? <Spinner size="0.9rem" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            </button>
+          ) : undefined
+        }
+      >
+        Meta: Instagram and ads
+      </Heading>
       {!status && !error ? <CenteredSpinner className="py-6" /> : null}
+
       {status?.connected ? (
-        <div className="surface-2 flex flex-wrap items-center gap-3 p-3.5">
-          <div className="min-w-0 flex-1 text-sm">
-            <p className="font-medium">Posting as @{status.username}</p>
-            <p className="muted text-xs">
-              {status.accountType === "MEDIA_CREATOR" ? "Creator account" : status.accountType === "BUSINESS" ? "Business account" : "Professional account"}
-              {status.expiresAt ? ` · token renews by itself, good till ${shortDate(status.expiresAt)}` : " · token renews by itself"}
-            </p>
+        <div className="space-y-3">
+          <div className="surface-2 flex flex-wrap items-center gap-3 p-3.5">
+            <div className="min-w-0 flex-1 text-sm">
+              <p className="font-medium">{status.page?.instagram ? `Posting as @${status.page.instagram.username}` : "No Instagram account linked"}</p>
+              <p className="muted text-xs">
+                {status.page ? `Page: ${status.page.name}` : "No Page chosen"}
+                {status.systemUser ? ` · token of ${status.systemUser}` : ""}
+              </p>
+            </div>
+            <button type="button" className="btn btn-white text-[13px]" disabled={busy !== null} onClick={() => void run("disconnect", metaDisconnectAction)}>
+              {busy === "disconnect" ? <Spinner size="1rem" /> : null}
+              Disconnect
+            </button>
           </div>
-          <button type="button" className="btn btn-white text-[13px]" disabled={busy} onClick={() => void disconnect()}>
-            {busy ? <Spinner size="1rem" /> : null}
-            Disconnect
-          </button>
+
+          {status.missingPermissions.length ? (
+            <Notice tone="warn">The token lacks {status.missingPermissions.join(", ")}. Generate a new one with them, disconnect and paste it.</Notice>
+          ) : null}
+
+          {status.pages.length > 1 ? (
+            <label className="block text-xs">
+              <span className="muted mb-1 block">Facebook Page</span>
+              <select
+                className="input text-base sm:text-sm"
+                value={status.page?.id ?? ""}
+                disabled={busy !== null}
+                onChange={(e) => void run("page", () => metaChooseAction({ pageId: e.target.value }))}
+              >
+                {status.page ? null : <option value="">Pick a Page</option>}
+                {status.pages.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.instagram ? ` (@${p.instagram.username})` : " (no Instagram)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          {status.adAccounts.length ? (
+            <label className="block text-xs">
+              <span className="muted mb-1 block">Ad account</span>
+              <select
+                className="input text-base sm:text-sm"
+                value={status.adAccount?.id ?? ""}
+                disabled={busy !== null}
+                onChange={(e) => void run("account", () => metaChooseAction({ adAccountId: e.target.value }))}
+              >
+                {status.adAccount ? null : <option value="">Pick an ad account</option>}
+                {status.adAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} · {a.currency}
+                    {a.status === 1 ? "" : " (not active)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <p className="muted text-xs">
+              No ad account yet, so Seelie can post but not run ads. Create one in Business Settings → Accounts → Ad accounts, add a payment method, assign it to the system user,
+              then press the refresh button above.
+            </p>
+          )}
+
+          {status.adAccount ? (
+            <div className="space-y-2">
+              <form
+                className="flex flex-wrap items-end gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (capValid && capChanged) void run("cap", () => metaChooseAction({ monthlyCap: capValue }));
+                }}
+              >
+                <label className="block min-w-0 flex-1 text-xs">
+                  <span className="muted mb-1 block">Monthly ad cap ({currency})</span>
+                  <input
+                    className="input text-base tabular-nums sm:text-sm"
+                    inputMode="numeric"
+                    placeholder="Not set: no ad may spend"
+                    value={cap}
+                    onChange={(e) => setCap(e.target.value.replace(/[^\d.]/g, ""))}
+                  />
+                </label>
+                <button type="submit" className="btn btn-primary" disabled={busy !== null || !capValid || !capChanged}>
+                  {busy === "cap" ? <Spinner size="1rem" color="currentColor" /> : "Save"}
+                </button>
+              </form>
+              {month ? (
+                <p className="muted text-xs tabular-nums">
+                  This month: {formatMoney(month.spent, month.currency)} spent
+                  {month.heldByRunning > 0 ? `, up to ${formatMoney(month.heldByRunning, month.currency)} more by running ads` : ""}
+                  {status.monthlyCap !== null ? ` · ${formatMoney(month.room, month.currency)} left for new ads` : ""}
+                  {month.accountStatus !== "active" ? ` · account ${month.accountStatus}` : ""}
+                </p>
+              ) : null}
+              <p className="muted text-xs">
+                Seelie asks before every ad, restart or bigger budget, and refuses anything that wouldn&apos;t fit under the cap. It may pause an ad or lower its budget on its own.
+              </p>
+            </div>
+          ) : null}
         </div>
       ) : null}
+
       {status && !status.connected ? (
         <form onSubmit={connect} className="space-y-2.5">
-          {status.needsToken ? <Notice tone="warn">Instagram stopped taking the saved token{status.username ? ` for @${status.username}` : ""}. Paste a new one.</Notice> : null}
+          {status.needsToken ? <Notice tone="warn">Meta stopped taking the saved token. Paste a new one.</Notice> : null}
           <p className="muted text-xs">
-            Seelie posts finished videos as reels, and asks you before each one. Paste a long-lived access token for the shop&apos;s Instagram business or creator account (Meta for
-            Developers → your app → Instagram API with Instagram Login → Generate token). It is kept encrypted on this server and renewed by itself.
+            One system-user token lets Seelie post on Instagram (it asks before every post) and run ads within a monthly cap you set. It is kept encrypted on this server and doesn&apos;t
+            expire.
           </p>
+          <ol className="muted list-decimal space-y-1 pl-4 text-xs">
+            {META_STEPS.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
           <input
             className="input text-base sm:text-sm"
             type="password"
             autoComplete="off"
             spellCheck={false}
-            placeholder="Access token"
+            placeholder="System-user access token"
             value={token}
             onChange={(e) => setToken(e.target.value)}
             required
           />
           <div className="flex flex-wrap items-center gap-3">
-            <button type="submit" className="btn btn-primary" disabled={busy || token.trim().length < 40}>
-              {busy ? <Spinner size="1rem" color="currentColor" /> : "Connect"}
+            <button type="submit" className="btn btn-primary" disabled={busy !== null || token.trim().length < 40}>
+              {busy === "connect" ? <Spinner size="1rem" color="currentColor" /> : "Connect"}
             </button>
             <a
               className="muted inline-flex items-center gap-1 text-xs hover:underline"
-              href="https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login"
+              href="https://developers.facebook.com/docs/marketing-api/system-users/"
               target="_blank"
               rel="noreferrer"
             >
-              How to get a token <ExternalLink className="h-3 w-3" />
+              About system users <ExternalLink className="h-3 w-3" />
             </a>
           </div>
         </form>
       ) : null}
-      {error ? <div className="mt-2"><Notice tone="danger">{error}</Notice></div> : null}
+      {error ? (
+        <div className="mt-2">
+          <Notice tone="danger">{error}</Notice>
+        </div>
+      ) : null}
     </section>
   );
 }

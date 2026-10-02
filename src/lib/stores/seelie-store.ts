@@ -333,7 +333,10 @@ export const useSeelie = create<SeelieState>((set, get) => {
 
     async loadChats() {
       const res = await chatsAction();
-      if (res.ok) set({ chats: res.data });
+      if (!res.ok) return;
+      // Seelie may have named the open chat after its reply ended.
+      const open = res.data.find((c) => c.id === get().chatId);
+      set({ chats: res.data, ...(open ? { title: open.title } : {}) });
     },
 
     async openChat(chatId) {

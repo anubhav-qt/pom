@@ -66,6 +66,8 @@ export type Published =
   | {
       to: "instagram";
       version: number;
+      /** How it went up (a reel when missing: the first posts were all reels). */
+      as?: "reel" | "carousel" | "story";
       mediaId: string;
       permalink: string | null;
       caption: string;
