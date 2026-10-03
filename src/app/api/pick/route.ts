@@ -1,24 +1,22 @@
 import { NextResponse } from "next/server";
 
 import { SeelieOfflineError } from "@/lib/seelie/config";
-import { nextStep, PICK_MODES, PickError, type PickMode, type PickRequest, type PickTurn } from "@/lib/pick/engine";
+import { nextStep, PickError, type PickRequest, type PickTurn } from "@/lib/pick/engine";
 import { takeStep, visitorOf } from "@/lib/pick/limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-/** A phone photo, downscaled by the shop before it's sent, fits well under this. */
-const MAX_BODY_BYTES = 6_000_000;
-const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+/** Six turns of short strings come nowhere near this. */
+const MAX_BODY_BYTES = 64_000;
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
 /** The journey as the shopper's browser sent it, cut to sizes no honest one goes past. */
 function parse(body: unknown): PickRequest | string {
-  if (!body || typeof body !== "object") return "Send { mode, turns }.";
+  if (!body || typeof body !== "object") return "Send { turns }.";
   const b = body as Record<string, unknown>;
-  if (!PICK_MODES.includes(b.mode as PickMode)) return `mode is one of ${PICK_MODES.join(", ")}.`;
   if (!Array.isArray(b.turns) || b.turns.length > 6) return "turns is a list of at most 6.";
   const turns: PickTurn[] = [];
   for (const t of b.turns as Record<string, unknown>[]) {
@@ -30,15 +28,7 @@ function parse(body: unknown): PickRequest | string {
       text: str(t.text, 300) || undefined,
     });
   }
-  let photo: PickRequest["photo"] = null;
-  if (b.photo && typeof b.photo === "object") {
-    const p = b.photo as Record<string, unknown>;
-    if (!PHOTO_TYPES.includes(String(p.mimeType)) || typeof p.data !== "string" || !/^[A-Za-z0-9+/=]+$/.test(p.data.slice(0, 200))) {
-      return "photo is { mimeType, data } with a JPEG, PNG or WebP as base64.";
-    }
-    photo = { mimeType: String(p.mimeType), data: p.data };
-  }
-  return { mode: b.mode as PickMode, turns, photo, photoNotes: str(b.photoNotes, 500) || null };
+  return { turns };
 }
 
 /**
@@ -48,7 +38,7 @@ function parse(body: unknown): PickRequest | string {
  */
 export async function POST(request: Request) {
   if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) {
-    return NextResponse.json({ error: "That photo is too big. Try a smaller one." }, { status: 413 });
+    return NextResponse.json({ error: "That's more than a styling session needs." }, { status: 413 });
   }
   const parsed = parse(await request.json().catch(() => null));
   if (typeof parsed === "string") return NextResponse.json({ error: parsed }, { status: 400 });
