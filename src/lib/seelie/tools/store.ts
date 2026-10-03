@@ -717,6 +717,179 @@ export const storeAmazonGap = defineTool({
 });
 
 /* -------------------------------------------------------------------------- */
+/* store_hero                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The homepage hero: three photos under one settings key, the same shape the
+ * storefront's hero and its admin editor read and write
+ * (marketplace-web src/lib/heroSectionImages.ts). Each photo can open a
+ * product; each remembers the one photo it replaced, for 30 days.
+ */
+const HERO_KEY = "hero_section_images";
+const HERO_SLOTS = { centre: "main", left: "pink", right: "black" } as const;
+type HeroPlace = keyof typeof HERO_SLOTS;
+type HeroSlotId = (typeof HERO_SLOTS)[HeroPlace];
+const HERO_PLACES = Object.keys(HERO_SLOTS) as HeroPlace[];
+const HERO_DEFAULTS: Record<HeroSlotId, string> = { main: "/hero/hero-main.jpg", pink: "/hero/pink_3.jpg", black: "/hero/black_3.jpg" };
+const HERO_RESET_MS = 30 * 86_400_000;
+const HERO_DESCRIPTION =
+  "The three homepage hero photos (centre, left, right prints), each with the product it opens and its immediate-previous image for a 30-day reset.";
+
+interface HeroLink {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+interface HeroSlot {
+  url: string;
+  product?: HeroLink | null;
+  previous: { url: string; changedAt: string; product?: HeroLink | null } | null;
+}
+
+type Hero = Record<HeroSlotId, HeroSlot>;
+
+async function readHero(): Promise<Hero> {
+  const res = await call<{ value?: Partial<Hero> | null } | null>("GET", `/settings/${HERO_KEY}`);
+  const value = res?.value ?? {};
+  const slot = (id: HeroSlotId): HeroSlot => (value[id]?.url ? value[id]! : { url: HERO_DEFAULTS[id], previous: null });
+  return { main: slot("main"), pink: slot("pink"), black: slot("black") };
+}
+
+/** A bundled photo is a path on the storefront itself; the rest are on the image host. */
+const heroPhotoUrl = (url: string) => (url.startsWith("/") ? `https://paribelle.in${url}` : url);
+
+const canReset = (slot: HeroSlot, now: number) => !!slot.previous && now - Date.parse(slot.previous.changedAt) <= HERO_RESET_MS;
+
+function heroLine(place: HeroPlace, slot: HeroSlot, now: number) {
+  return {
+    place,
+    photo: heroPhotoUrl(slot.url),
+    opens: slot.product ? { name: slot.product.name, url: `https://paribelle.in/products/${slot.product.slug}` } : null,
+    ...(slot.previous
+      ? {
+          replaced: {
+            photo: heroPhotoUrl(slot.previous.url),
+            opened: slot.previous.product?.name ?? null,
+            on: slot.previous.changedAt.slice(0, 10),
+            canReset: canReset(slot, now),
+          },
+        }
+      : {}),
+  };
+}
+
+const HeroChange = Type.Object({
+  place: StringEnum(["centre", "left", "right"], { description: "centre is the big photo; left and right sit behind it (on phones: the 1st, 2nd and 3rd slide)." }),
+  image: Type.Optional(Type.String({ description: "A new photo: a URL, chat:N or asset:N (uploaded to the store first). Portrait, 4:5." })),
+  product: Type.Optional(
+    Type.Union([Type.String(), Type.Null()], {
+      description: "Product id or slug the photo opens when tapped (it must be live); null removes the link. A new image without one is left unlinked.",
+    }),
+  ),
+  reset: Type.Optional(Type.Boolean({ description: "Back to the photo this one replaced, and its link (only within 30 days of the change)." })),
+});
+
+export const storeHero = defineTool({
+  name: "store_hero",
+  label: "paribelle.in homepage hero",
+  description: [
+    "Read or change the three photos at the top of paribelle.in's homepage (centre, left, right), each of which opens a product when tapped.",
+    "Without changes it shows each photo, the product it opens and the photo it replaced. Changes replace a photo, link or unlink its product,",
+    "or reset it to the one it replaced. A new photo should come with the product it shows.",
+  ].join(" "),
+  parameters: Type.Object({
+    changes: Type.Optional(Type.Array(HeroChange, { minItems: 1, maxItems: 3, description: "Leave out to read the hero." })),
+  }),
+  kind: (a) => (a.changes?.length ? "store" : "read"),
+  ownerOnly: true,
+  enabled,
+  summary: (a) =>
+    a.changes?.length
+      ? a.changes
+          .map((c) => {
+            const what = [
+              c.reset && "reset to the photo it replaced",
+              c.image && `new photo ${c.image.length > 60 ? `${c.image.slice(0, 57)}…` : c.image}`,
+              c.product === null ? "no product link" : c.product && `opens ${c.product}`,
+            ].filter(Boolean);
+            return `${c.place}: ${what.join(", ") || "nothing"}`;
+          })
+          .join("; ")
+      : "The homepage hero",
+  async execute(a, ctx) {
+    const now = Date.now();
+    const hero = await readHero();
+    if (!a.changes?.length) {
+      return {
+        data: {
+          hero: HERO_PLACES.map((place) => heroLine(place, hero[HERO_SLOTS[place]], now)),
+          note: "On phones the three are a carousel, in the order centre, left, right.",
+        },
+      };
+    }
+
+    // Everything is checked before anything is uploaded or saved.
+    const places = a.changes.map((c) => c.place);
+    if (new Set(places).size !== places.length) throw new ToolError("One change per place. Nothing was changed.");
+    for (const c of a.changes) {
+      if (c.reset && (c.image || c.product !== undefined)) {
+        throw new ToolError(`${c.place}: a reset brings back the old photo and its link, so it can't also set them. Nothing was changed.`);
+      }
+      if (!c.reset && !c.image && c.product === undefined) throw new ToolError(`${c.place}: nothing to change. Nothing was changed.`);
+      if (c.reset && !canReset(hero[HERO_SLOTS[c.place]], now)) {
+        throw new ToolError(`${c.place}: no photo was replaced there in the last 30 days, so there's nothing to reset to. Nothing was changed.`);
+      }
+    }
+    const links = new Map<string, HeroLink>();
+    for (const c of a.changes) {
+      if (!c.product || links.has(c.product)) continue;
+      ctx.progress(`Finding ${c.product}…`);
+      const p = await getProduct(c.product);
+      if (p.status !== "active") {
+        throw new ToolError(`${p.name} is ${p.status} on paribelle.in, so shoppers can't open it. Publish it first or pick a live product. Nothing was changed.`);
+      }
+      links.set(c.product, { id: p.id, slug: p.slug, name: p.name });
+    }
+
+    const hosted = await rehost(a.changes.flatMap((c) => (c.image ? [c.image] : [])), ctx);
+    const next: Hero = { ...hero };
+    const done: string[] = [];
+    for (const c of a.changes) {
+      const id = HERO_SLOTS[c.place];
+      const slot = hero[id];
+      if (c.reset) {
+        const previous = slot.previous!;
+        next[id] = { url: previous.url, product: previous.product ?? null, previous: null };
+        done.push(`${c.place}: back to the photo from before ${previous.changedAt.slice(0, 10)}${previous.product ? `, opening ${previous.product.name}` : ""}`);
+        continue;
+      }
+      // A new photo starts unlinked unless given its product; a link change keeps the photo.
+      const product = c.product ? links.get(c.product)! : c.product === null || c.image ? null : (slot.product ?? null);
+      if (c.image) {
+        next[id] = {
+          url: hosted.get(c.image) ?? c.image,
+          product,
+          previous: { url: slot.url, changedAt: new Date(now).toISOString(), product: slot.product ?? null },
+        };
+        done.push(`${c.place}: new photo, ${product ? `opens ${product.name}` : "not linked to a product"}`);
+      } else {
+        next[id] = { ...slot, product };
+        done.push(`${c.place}: ${product ? `opens ${product.name}` : "no longer opens a product"}`);
+      }
+    }
+
+    ctx.progress("Saving the hero…");
+    await call("PUT", `/settings/${HERO_KEY}`, { body: { value: next, description: HERO_DESCRIPTION }, signal: ctx.signal });
+    return {
+      text: `${done.join("\n")}\nLive on paribelle.in now; returning visitors may see the old hero for a few minutes (their browser keeps a copy).`,
+      data: { hero: HERO_PLACES.map((place) => heroLine(place, next[HERO_SLOTS[place]], now)) },
+    };
+  },
+});
+
+/* -------------------------------------------------------------------------- */
 /* store_api                                                                  */
 /* -------------------------------------------------------------------------- */
 

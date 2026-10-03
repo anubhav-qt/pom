@@ -23,6 +23,7 @@ import {
   storeApiRoutes,
   storeCreateProducts,
   storeDeleteProducts,
+  storeHero,
   storeProducts,
   storeUpdateProducts,
   storeUploadImages,
@@ -65,6 +66,7 @@ const ALL = [
   storeUploadImages,
   storeCreateProducts,
   storeAmazonGap,
+  storeHero,
   storeApiRoutes,
   storeApi,
   // Media (videos and reels are Seelie's own edits through video_render; the Reels screen's
