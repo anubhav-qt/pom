@@ -23,6 +23,22 @@ import { Notice, Timeline } from "./timeline";
 
 const NEW = "__new";
 
+/** Where the visible part of the page ends, in page coordinates: above the keyboard while it's up. */
+function visibleBottom() {
+  const vv = window.visualViewport;
+  return vv ? vv.pageTop + vv.height : window.scrollY + window.innerHeight;
+}
+
+/**
+ * Brings the page's end to the visible bottom. Scrolling to scrollHeight won't do on an iPhone:
+ * with the keyboard up Safari scrolls the page past its end, leaving the box mid-screen over
+ * blank space, so this moves by the difference instead (up as well as down).
+ */
+function toEnd(behavior: ScrollBehavior = "auto") {
+  const gap = document.documentElement.scrollHeight - visibleBottom();
+  if (Math.abs(gap) >= 1) window.scrollBy({ top: gap, behavior });
+}
+
 export function Seelie() {
   const status = useSeelie((s) => s.status);
   const chats = useSeelie((s) => s.chats);
@@ -72,7 +88,7 @@ export function Seelie() {
   const [behind, setBehind] = useState(false);
   useEffect(() => {
     const onScroll = () => {
-      stick.current = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 160;
+      stick.current = visibleBottom() >= document.documentElement.scrollHeight - 160;
       setBehind(!stick.current);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -88,27 +104,36 @@ export function Seelie() {
     setBehind(false);
   }, [chatId]);
   useEffect(() => {
-    if (stick.current) window.scrollTo({ top: document.documentElement.scrollHeight });
+    if (stick.current) toEnd();
   }, [messages, tools, partial, pending, loadingChat, error]);
 
-  // When a phone's keyboard goes down (a message just sent), iOS leaves the page scrolled
-  // past its end: the reply sits off the top and the box floats mid-screen. Settle it.
+  // When a phone's keyboard comes up or goes down, and once Safari has scrolled the box into
+  // view (a pause in the viewport's scrolling), iOS can leave the page scrolled past its end:
+  // the box floats mid-screen over blank space. Settle it.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
     let frame = 0;
+    let pause = 0;
     const settle = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const max = document.documentElement.scrollHeight - window.innerHeight;
-        if (stick.current) window.scrollTo({ top: document.documentElement.scrollHeight });
-        else if (window.scrollY > max) window.scrollTo({ top: max });
+        if (stick.current || visibleBottom() > document.documentElement.scrollHeight + 1) toEnd();
       });
     };
+    const settled = () => {
+      clearTimeout(pause);
+      pause = window.setTimeout(() => {
+        if (visibleBottom() > document.documentElement.scrollHeight + 1) toEnd();
+      }, 150);
+    };
     vv.addEventListener("resize", settle);
+    vv.addEventListener("scroll", settled);
     return () => {
       vv.removeEventListener("resize", settle);
+      vv.removeEventListener("scroll", settled);
       cancelAnimationFrame(frame);
+      clearTimeout(pause);
     };
   }, []);
 
@@ -279,7 +304,7 @@ export function Seelie() {
                 behind && !empty
                   ? () => {
                       stick.current = true;
-                      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+                      toEnd("smooth");
                     }
                   : undefined
               }

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { setTimeout as sleep } from "node:timers/promises";
+
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -79,6 +81,20 @@ export class StoreError extends Error {
   }
 }
 
+/** The API didn't answer at all (no HTTP response): down, restarting, or the connection dropped. */
+class StoreUnreachable extends StoreError {}
+
+/** fetch's own words ("fetch failed") and, under them, the socket's: refused, reset, closed. */
+function reasonOf(err: unknown) {
+  if (!(err instanceof Error)) return String(err);
+  const cause = (err as { cause?: unknown }).cause;
+  const code = cause instanceof Error ? (cause as { code?: string }).code : undefined;
+  const under = cause instanceof Error ? (code && !cause.message.includes(code) ? `${code} ${cause.message}` : cause.message) : cause ? String(cause) : "";
+  return under && !err.message.includes(under) ? `${err.message}: ${under}` : err.message;
+}
+
+const unreachable = (err: unknown) => new StoreUnreachable(`paribelle.in's API can't be reached (${reasonOf(err)}).`);
+
 function expiryOf(token: string) {
   try {
     const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8")) as { exp?: number };
@@ -99,7 +115,7 @@ async function login(api: string, email: string, password: string) {
       signal: AbortSignal.timeout(20_000),
     });
   } catch (err) {
-    throw new StoreError(`paribelle.in's API can't be reached (${err instanceof Error ? err.message : String(err)}).`);
+    throw unreachable(err);
   }
   if (res.status === 401) return null;
   const body = (await res.json().catch(() => null)) as { access_token?: string; user?: { firstName?: string; lastName?: string; role?: string } } | null;
@@ -205,6 +221,11 @@ export interface StoreRequest {
   signal?: AbortSignal;
   /** Longer than the usual minute, for a big upload. */
   timeoutMs?: number;
+  /**
+   * Send it again when the API didn't answer at all, once it's back (it restarts for about a
+   * minute when a new version goes out). On for GETs; for a write only when a repeat is harmless.
+   */
+  retry?: boolean;
 }
 
 function cleanPath(path: string) {
@@ -250,12 +271,18 @@ export async function storeFetch<T = unknown>(method: StoreMethod, path: string,
   };
 
   let res: Response;
-  try {
-    res = await send(await token(api));
-    if (res.status === 401) res = await send(await token(api, true));
-  } catch (err) {
-    if (err instanceof StoreError) throw err;
-    throw new StoreError(`paribelle.in's API can't be reached (${err instanceof Error ? err.message : String(err)}).`);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await send(await token(api));
+      if (res.status === 401) res = await send(await token(api, true));
+      break;
+    } catch (err) {
+      if (err instanceof StoreError && !(err instanceof StoreUnreachable)) throw err;
+      const failure = err instanceof StoreUnreachable ? err : unreachable(err);
+      // Stopped, or out of time: going again wouldn't help.
+      const gaveUp = req.signal?.aborted || (err instanceof Error && err.name === "TimeoutError");
+      if (!(req.retry ?? method === "GET") || gaveUp || attempt >= 3 || !(await backUp(api, req.signal))) throw failure;
+    }
   }
 
   const text = await res.text();
@@ -267,6 +294,26 @@ export async function storeFetch<T = unknown>(method: StoreMethod, path: string,
   }
   if (!res.ok) throw new StoreError(`${method} ${path}: ${errorText(body, res.status)}`, res.status);
   return body as T;
+}
+
+/** Waits up to 90 s for the API to answer its health check again; false if it doesn't. */
+async function backUp(api: string, signal?: AbortSignal) {
+  const until = Date.now() + 90_000;
+  try {
+    await sleep(2000, undefined, { signal });
+    while (Date.now() < until) {
+      const limit = AbortSignal.timeout(5000);
+      const ok = await fetch(`${api}/health`, { signal: signal ? AbortSignal.any([signal, limit]) : limit }).then(
+        (r) => r.ok,
+        () => false,
+      );
+      if (ok) return true;
+      await sleep(3000, undefined, { signal });
+    }
+  } catch {
+    // Stopped.
+  }
+  return false;
 }
 
 /** The API's own description of its routes (Swagger), read once per process. */
