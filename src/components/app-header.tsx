@@ -172,8 +172,16 @@ export function AppHeader({
 
       {/* ---------------------------------------------------------- band 3 -- */}
       {/* Empty slot the Orders sub-status tabs (`RailTabs`) portal into, so they
-          sit inside the header: attached to band 2, full width, same look. */}
-      {hasRail ? <div id={RAIL_SLOT_ID} /> : null}
+          sit inside the header: attached to band 2, full width, same look. From
+          `sm` up it holds the band's height while it's empty (the first paint,
+          before the page's scripts fill it), so the page doesn't jump down. */}
+      {hasRail ? (
+        <div
+          id={RAIL_SLOT_ID}
+          className="rail-slot"
+          style={{ "--rail-h": `${hasSearch ? 61 : effectiveScreen === "seelie" ? 53 : 45}px` } as React.CSSProperties}
+        />
+      ) : null}
     </header>
   );
 }

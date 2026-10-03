@@ -111,7 +111,10 @@ export function Composer({
     const el = textRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
+    const max = window.innerHeight * 0.4;
+    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+    // No scrollbar until it's that tall (a placeholder wider than the box showed one).
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
   }, [draft]);
 
   // A fresh chat, or a switch to another, puts the cursor in the box (not on phones,
@@ -246,7 +249,7 @@ export function Composer({
             if (!e.clipboardData.getData("text/plain")) e.preventDefault();
             void take(files);
           }}
-          placeholder={disabled ?? (chatId ? "Reply to Seelie…" : "Ask Seelie anything, or tell it what to do…")}
+          placeholder={disabled ?? (chatId ? "Reply to Seelie…" : "Ask Seelie anything…")}
           className="block max-h-[40vh] w-full resize-none bg-transparent px-4 pb-1 pt-3.5 text-base leading-relaxed outline-none placeholder:text-[var(--muted-2)] sm:text-[15px]"
         />
 

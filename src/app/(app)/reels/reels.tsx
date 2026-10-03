@@ -333,7 +333,7 @@ function PhotoGrid({ s }: { s: Store }) {
       >
         <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
           Photos
-          <span className="rounded-full px-1.5 py-px text-[10.5px] tabular-nums" style={{ background: "var(--panel)", color: "var(--muted)" }}>
+          <span className="rounded-sm px-1.5 py-px text-[10.5px] tabular-nums" style={{ background: "var(--panel)", color: "var(--muted)" }}>
             {s.photos.length}
           </span>
           {tappable ? (
@@ -712,7 +712,7 @@ function Scenes({ view, photos }: { view: ReelJobView; photos: ReelPhoto[] }) {
                 <ZoomImg src={preview.get(sc.photo)!} alt={`Scene ${i + 1}`} className="h-full w-full object-cover" />
               ) : null}
               <span
-                className="absolute left-1 top-1 rounded-full px-1.5 text-[10px] font-semibold tabular-nums text-white"
+                className="absolute left-1 top-1 rounded-sm px-1.5 text-[10px] font-semibold tabular-nums text-white"
                 style={{ background: "rgba(15,23,42,0.6)" }}
               >
                 {i + 1}
@@ -835,7 +835,7 @@ function OptionsInline({ s }: { s: Store }) {
       type="button"
       onClick={flip}
       disabled={s.busy}
-      className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium disabled:opacity-50"
+      className="inline-flex items-center gap-1.5 rounded-sm px-3 py-2 text-xs font-medium disabled:opacity-50"
       style={{ background: on ? "var(--accent-soft)" : "var(--panel-2)", color: on ? "#0b7fb0" : "var(--muted)" }}
     >
       {label}

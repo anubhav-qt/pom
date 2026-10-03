@@ -313,6 +313,7 @@ export const videoWatch = defineTool({
     `Watch and listen to clips, sounds, songs and library videos (refs; append #<from>-<to> in seconds for a stretch; up to ${WATCH_MAX_SECONDS} s each, 3 at a time).`,
     "You get the clip itself, with its sound: judge pacing, cuts, text legibility, colour and how the music sits. The latest 3 clips you watched stay with you on later turns.",
     "times: instead, stills at those seconds (sharper than the clip for small text and detail). Images (chat:<n>, image assets) are shown as they are.",
+    "Only you see what you watch: to show the owner a library video, use video_library show.",
   ].join(" "),
   parameters: Type.Object({
     refs: Type.Array(Type.String(), { minItems: 1, maxItems: 3 }),
@@ -338,6 +339,7 @@ export const videoWatch = defineTool({
           notes.push(`${ref}: attached`);
         }
       }
+      if (videos.length) notes.push("(Only you see these. To show the owner one, use video_library show.)");
       return { text: notes.join("\n"), videos, images };
     });
   },
@@ -455,10 +457,11 @@ export const videoLibrary = defineTool({
   description: [
     "Seelie's video library: every video rendered, each version with the graph and inputs that made it.",
     "list: this chat's videos (scope 'all' for every one). get: a video with its versions and a version's recipe (inputs, graph, files) to change and render again.",
+    "show: play a version (default the latest) for the owner in the chat, with Download and Share: how you show a video when asked to see it.",
     "rename: a new title. feedback: record what the owner said about it (liked, notes, in their words); it guides later videos. delete: remove it and its files.",
   ].join(" "),
   parameters: Type.Object({
-    action: StringEnum(["list", "get", "rename", "feedback", "delete"]),
+    action: StringEnum(["list", "get", "show", "rename", "feedback", "delete"]),
     scope: optional(StringEnum(["chat", "all"])),
     videoId: optional(Type.Integer()),
     version: optional(Type.Integer()),
@@ -476,7 +479,7 @@ export const videoLibrary = defineTool({
           ? `Rename video:${a.videoId} to "${a.title ?? ""}"`
           : a.action === "feedback"
             ? `Note on video:${a.videoId}`
-            : `video:${a.videoId}${a.version ? `@${a.version}` : ""}`,
+            : `${a.action === "show" ? "Show " : ""}video:${a.videoId}${a.version ? `@${a.version}` : ""}`,
   async execute(a, ctx) {
     return media(async () => {
       if (a.action === "list") {
@@ -497,6 +500,12 @@ export const videoLibrary = defineTool({
               ...(v ? { recipe: { inputs: v.inputs, graph: v.graph, files: v.files, width: v.canvas.width, height: v.canvas.height, fps: v.fps, duration: v.seconds } } : {}),
             },
           };
+        }
+        case "show": {
+          if (!video.version) throw new ToolError(`video:${video.id} isn't rendered yet.`);
+          const v = versionOf(video, a.version);
+          if (v.pruned) throw new ToolError(`video:${video.id}@${v.version}'s file was cleared to save space; render it again to show it.`);
+          return { data: videoSummary(video, v.version), text: `The owner sees video:${video.id}@${v.version} playing in the chat now.` };
         }
         case "rename":
           if (!a.title?.trim()) throw new ToolError("What title?");

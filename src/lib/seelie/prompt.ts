@@ -76,7 +76,7 @@ async function videoSection(names: Set<string>) {
     "- Music: a library song (song:<id>) cut on its beats and fading at the end. Each song makes one video; a final claims it. For something new, find it (youtube search, then watch to judge the vibe) and add it with songs add (that asks first).",
     "- Ideas and references: web_search for trends and what works now, youtube watch for a reference edit the owner names. Say where an idea came from.",
     "- When the owner reacts to a video (likes it, dislikes it, asks for changes), record it with video_library feedback in their words; later videos learn from it.",
-    "- Finished videos: the chat shows them with Download and Share. Publishing to paribelle.in (video_publish) or Instagram (instagram_post) only when asked, and only a final.",
+    "- Finished videos: a render's card plays it for the owner, with Download and Share. When they ask to see a video (again, or another version), video_library show puts it in front of them; video_watch is for your eyes only, so never say you've shown something you only watched. Publishing to paribelle.in (video_publish) or Instagram (instagram_post) only when asked, and only a final.",
   ];
   if (lessons.length) lines.push("- What the owner said about past videos (follow it):", ...lessons);
   return lines.join("\n");

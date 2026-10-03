@@ -327,7 +327,7 @@ function FileList({
         <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
           Files
           <span
-            className="rounded-full px-1.5 py-px text-[10.5px] tabular-nums"
+            className="rounded-sm px-1.5 py-px text-[10.5px] tabular-nums"
             style={{ background: "var(--panel)", color: "var(--muted)" }}
           >
             {files.length}
@@ -437,7 +437,7 @@ function OptionsInline({ options, onOptions }: PrinterViewProps) {
     <button
       type="button"
       onClick={flip}
-      className="rounded-full px-3 py-2 text-xs font-medium"
+      className="rounded-sm px-3 py-2 text-xs font-medium"
       style={{
         background: on ? "var(--accent-soft)" : "var(--panel-2)",
         color: on ? "#0b7fb0" : "var(--muted)",

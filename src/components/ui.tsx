@@ -6,7 +6,7 @@ export function ChannelTag({ channel }: { channel: Channel }) {
   const meta = CHANNEL_META[channel];
   return (
     <span
-      className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full py-1 pl-1.5 pr-2.5 text-xs font-medium"
+      className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm py-1 pl-1.5 pr-2.5 text-xs font-medium"
       style={{ background: `color-mix(in srgb, ${meta.color} 12%, transparent)` }}
       title={meta.live ? `${meta.name} (live sync)` : `${meta.name} (file import)`}
     >

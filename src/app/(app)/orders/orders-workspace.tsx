@@ -143,7 +143,8 @@ export function OrdersWorkspace({
             // Collection has no defined meaning for Packed / Shipped (24h) yet —
             // shown, not hidden, but disabled rather than pretending they work.
             options: [
-              { id: "unshipped", label: "Unshipped" },
+              // The orders the pick list covers, as the list view counts them.
+              { id: "unshipped", label: "Unshipped", count: new Set(data.rows.flatMap((r) => r.orderIds)).size },
               { id: "packed", label: "Packed", disabled: true },
               { id: "shipped24h", label: "Shipped (24h)", disabled: true },
             ],

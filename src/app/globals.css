@@ -76,6 +76,12 @@ html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
+
+/* Room for the scrollbar always, so the header and page don't shift sideways between
+   screens that scroll and ones that don't (the printer, Reels, a new Seelie chat). */
+html {
+  scrollbar-gutter: stable;
+}
 a,
 button,
 input,
@@ -626,6 +632,13 @@ html[data-typing] .dock-spacer {
 }
 html[data-typing] main {
   padding-bottom: 0;
+}
+
+/* The header's rail band, kept at its height until the page fills it (see AppHeader). */
+@media (min-width: 640px) {
+  .rail-slot:empty {
+    min-height: var(--rail-h);
+  }
 }
 
 /* Only the page itself should reach the printer, never the app chrome. */

@@ -43,6 +43,28 @@ const nextConfig = {
    */
   assetPrefix: basePath,
 
+  /**
+   * No "x-powered-by: Next.js" on every answer, and the headers a signed-in admin
+   * tool needs: HTTPS only, never inside another site's frame (clickjacking), no
+   * guessing file types, and only the origin in links out. Only the OMS's own pages
+   * frame it (the PDF printer's demo).
+   */
+  poweredByHeader: false,
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
+    ];
+  },
+
   env: {
     NEXT_PUBLIC_BASE_PATH: basePath,
   },

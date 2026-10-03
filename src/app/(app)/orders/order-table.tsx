@@ -331,7 +331,7 @@ export function OrderTable({
                           </span>
                         ) : null}
                       </div>
-                      <div className="font-mono text-xs">{row.externalOrderId}</div>
+                      <div className="whitespace-nowrap font-mono text-xs">{row.externalOrderId}</div>
                       <div className="muted text-xs">{dayLabel(new Date(row.orderedAt))}</div>
                     </td>
 
@@ -516,8 +516,13 @@ export function OrderCard({
         </div>
 
         <div className="muted flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-          <span>{[row.shipCity, row.shipState].filter(Boolean).join(", ") || "—"}</span>
-          <span>·</span>
+          {/* Without a city (Amazon leaves it out of some orders), just the value. */}
+          {row.shipCity || row.shipState ? (
+            <>
+              <span>{[row.shipCity, row.shipState].filter(Boolean).join(", ")}</span>
+              <span>·</span>
+            </>
+          ) : null}
           <span className="tabular-nums">{money(row.totalAmount)}</span>
           {hasUnmapped ? (
             <span className="font-semibold" style={{ color: "var(--danger)" }}>

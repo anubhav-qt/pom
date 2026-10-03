@@ -179,7 +179,7 @@ function Summary({ view }: { view: DashboardView }) {
       >
         {p.pending ? (
           <>
-            <span>{num(p.pending.expected)} more returns expected</span>
+            <span>{num(p.pending.expected)} more returns due</span>
             <span>at the usual {pct(p.pending.usualRate)}</span>
           </>
         ) : (

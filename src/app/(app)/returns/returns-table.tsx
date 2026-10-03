@@ -238,7 +238,8 @@ export function ReturnsDesk({ initialView, initialTab }: { initialView: ReturnsV
         </div>
 
         <aside className="min-w-0">
-          <div className="panel p-5">
+          {/* Stays in view down the long list, just under the header and its rail. */}
+          <div className="panel p-5 lg:sticky lg:top-[125px]">
             <h2 className="text-sm font-semibold">Why customers return</h2>
             {totalReasons > 0 ? (
               <p className="muted mb-4 text-xs">{Math.round((sizeCount / totalReasons) * 100)}% are about size</p>
@@ -293,7 +294,8 @@ function ReturnCard({ row, onChanged }: { row: ReturnDeskRow; onChanged: () => v
         <div className="flex min-w-0 items-center gap-3">
           <OrderThumb src={row.imageUrl} alt={it.name} size="h-11 w-11 shrink-0" />
           <div className="min-w-0">
-            <div className="truncate text-sm font-medium" title={it.name}>
+            {/* Two lines before it's cut: on a phone one line beside the stage held only a couple of words. */}
+            <div className="line-clamp-2 text-sm font-medium leading-snug" title={it.name}>
               {it.name}
             </div>
             <div className="muted text-xs">
