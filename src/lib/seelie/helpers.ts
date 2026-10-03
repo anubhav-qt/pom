@@ -8,14 +8,15 @@ import { StringEnum } from "./tools/util";
 import type { HelperState } from "./types";
 
 /**
- * Seelie's helpers: one reply can hand parts of a request that don't need each other to
- * up to MAX_HELPERS helpers, which work at the same time, each with Seelie's tools and
- * the same approvals, and answer back to Seelie. The engine runs them (engine.ts
+ * Seelie's helpers: one reply hands the parts of a request that don't need each other
+ * (different questions, or the same job over several things) to up to MAX_HELPERS helpers,
+ * which work at the same time, each with Seelie's tools, the thinking Seelie picks for it
+ * and the same approvals, and answer back to Seelie. The engine runs them (engine.ts
  * runHelpers); this is the tool the model sees, the model a helper runs on and what
  * a helper is told.
  */
 
-export const MAX_HELPERS = 4;
+export const MAX_HELPERS = 8;
 /** The most tool calls one helper may make. */
 export const HELPER_MAX_CALLS = 30;
 /** Helpers run on Gemini 3.8 Flash when a connected account serves it (Antigravity first); Seelie picks the thinking. */
@@ -35,7 +36,8 @@ export const helpersParameters = Type.Object({
           "Everything the helper needs, complete on its own (it doesn't see this chat): what to find or do, the ids, SKUs, dates and filters, images as chat:N, and exactly what to report back.",
       }),
       thinking: StringEnum(TIERS, {
-        description: "How hard it thinks: minimal or low for lookups and simple changes, medium for a few steps, high for analysis or careful writing.",
+        description:
+          "How hard it thinks, picked for this part alone: minimal or low for lookups and simple changes, medium for a few steps, high for analysis, judgement or careful writing.",
       }),
     }),
     { minItems: 1, maxItems: MAX_HELPERS },
@@ -49,8 +51,8 @@ export const helpersTool = defineTool({
   name: "helpers",
   label: "Helpers",
   description: [
-    `Hand up to ${MAX_HELPERS} parts of the request that don't depend on each other to helpers that work at the same time, then put their answers together.`,
-    "Each helper has your tools and the same approvals, sees only its task (not this chat), and answers back to you, not the user.",
+    `Start up to ${MAX_HELPERS} helpers at once, one per part of the work that doesn't need the others' results (different questions, or the same job over several things), then put their answers together.`,
+    "Each helper has your tools, the thinking you pick for it and the same approvals, sees only its task (not this chat), and answers back to you, not the user.",
   ].join(" "),
   parameters: helpersParameters,
   kind: "read",
@@ -66,10 +68,11 @@ export const helpersTool = defineTool({
 /** What the main reply is told about helpers. */
 export function helpersSection() {
   return [
-    "Helpers (the helpers tool):",
-    "- When a request has parts that don't need each other's results (\"check stock of these, pull last week's ad results and draft a caption\"), give them to helpers in one helpers call so they run at the same time, then answer from what they report. It's faster; use it whenever there are two or more such parts that each take a few steps.",
-    "- Don't use helpers for a single quick lookup, for steps where one needs another's result (do those yourself, in order), or to split one tool call that already takes many things at once.",
-    "- A helper sees only its task: write it complete, with the ids, SKUs, dates, filters and chat:N images it needs and what to report back. Pick each helper's thinking for its job.",
+    "Helpers (the helpers tool): work in parallel every time the work allows it. It's how you answer fast without cutting corners.",
+    `- Whenever the work splits into two or more parts that each take more than one step and don't need each other's results, hand them to helpers in one helpers call (up to ${MAX_HELPERS}), so they run at the same time, then answer from what they report. That's different questions in one request ("check stock of these, pull last week's ad results and draft a caption") and the same job over several things (compare each of these products, review each video, fix each listing). Plan the split before your first call.`,
+    "- Pick each helper's thinking for its own part: minimal or low for lookups and simple changes, medium for a few steps, high for analysis, judgement or careful writing. Spend thinking where quality matters, not everywhere.",
+    "- Do it yourself when it's one quick lookup, when one step needs another's result (those go in order), or when a single tool call already takes all the things at once (one call for 40 orders, not 40 helpers). Your own independent calls still go out together in one reply.",
+    "- A helper sees only its task: write it complete, with the ids, SKUs, dates, filters and chat:N images it needs and exactly what to report back.",
     "- Their changes ask the user like yours; a helper doesn't wait for the others. Check what they report before you state it, and say if a helper failed or a change is waiting.",
   ].join("\n");
 }

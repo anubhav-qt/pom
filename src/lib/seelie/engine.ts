@@ -394,6 +394,7 @@ function withoutAsk(params: unknown) {
 }
 
 function agentTool(run: LiveRun, tool: SeelieTool, scope?: Scope): AgentTool {
+  // A reply's changes run one at a time, in the order asked; its lookups run alongside them.
   const sequential = tool.kind !== "read";
   return {
     name: tool.name,

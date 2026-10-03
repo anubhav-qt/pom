@@ -93,6 +93,8 @@ async function toParibelle(video: VideoRow, v: VideoVersion, a: { product?: stri
       },
       signal: ctx.signal,
       timeoutMs: 10 * 60_000,
+      // A repeat costs at most a spare copy on the video host; the product changes only after.
+      retry: true,
     });
     if (!up?.url) throw new ToolError("The store's video upload didn't answer with a URL.");
     url = up.url;

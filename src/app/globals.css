@@ -619,10 +619,13 @@ input[type="checkbox"]:disabled {
 }
 
 /* While Seelie's box is written in on a phone (the keyboard is up), the bottom
-   nav steps aside so the box can sit on the keyboard. */
+   nav and the page's foot step aside so the box can sit on the keyboard. */
 html[data-typing] .mobile-nav,
 html[data-typing] .dock-spacer {
   display: none;
+}
+html[data-typing] main {
+  padding-bottom: 0;
 }
 
 /* Only the page itself should reach the printer, never the app chrome. */
