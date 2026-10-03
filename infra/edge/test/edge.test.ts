@@ -82,3 +82,26 @@ test("trying it locally: WWW_FALLBACK_ORIGIN stands in for the DNS record", asyn
   assert.equal(await res.text(), "origin vercel.test:3000");
   assert.equal(n.sent[1].url, "http://vercel.test:3000/cart?x=1");
 });
+
+test("a failed OMS page checks the OMS's health before sending everyone to Vercel", async () => {
+  const n = net((r) => {
+    const { host, pathname } = new URL(r.url);
+    if (host !== "laptop.paribelle.in") return new Response(`origin ${host}`);
+    return pathname === "/pom/api/health" ? new Response("ok") : new Response("oops", { status: 504 });
+  });
+  const res = await handle(new Request("https://www.paribelle.in/pom/finance"), env, n.fetcher, n.down);
+  assert.equal(await res.text(), "origin www.paribelle.in");
+  const check = n.sent.find((r) => new URL(r.url).pathname === "/pom/api/health");
+  assert.ok(check, "the health check was made");
+  assert.equal(check.headers.get("x-paribelle-edge-key"), env.EDGE_KEY);
+  assert.equal(check.headers.get("x-paribelle-host"), "www.paribelle.in");
+  assert.equal(n.down.oms.until, 0, "the OMS stays on the ThinkPad");
+});
+
+test("Seelie's API stays on the ThinkPad: its own errors are passed on", async () => {
+  const n = net((r) => (new URL(r.url).host === "laptop.paribelle.in" ? new Response("busy", { status: 503 }) : new Response("vercel")));
+  const res = await handle(new Request("https://www.paribelle.in/pom/api/seelie/runs/abc/stream"), env, n.fetcher, n.down);
+  assert.equal(res.status, 503);
+  assert.equal(res.headers.get("x-paribelle-served-by"), "thinkpad");
+  assert.ok(n.sent.every((r) => new URL(r.url).host === "laptop.paribelle.in"));
+});

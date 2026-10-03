@@ -40,7 +40,11 @@ visitor ─► Cloudflare ─► paribelle-edge Worker ──(tunnel + edge key)
   down, gate refused, app unreachable) goes to the fallback, POSTs included. A GET also goes
   there on a 502/503/504, after 8 s without an answer (15 s for the OMS), or on a network
   error. A POST that may have reached the app is never sent twice; the visitor sees an error
-  and retries. After a failure the Worker leaves the ThinkPad alone for 20 s.
+  and retries. After a failure the Worker leaves the ThinkPad alone for 20 s, but when the
+  request did reach the app (a timeout, a 5xx, a dropped connection) only if a quick health
+  check through the gate fails too: one slow page doesn't send everyone to Vercel. Seelie's
+  API (`/pom/api/seelie/…`) stays on the ThinkPad: no timeout, and its own errors are passed
+  on, since Vercel has neither its chats nor its media.
 - **The sync** (`sync/`) keeps each ThinkPad database and its Supabase copy in step, both
   ways, every second. The gate opens only once a pull has found nothing more waiting, so what
   the fallback wrote is on the ThinkPad before it serves. It also runs the ThinkPad's timed

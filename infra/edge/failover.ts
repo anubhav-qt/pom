@@ -13,7 +13,10 @@
  * twice is harmless. A POST that may have reached the app is never sent twice.
  *
  * After a failure this isolate leaves the ThinkPad alone for a while (downMs, or a
- * standby's Retry-After) so visitors don't each wait out the same timeout.
+ * standby's Retry-After) so visitors don't each wait out the same timeout. A request that
+ * did reach the app and failed (one slow report, one process restarting) only does that
+ * when the ThinkPad then fails a quick health check too (`probe`): otherwise everyone
+ * would spend the next 20 s on the fallback, where Seelie is offline, over one page.
  */
 
 export interface FailoverOptions {
@@ -27,6 +30,17 @@ export interface FailoverOptions {
   downMs?: number;
   /** Request bodies up to this size are kept so they can be replayed on the fallback. */
   maxBufferBytes?: number;
+  /**
+   * Whether the ThinkPad is up, asked after a request that reached it failed. Without one,
+   * any failure leaves the ThinkPad alone for downMs.
+   */
+  probe?: () => Promise<boolean>;
+  /**
+   * Only the ThinkPad can serve this (Seelie: its chats and media aren't in the cloud). No
+   * timeout, and once the app has it, its answer stands; the fallback only gets what never
+   * reached it, or a failure while the ThinkPad is down.
+   */
+  primaryOnly?: boolean;
   /** For tests. */
   fetch?: typeof fetch;
   now?: () => number;
@@ -91,15 +105,21 @@ export async function failover(req: Request, o: FailoverOptions, down: DownState
   const markDown = (ms: number) => {
     down.until = Math.max(down.until, now() + ms);
   };
+  // It reached the ThinkPad and failed: left alone only if the ThinkPad fails the check too.
+  const stillUp = async () => {
+    const up = o.probe ? await o.probe().catch(() => false) : false;
+    if (!up) markDown(downMs);
+    return up;
+  };
 
   const ctl = new AbortController();
-  const timer = safe ? setTimeout(() => ctl.abort(new Error("timed out")), timeoutMs) : undefined;
+  const timer = safe && !o.primaryOnly ? setTimeout(() => ctl.abort(new Error("timed out")), timeoutMs) : undefined;
   let res: Response;
   try {
     res = await doFetch(relay(req, o.primary, o.edgeKey, body), { signal: ctl.signal });
   } catch (e) {
-    markDown(downMs);
-    if (safe && replayable) return fallback(again());
+    const up = await stillUp();
+    if (safe && replayable && !(o.primaryOnly && up)) return fallback(again());
     console.error("ThinkPad unreachable mid-request", req.method, new URL(req.url).pathname, String(e));
     return new Response("The ThinkPad did not answer. Please try again.", { status: 502, headers: { "retry-after": "1" } });
   } finally {
@@ -108,14 +128,18 @@ export async function failover(req: Request, o: FailoverOptions, down: DownState
 
   const standby = res.headers.has("x-paribelle-standby");
   const gate = res.headers.get("x-paribelle-gate");
-  const neverReached = standby || gate !== null || res.status === 530;
-  if (neverReached || (safe && MAYBE_DOWN.has(res.status))) {
+  if (standby || gate !== null || res.status === 530) {
     if (gate === "forbidden") console.error("The ThinkPad's gate refused the edge key: is EDGE_KEY the same on both?");
     markDown(standby ? retryAfterMs(res, downMs) : downMs);
     await res.body?.cancel();
     if (replayable) return fallback(again());
     // It never reached the app, but the body is gone: the client's retry lands on the fallback.
     return new Response("Please try again.", { status: 503, headers: { "retry-after": "1" } });
+  }
+  if (safe && !o.primaryOnly && MAYBE_DOWN.has(res.status)) {
+    await res.body?.cancel();
+    await stillUp();
+    return fallback(again());
   }
   return tag(res, "thinkpad");
 }

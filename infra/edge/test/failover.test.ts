@@ -189,3 +189,61 @@ test("relaying: the visitor's address is always the connection's, never one the 
   assert.equal(sent.url, "https://render.example/api/v1/x");
   assert.equal(from({}).headers.get("x-paribelle-client-ip"), null);
 });
+
+test("a failed request while the ThinkPad passes its check: that request goes to the fallback, nobody else does", async () => {
+  let checks = 0;
+  const h = harness((r) => (r.url.endsWith("/slow") ? new Response("oops", { status: 504 }) : new Response("thinkpad")), {
+    probe: async () => (checks++, true),
+  });
+  assert.equal(await (await h.run(get("/slow"))).text(), "fallback GET ");
+  assert.equal(checks, 1);
+  assert.equal(h.down.until, 0);
+  assert.equal(await (await h.run(get("/next"))).text(), "thinkpad");
+});
+
+test("a failed request and a failed check: the ThinkPad is left alone", async () => {
+  const h = harness(() => new Response("oops", { status: 502 }), { probe: async () => false });
+  await h.run(get());
+  assert.ok(h.down.until > 0);
+  const thrown = harness(() => new Response("oops", { status: 502 }), {
+    probe: async () => {
+      throw new TypeError("network connection lost");
+    },
+  });
+  await thrown.run(get());
+  assert.ok(thrown.down.until > 0, "a check that can't be made counts as failed");
+});
+
+test("a timeout while the ThinkPad passes its check: the slow GET goes to the fallback, the ThinkPad stays in service", async () => {
+  const hang = (r: Request) =>
+    new Promise<Response>((_, reject) => r.signal.addEventListener("abort", () => reject(r.signal.reason)));
+  const h = harness(hang, { timeoutMs: 50, probe: async () => true });
+  assert.equal(await (await h.run(get())).text(), "fallback GET ");
+  assert.equal(h.down.until, 0);
+});
+
+test("primary only (Seelie): no timeout, the app's own errors are passed on, and the fallback only gets it while the ThinkPad is down", async () => {
+  const late = harness(() => new Promise<Response>((resolve) => setTimeout(() => resolve(new Response("late but fine")), 120)), {
+    timeoutMs: 20,
+    primaryOnly: true,
+  });
+  assert.equal(await (await late.run(get("/pom/api/seelie/runs/1/stream"))).text(), "late but fine");
+
+  const busy = harness(() => new Response("busy", { status: 503 }), { primaryOnly: true, probe: async () => true });
+  const res = await busy.run(get());
+  assert.equal(res.status, 503);
+  assert.equal(res.headers.get("x-paribelle-served-by"), "thinkpad");
+  assert.equal(busy.seen.fallback.length, 0);
+
+  const dropped = () => {
+    throw new TypeError("network connection lost");
+  };
+  const up = harness(dropped, { primaryOnly: true, probe: async () => true });
+  assert.equal((await up.run(get())).status, 502, "up: the client tries the ThinkPad again");
+  assert.equal(up.seen.fallback.length, 0);
+  const gone = harness(dropped, { primaryOnly: true, probe: async () => false });
+  assert.equal(await (await gone.run(get())).text(), "fallback GET ", "down: the fallback says so");
+
+  const standing = harness(standby, { primaryOnly: true });
+  assert.equal(await (await standing.run(get())).text(), "fallback GET ", "it never reached the app");
+});
