@@ -165,7 +165,7 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
     [
       `Now: ${nowIst()}.`,
       `You're talking with ${user.name}, ${user.role === "owner" ? "the owner" : "a staff member"}.`,
-      `Marketplaces live in the app: ${ENABLED_CHANNELS.join(", ")} (synced from Amazon's SP-API). Flipkart and Meesho orders and payments come in from their seller-portal sheets, so finance and sales can include them; orders.channel says which marketplace an order is from.`,
+      `Channels live in the app: ${ENABLED_CHANNELS.join(", ")} (Amazon synced from its SP-API; paribelle, the shop's own paribelle.in, from the store's admin API: its orders and exchanges, its SKUs joined to POM's products, its labels made in POM, and shipping, delivery, cancellations, COD refusals and exchange steps written back from the order popup and the Returns desk's Exchanges tab). Flipkart and Meesho orders and payments come in from their seller-portal sheets, so finance and sales can include them; orders.channel says which channel an order is from.`,
       lastSync ? `Orders were last synced from Amazon at ${ist(lastSync)} IST; anything newer isn't in the OMS until a sync runs.` : "No order sync has finished yet.",
       off.length ? `Switched off in this app (don't offer them): ${off.join("; ")}.` : "",
       store,
@@ -207,6 +207,11 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
   if (names.has("store_hero")) {
     flows.push(
       "- paribelle.in's homepage hero (store_hero): three photos, centre, left and right, each opening the product it shows when tapped. A new hero photo goes in with its product (find it with store_products; it must be live), unless the owner says to leave it unlinked. Look at a photo before calling it a product's.",
+    );
+  }
+  if (names.has("store_settings")) {
+    flows.push(
+      "- Anything paribelle.in's admin can change, you can: products (store_products and the store_* product tools), the homepage hero (store_hero), pages like About or FAQ (store_pages), categories and their filters (store_categories), the shop's settings, footer, invoice details and policies (store_settings), HSN codes (store_hsn); anything else through store_api. Read what's there first, change only what was asked, and keep the rest as it was.",
     );
   }
   if (names.has("view_images") || names.has("video_render") || names.has("photo_edit")) {

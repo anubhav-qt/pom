@@ -3,6 +3,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
+import type { ParibelleRaw } from "@/channels/paribelle";
 import { db } from "@/db";
 import {
   batchOrders,
@@ -65,11 +66,53 @@ export interface OrderDetail {
     receivedAt: string | null;
     restocked: boolean;
   } | null;
+  /** A paribelle.in order as the store has it, for shipping and writing back. */
+  store: StoreOrderInfo | null;
+  /** Whether the person looking can make the owner's calls (store credit). */
+  viewerIsOwner: boolean;
+}
+
+export interface StoreOrderInfo {
+  /** The store's own status: pending, confirmed, processing, shipped, delivered, cancelled… */
+  status: string;
+  paymentMethod: string | null;
+  paymentStatus: string;
+  total: number | null;
+  name: string;
+  phone: string;
+  address: string;
+  courier: string | null;
+  awb: string | null;
+  notes: string | null;
+  cancellationReason: string | null;
+  shippedAt: string | null;
+  /** The exchange this order replaces, if it's a replacement. */
+  replacementFor: string | null;
+}
+
+function storeOrderInfo(raw: unknown): StoreOrderInfo | null {
+  const r = raw as ParibelleRaw | null;
+  if (!r?.id) return null;
+  return {
+    status: r.status,
+    paymentMethod: r.paymentMethod,
+    paymentStatus: r.paymentStatus,
+    total: r.total,
+    name: r.address.name,
+    phone: r.address.phone,
+    address: [r.address.line, r.address.city, r.address.state, r.address.pincode].filter(Boolean).join(", "),
+    courier: r.carrier,
+    awb: r.trackingNumber,
+    notes: r.customerNotes,
+    cancellationReason: r.cancellationReason,
+    shippedAt: r.shippedAt,
+    replacementFor: r.replacementFor?.returnNumber ?? null,
+  };
 }
 
 /** Everything known about one order, for the detail popup. */
 export async function getOrderDetail(orderId: number): Promise<OrderDetail | null> {
-  await requireUser();
+  const user = await requireUser();
 
   const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
   if (!order) return null;
@@ -162,6 +205,8 @@ export async function getOrderDetail(orderId: number): Promise<OrderDetail | nul
     returnRecord: returnRow
       ? { ...returnRow, receivedAt: returnRow.receivedAt?.toISOString() ?? null }
       : null,
+    store: order.channel === "paribelle" ? storeOrderInfo(order.raw) : null,
+    viewerIsOwner: user.role === "owner",
   };
 }
 

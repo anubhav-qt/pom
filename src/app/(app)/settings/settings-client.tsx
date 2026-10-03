@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
-import { CHANNEL_META } from "@/channels";
+import { CHANNEL_META } from "@/channels/meta";
 import { ChannelTag, Empty, Spinner } from "@/components/ui";
 import { ENABLED_CHANNELS, FEATURES } from "@/config/features";
 import type { Channel } from "@/db/schema";
@@ -39,6 +39,8 @@ const CREDENTIAL_FIELDS: Record<Channel, CredentialField[]> = {
     { key: "locationId", label: "Location ID", hint: "Warehouse used for stock updates" },
   ],
   meesho: [],
+  // Signs in with the paribelle.in admin login saved in Seelie's settings.
+  paribelle: [],
 };
 
 export interface AccountRow {
@@ -189,7 +191,7 @@ export function ChannelAccounts({
             });
           }}
         >
-          <h2 className="text-sm font-semibold capitalize">Add {adding} account</h2>
+          <h2 className="text-sm font-semibold">Add {CHANNEL_META[adding].name} account</h2>
 
           <div>
             <label className="muted mb-1 block text-xs">Name it something recognisable</label>
@@ -213,6 +215,14 @@ export function ChannelAccounts({
               </div>
             ),
           )}
+
+          {adding === "paribelle" ? (
+            <p className="muted text-xs">
+              Nothing to paste: paribelle.in is read and updated with the admin login saved in
+              Seelie&apos;s settings (the paribelle.in panel). Its orders and exchanges then sync like
+              Amazon&apos;s, and its SKUs join the catalogue on the first sync.
+            </p>
+          ) : null}
 
           {adding === "meesho" ? (
             <p className="muted text-xs">

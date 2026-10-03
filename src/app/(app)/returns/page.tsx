@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 /**
  * The Returns desk: customer returns from Amazon's Returns report, plus the
  * RTO and cancelled parcels the Orders screen already tracks, in one place with
- * the money attached.
+ * the money attached, and paribelle.in's exchanges, moved along from here.
  */
 export default async function ReturnsPage({
   searchParams,
@@ -24,5 +24,5 @@ export default async function ReturnsPage({
   const { tab, resolved } = await searchParams;
   const view = await getReturnsView(resolved === "1");
 
-  return <ReturnsDesk initialView={view} initialTab={tab === "rto" ? "rto" : "returns"} />;
+  return <ReturnsDesk initialView={view} initialTab={tab === "rto" || tab === "exchanges" ? tab : "returns"} />;
 }

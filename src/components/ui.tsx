@@ -1,4 +1,4 @@
-import { CHANNEL_META } from "@/channels";
+import { CHANNEL_META } from "@/channels/meta";
 import type { Channel, OrderStatus } from "@/db/schema";
 import { cn } from "@/lib/utils";
 

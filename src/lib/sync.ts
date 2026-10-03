@@ -633,6 +633,11 @@ export async function syncAccount(
         },
       });
       const ingested = await ingestOrders(account, res.orders, { syncRunId: run.id });
+      // paribelle.in's SKUs join the catalogue as they first sell (or on the first sync).
+      if (account.channel === "paribelle" && ingested.unmappedSkus.length) {
+        const { linkParibelleCatalogue } = await import("./paribelle");
+        await linkParibelleCatalogue(account);
+      }
       seen = ingested.seen;
       written = ingested.written;
       syncedThrough = res.syncedThrough;

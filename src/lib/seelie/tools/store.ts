@@ -54,10 +54,10 @@ interface Category {
   parentId?: string | null;
 }
 
-const enabled = () => storeApiUrl() !== null;
+export const enabled = () => storeApiUrl() !== null;
 
 /** Store failures reach the model as refusals it can read. */
-async function call<T>(method: StoreMethod, path: string, req: Parameters<typeof storeFetch>[2] = {}): Promise<T> {
+export async function call<T>(method: StoreMethod, path: string, req: Parameters<typeof storeFetch>[2] = {}): Promise<T> {
   try {
     return await storeFetch<T>(method, path, req);
   } catch (err) {
@@ -412,7 +412,7 @@ const UPLOAD_EDGE = 1920;
  * Accepts https URLs, "chat:N" (the Nth image attached in this chat) and "asset:N"
  * (Seelie's media: shoot results, photo_edit output). Cloudinary URLs pass through.
  */
-async function rehost(refs: string[], ctx: ToolContext): Promise<Map<string, string>> {
+export async function rehost(refs: string[], ctx: ToolContext): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   const todo = [...new Set(refs)].filter((r) => {
     if (/^https:\/\/res\.cloudinary\.com\//.test(r)) {
@@ -473,7 +473,7 @@ export const storeUploadImages = defineTool({
 /* store_create_products                                                      */
 /* -------------------------------------------------------------------------- */
 
-function slugify(text: string) {
+export function slugify(text: string) {
   return text
     .toLowerCase()
     .normalize("NFKD")
@@ -932,8 +932,8 @@ export const storeApi = defineTool({
   name: "store_api",
   label: "paribelle.in API",
   description: [
-    "Call any paribelle.in API route as the store's admin, for what the other store tools don't cover (orders, promotions, homepage, categories,",
-    "reviews, customers, analytics, ...). Path is under /api/v1, e.g. /orders?page=1. GET only reads; any other method changes the store and always asks.",
+    "Call any paribelle.in API route as the store's admin, for what the other store tools don't cover (orders, promotions, reviews,",
+    "customers, analytics, ...). Path is under /api/v1, e.g. /orders?page=1. GET only reads; any other method changes the store and always asks.",
     "Check store_api_routes first. Never use it for product deletes or edits the store_* product tools can do.",
   ].join(" "),
   parameters: Type.Object({

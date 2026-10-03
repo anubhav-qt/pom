@@ -11,7 +11,7 @@ export const useReturnsCache = createViewCache<ReturnsView>();
 
 export const returnsKey = (resolved: boolean) => (resolved ? "1" : "0");
 
-export type ReturnsTab = "returns" | "rto";
+export type ReturnsTab = "returns" | "rto" | "exchanges";
 export type ReturnsFilter = "todo" | "overdue" | "done";
 
 interface ReturnsNavState {

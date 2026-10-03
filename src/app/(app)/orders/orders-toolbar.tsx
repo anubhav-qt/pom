@@ -1,6 +1,6 @@
 "use client";
 
-import { CHANNEL_META } from "@/channels";
+import { CHANNEL_META } from "@/channels/meta";
 import { ENABLED_CHANNELS } from "@/config/features";
 import type { Channel } from "@/db/schema";
 import { useOrdersNav } from "@/lib/stores/orders-cache";
