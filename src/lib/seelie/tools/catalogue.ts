@@ -19,6 +19,7 @@ import {
 } from "@/db/schema";
 import { FEATURES } from "@/config/features";
 import { linkCatalogue } from "@/lib/catalogue";
+import { linkParibelleCatalogue } from "@/lib/paribelle";
 import { freezeOrderCosts, productFamilyKey } from "@/lib/finance-queries";
 import { adjustStock, pushInventoryToChannels, sellableQuantity } from "@/lib/inventory";
 import { recomputeReserved } from "@/lib/sync";
@@ -577,17 +578,29 @@ export const amazonListings = defineTool({
 
 export const catalogueLink = defineTool({
   name: "catalogue_link",
-  label: "Map the Amazon catalogue",
+  label: "Map a channel's catalogue",
   description: [
     "Bring the Amazon catalogue into the OMS: reads the listings report and every SKU ever sold, creates a product for each new SKU",
     "(seller SKU = our SKU, Amazon's title), links listings, seeds stock rows from Amazon's quantity (never overwriting a count),",
     "fetches missing product photos, and links every old order line to its product. Safe to repeat; never touches cost, bin, weight or active.",
     "This is how 'new items on Amazon, map them here' is done.",
+    "With channel 'paribelle' it maps paribelle.in instead: each variant SKU joins the OMS product with the same SKU (the same piece on Amazon",
+    "shares one stock count), or becomes a new product with the store's photo, its stock row seeded from the store's count plus what's sold",
+    "and not yet shipped. A paribelle.in sync does this by itself for SKUs it hasn't seen.",
   ].join(" "),
-  parameters: Type.Object({ accountId: Type.Optional(Type.Integer()) }),
+  parameters: Type.Object({
+    accountId: Type.Optional(Type.Integer()),
+    channel: Type.Optional(StringEnum(["amazon", "paribelle"], { description: "Which channel's catalogue (default amazon)." })),
+  }),
   kind: "write",
-  summary: () => "Create products for new Amazon listings and link orders to them",
+  summary: (a) => (a.channel === "paribelle" ? "Map paribelle.in's SKUs to OMS products and link orders to them" : "Create products for new Amazon listings and link orders to them"),
   async execute(a, ctx) {
+    if (a.channel === "paribelle") {
+      const [account] = (await accountsFor(a.accountId)).filter((x) => x.channel === "paribelle");
+      if (!account) throw new ToolError("No paribelle.in account is connected. Add one in Settings, under channels.");
+      ctx.progress("Reading paribelle.in's catalogue…");
+      return { data: await linkParibelleCatalogue(account) };
+    }
     const account = await amazonAccount(a.accountId);
     const result = await linkCatalogue(account, { onProgress: (step) => ctx.progress(step) });
     listingCache.delete(account.id);

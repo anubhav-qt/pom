@@ -172,3 +172,83 @@ export async function getReturnsDesk(): Promise<{
     reasons: reasonRows.map((r) => ({ reason: String(r.reason), count: n(r.count) })),
   };
 }
+
+/* -------------------------------------------------------------------------- */
+/* paribelle.in exchanges                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** An exchange (or an old-style return) raised on paribelle.in, as the desk shows it. */
+export interface ExchangeRow {
+  id: number;
+  returnNumber: string;
+  orderId: number | null;
+  externalOrderId: string | null;
+  kind: "exchange" | "return";
+  /** The store's status: requested, approved, in_transit, received, replacement_shipped, completed, rejected… */
+  status: string;
+  product: string;
+  sku: string;
+  quantity: number;
+  /** The size or piece they want instead. */
+  wants: string | null;
+  sameProduct: boolean;
+  hasReplacement: boolean;
+  reason: string | null;
+  /** The customer's tracking for the parcel coming back. */
+  awb: string | null;
+  inspectionResult: "passed" | "failed" | null;
+  rejectionReason: string | null;
+  replacementAwb: string | null;
+  replacementOrdered: boolean;
+  requestedAt: string | null;
+  imageUrl: string | null;
+  open: boolean;
+}
+
+const OPEN_EXCHANGE = new Set(["requested", "approved", "in_transit", "received"]);
+
+export async function getParibelleExchanges(): Promise<ExchangeRow[]> {
+  const rows = (
+    await db.execute(sql`
+      SELECT r.id, r.order_id, o.external_order_id, r.reason, r.awb, r.requested_at, r.status, r.raw,
+             (SELECT p.image_url FROM order_items oi JOIN products p ON p.id = oi.product_id
+               WHERE oi.order_id = r.order_id AND oi.external_item_id = r.raw->>'orderItemId' AND p.image_url IS NOT NULL LIMIT 1) AS item_image,
+             (SELECT p.image_url FROM order_items oi JOIN products p ON p.id = oi.product_id
+               WHERE oi.order_id = r.order_id AND p.image_url IS NOT NULL ORDER BY oi.id LIMIT 1) AS any_image
+      FROM returns r
+      LEFT JOIN orders o ON o.id = r.order_id
+      WHERE r.channel = 'paribelle'
+      ORDER BY r.requested_at DESC NULLS LAST, r.id DESC
+      LIMIT 1000
+    `)
+  ).rows;
+
+  return rows.map((r) => {
+    const raw = (r.raw ?? {}) as Record<string, unknown>;
+    const str = (v: unknown) => (v == null || v === "" ? null : String(v));
+    const status = String(r.status ?? raw.status ?? "requested");
+    return {
+      id: n(r.id),
+      returnNumber: String(raw.returnNumber ?? ""),
+      orderId: r.order_id == null ? null : n(r.order_id),
+      externalOrderId: str(r.external_order_id),
+      kind: raw.requestType === "return" ? "return" : "exchange",
+      status,
+      product: String(raw.product ?? ""),
+      sku: String(raw.sku ?? ""),
+      quantity: n(raw.quantity) || 1,
+      wants: str(raw.wants),
+      sameProduct: raw.sameProduct !== false,
+      hasReplacement: raw.hasReplacement !== false,
+      reason: str(r.reason),
+      awb: str(r.awb),
+      inspectionResult: raw.inspectionResult === "passed" || raw.inspectionResult === "failed" ? raw.inspectionResult : null,
+      rejectionReason: str(raw.rejectionReason),
+      replacementAwb: str(raw.replacementTrackingNumber),
+      replacementOrdered: Boolean(raw.completedOrderId),
+      requestedAt: r.requested_at ? new Date(r.requested_at as string).toISOString() : null,
+      imageUrl: str(r.item_image) ?? str(r.any_image),
+      open: OPEN_EXCHANGE.has(status),
+    };
+  });
+}

@@ -5,8 +5,9 @@ import { revalidatePath } from "next/cache";
 
 import { db } from "@/db";
 import { orderItems, returns } from "@/db/schema";
-import { requireUser } from "@/lib/auth";
+import { requireOwner, requireUser } from "@/lib/auth";
 import { adjustStock } from "@/lib/inventory";
+import { actOnParibelleExchange, type ParibelleExchangeAction } from "@/lib/paribelle";
 
 /**
  * Check a returned parcel back in.
@@ -101,4 +102,25 @@ export async function reopenReturn(returnId: number) {
   await db.update(returns).set({ outcome: null }).where(eq(returns.id, returnId));
   revalidatePath("/returns");
   return { ok: true as const };
+}
+
+/**
+ * A paribelle.in exchange moved along from the desk: approved or rejected,
+ * inspected, its replacement shipped or ordered, or settled as store credit
+ * (money, so the owner's call). The store tells the customer each step.
+ */
+export async function paribelleExchangeAction(
+  returnId: number,
+  act: ParibelleExchangeAction,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = act.action === "settle_credit" ? await requireOwner() : await requireUser();
+  try {
+    await actOnParibelleExchange(returnId, act, user.id);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath("/returns");
+  revalidatePath("/orders");
+  revalidatePath("/inventory");
+  return { ok: true };
 }

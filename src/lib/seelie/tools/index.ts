@@ -29,6 +29,8 @@ import {
   storeUpdateProducts,
   storeUploadImages,
 } from "./store";
+import { paribelleOrders } from "./paribelle";
+import { storeCategories, storeHsn, storePages, storeSettings } from "./site";
 import { marketplaceAccounts, syncMarketplace, syncStatus } from "./sync";
 import type { SeelieTool } from "./types";
 import { fetchUrl, webSearch, youtube } from "./web";
@@ -44,6 +46,7 @@ const ALL = [
   scanLookup,
   returnsDesk,
   returnsUpdate,
+  paribelleOrders,
   orderNotes,
   // Catalogue and stock
   productsTool,
@@ -68,6 +71,10 @@ const ALL = [
   storeCreateProducts,
   storeAmazonGap,
   storeHero,
+  storeSettings,
+  storePages,
+  storeCategories,
+  storeHsn,
   storeApiRoutes,
   storeApi,
   // Media (videos and reels are Seelie's own edits through video_render; the Reels screen's

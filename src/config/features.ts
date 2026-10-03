@@ -38,10 +38,11 @@ export const FEATURES = {
 } as const;
 
 /**
- * Channels offered in the UI. The adapters for the others still exist and still
- * work — they are simply not presented until we get to them.
+ * Channels offered in the UI: Amazon, and paribelle.in (the shop's own storefront).
+ * The adapters for the others still exist and still work — they are simply not
+ * presented until we get to them.
  */
-export const ENABLED_CHANNELS = ["amazon"] as const;
+export const ENABLED_CHANNELS = ["amazon", "paribelle"] as const;
 
 export type EnabledChannel = (typeof ENABLED_CHANNELS)[number];
 

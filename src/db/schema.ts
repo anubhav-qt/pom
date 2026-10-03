@@ -25,7 +25,7 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => "bytea",
 });
 
-export const channelEnum = pgEnum("channel", ["amazon", "flipkart", "meesho"]);
+export const channelEnum = pgEnum("channel", ["amazon", "flipkart", "meesho", "paribelle"]);
 
 /**
  * Canonical order lifecycle. Every marketplace has its own vocabulary

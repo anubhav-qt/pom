@@ -10,8 +10,10 @@ import type { Channel, OrderStatus } from "@/db/schema";
 import { money } from "@/lib/utils";
 
 import { useOrderDetailCache } from "@/lib/stores/order-detail-cache";
+import { invalidateOrderViews } from "@/lib/stores/orders-cache";
 
 import { getOrderDetail, type OrderDetail } from "./actions";
+import { ParibellePanel } from "./paribelle-panel";
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -41,6 +43,16 @@ export function OrderDetailModal({ orderId, onClose }: { orderId: number; onClos
     useOrderDetailCache.getState().peek(orderId),
   );
   const [error, setError] = useState<string | null>(null);
+
+  // After a change written back to paribelle.in: every cached view is stale, this order first.
+  const reload = () => {
+    invalidateOrderViews();
+    useOrderDetailCache
+      .getState()
+      .load(orderId, getOrderDetail)
+      .then((d) => d && setDetail(d))
+      .catch(() => {});
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +126,10 @@ export function OrderDetailModal({ orderId, onClose }: { orderId: number; onClos
               ))}
             </div>
           </div>
+
+          {detail.store ? (
+            <ParibellePanel orderId={detail.id} store={detail.store} isOwner={detail.viewerIsOwner} onChanged={reload} />
+          ) : null}
 
           {detail.shipment ? (
             <div>

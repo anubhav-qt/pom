@@ -11,7 +11,7 @@ const TTL_MS = 10 * 60_000;
 const TIMEOUT_MS = 15_000;
 
 /** The store's API, /api/v1 included. The product list is public, so the live one serves a dev machine too. */
-const storeApi = () => (process.env.PARIBELLE_API_URL?.trim() || "https://api.paribelle.in/api/v1").replace(/\/+$/, "");
+export const storeApi = () => (process.env.PARIBELLE_API_URL?.trim() || "https://api.paribelle.in/api/v1").replace(/\/+$/, "");
 
 interface RawVariant {
   variantAttributes: Record<string, string> | null;
@@ -66,6 +66,8 @@ export interface CatalogueItem {
 export interface Catalogue {
   items: CatalogueItem[];
   byRef: Map<string, CatalogueItem>;
+  /** By the store's product id. */
+  byId: Map<string, CatalogueItem>;
   /** Everything the model reads about the shop, one product a line. */
   text: string;
 }
@@ -157,6 +159,7 @@ async function load(): Promise<Catalogue> {
   return {
     items,
     byRef: new Map(items.map((it) => [it.ref, it])),
+    byId: new Map(items.map((it) => [it.card.id, it])),
     text: items.map((it) => it.line).join("\n"),
   };
 }
