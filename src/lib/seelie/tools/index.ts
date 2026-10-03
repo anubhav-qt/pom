@@ -9,6 +9,7 @@ import { instagram, instagramPost } from "./instagram";
 import { memory } from "./memory";
 import { finance, orderNotes } from "./money";
 import { cancellations, findOrders, fulfilment, orderDetails, ordersOverview, scanLookup } from "./orders";
+import { pdfEdit, pdfRead } from "./pdf";
 import { imageSpecs, photoEdit } from "./photo";
 import { photoshoot } from "./photoshoot";
 import { photoPublish, videoPublish } from "./publish";
@@ -84,6 +85,9 @@ const ALL = [
   photoEdit,
   imageSpecs,
   photoPublish,
+  // PDFs: read them, and make new ones (edits, forms, redaction, HTML laid out as pages)
+  pdfRead,
+  pdfEdit,
   // Instagram and Meta ads (the Meta connection in Seelie's settings)
   instagram,
   instagramPost,

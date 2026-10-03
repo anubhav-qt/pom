@@ -22,6 +22,9 @@ const studio = ["./src/lib/seelie/studio/templates/**", "./src/lib/seelie/studio
 const onVercel = !!process.env.VERCEL;
 const onnx = onVercel ? [] : ["./node_modules/onnxruntime-node/bin/napi-v6/linux/x64/**"];
 
+/** MuPDF (Seelie's PDF tools) reads its wasm from beside its script by URL, which tracing doesn't follow. */
+const mupdf = onVercel ? [] : ["./node_modules/mupdf/dist/mupdf.js", "./node_modules/mupdf/dist/mupdf-wasm.js", "./node_modules/mupdf/dist/mupdf-wasm.wasm"];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   /**
@@ -72,7 +75,7 @@ const nextConfig = {
    * external it resolves from node_modules normally, which is the only way
    * label splitting works inside a route handler.
    */
-  serverExternalPackages: ["pdf-lib", "xlsx", "pdfjs-dist", "@napi-rs/canvas", "ffmpeg-static", "onnxruntime-node", "nunjucks"],
+  serverExternalPackages: ["pdf-lib", "xlsx", "pdfjs-dist", "@napi-rs/canvas", "ffmpeg-static", "onnxruntime-node", "nunjucks", "mupdf"],
 
   /**
    * pdfjs loads its worker with a dynamic import it builds at runtime, which
@@ -97,10 +100,12 @@ const nextConfig = {
      * Seelie's tools run inside the request that started the reply: reels, renders,
      * cut-outs, photo edits and shoots (their prompt templates and the watermark maps
      * are read from src/ at run time). Uploads are read by ffmpeg as they arrive; an
-     * image asset's small copy is drawn with the canvas.
+     * image asset's small copy is drawn with the canvas. MuPDF (the PDF tools, and an
+     * uploaded PDF's page count) loads its wasm from beside its script.
      */
-    "/api/seelie/runs": [...media, ...onnx, "./src/lib/reels/assets/**", ...studio],
-    "/api/seelie/assets": media,
+    "/api/seelie/runs": [...media, ...onnx, "./src/lib/reels/assets/**", ...studio, ...mupdf],
+    "/api/seelie/tool-calls": mupdf,
+    "/api/seelie/assets": [...media, ...mupdf],
     "/api/seelie/assets/[id]": media,
   },
 

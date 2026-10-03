@@ -22,6 +22,7 @@ const BY_EXT: Record<string, string> = {
   m4a: "audio/mp4", mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg",
   jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif",
   srt: "application/x-subrip", ass: "text/x-ssa",
+  pdf: "application/pdf",
 };
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
 
   let mime = (h.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
   if (!kindOfMime(mime) || !extOf(mime)) mime = BY_EXT[name.split(".").pop()?.toLowerCase() ?? ""] ?? "";
-  if (!mime) return bad(`${name} isn't a clip, sound, image or subtitles Seelie can use.`, 415);
+  if (!mime) return bad(`${name} isn't a clip, sound, image, subtitles or PDF Seelie can use.`, 415);
 
   const dir = await mediaFolder("cache", "uploads");
   const part = path.join(dir, `${user.id}-${upload.toLowerCase()}.part`);

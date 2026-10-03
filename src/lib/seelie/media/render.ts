@@ -235,6 +235,7 @@ export async function renderGraph(
     for (const input of spec.inputs) {
       const media = await resolveRef(input.ref, { chatImages: ctx.chatImages, workDir: work });
       if (media.kind === "subtitles") throw new MediaError(`${input.ref} is subtitles: use it in the graph as $asset/<id>, not as an input.`);
+      if (media.kind === "document") throw new MediaError(`${input.ref} is a PDF: pdf_edit with as: "png" makes pictures of its pages to use instead.`);
       if (input.start !== undefined && (input.start < 0 || (media.duration && input.start >= media.duration))) {
         throw new MediaError(`${input.ref}: start ${input.start} s is outside its ${media.duration ?? 0} s.`);
       }

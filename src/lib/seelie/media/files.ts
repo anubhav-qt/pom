@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomBytes } from "node:crypto";
-import { copyFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { eq } from "drizzle-orm";
@@ -14,7 +14,7 @@ import { FfmpegError, runFfmpeg } from "@/lib/reels/ffmpeg";
  * Seelie's media folder: the ThinkPad's `seelie-media` volume (SEELIE_MEDIA_DIR), or
  * .seelie-media in the project on a dev machine. What lives there:
  *
- *   assets/   clips, images and sounds the tools work with (indexed in seelie_assets)
+ *   assets/   clips, images, sounds and PDFs the tools work with (indexed in seelie_assets)
  *   videos/   the library's renders: videos/<id>/v<version>.mp4, its poster and watch copy
  *   fonts/    fonts the graphs may use ($font/<file>), added by name from Google Fonts
  *   luts/     colour looks the graphs may use ($lut/<file>.cube)
@@ -22,7 +22,7 @@ import { FfmpegError, runFfmpeg } from "@/lib/reels/ffmpeg";
  *   models/   the cut-out model, downloaded once
  */
 
-export type MediaKind = "image" | "video" | "audio" | "subtitles";
+export type MediaKind = "image" | "video" | "audio" | "subtitles" | "document";
 
 export function mediaDir() {
   return path.resolve(process.env.SEELIE_MEDIA_DIR?.trim() || path.join(process.cwd(), ".seelie-media"));
@@ -62,6 +62,7 @@ const EXT: Record<string, string> = {
   "audio/ogg": "ogg",
   "text/x-ssa": "ass",
   "application/x-subrip": "srt",
+  "application/pdf": "pdf",
 };
 
 export function kindOfMime(mime: string): MediaKind | null {
@@ -69,6 +70,7 @@ export function kindOfMime(mime: string): MediaKind | null {
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
   if (mime === "text/x-ssa" || mime === "application/x-subrip") return "subtitles";
+  if (mime === "application/pdf") return "document";
   return null;
 }
 
@@ -167,7 +169,7 @@ export interface NewAsset {
 
 export class MediaError extends Error {}
 
-/** Save a file to assets/ and index it. Media that ffmpeg can't read safely is refused. */
+/** Save a file to assets/ and index it. Media that ffmpeg can't read safely is refused, and a PDF that isn't one. */
 export async function saveAsset(input: NewAsset): Promise<AssetRow> {
   const kind = kindOfMime(input.mime);
   const ext = extOf(input.mime);
@@ -181,7 +183,19 @@ export async function saveAsset(input: NewAsset): Promise<AssetRow> {
   else throw new MediaError("Nothing to save.");
 
   let facts: MediaFacts | null = null;
-  if (kind !== "subtitles") {
+  let meta = input.meta ?? null;
+  if (kind === "document") {
+    const bytes = input.bytes ?? (await readFile(file));
+    // A PDF starts with %PDF- (within its first KB, after any junk some writers put first).
+    if (!bytes.subarray(0, 1024).includes("%PDF-")) {
+      await rm(file, { force: true });
+      throw new MediaError(`${input.name} isn't a PDF.`);
+    }
+    if (typeof meta?.pages !== "number") {
+      const { pdfPageCount } = await import("./pdf");
+      meta = { ...meta, pages: await pdfPageCount(bytes) };
+    }
+  } else if (kind !== "subtitles") {
     facts = await inspect(file);
     if (!readableFormat(facts.format) || (kind === "video" && !facts.hasVideo) || (kind === "audio" && !facts.hasAudio)) {
       await rm(file, { force: true });
@@ -204,7 +218,7 @@ export async function saveAsset(input: NewAsset): Promise<AssetRow> {
       height: facts?.height ?? null,
       duration: kind === "image" ? null : (facts?.duration ?? null),
       hasAudio: kind === "video" ? (facts?.hasAudio ?? false) : null,
-      meta: input.meta ?? null,
+      meta,
     })
     .returning();
   return row;
@@ -237,6 +251,7 @@ export function assetSummary(a: AssetRow) {
     ...(a.width ? { size: `${a.width}x${a.height}` } : {}),
     ...(a.duration ? { seconds: Math.round(a.duration * 10) / 10 } : {}),
     ...(a.kind === "video" ? { sound: a.hasAudio } : {}),
+    ...(a.kind === "document" && typeof (a.meta as { pages?: unknown } | null)?.pages === "number" ? { pages: (a.meta as { pages: number }).pages } : {}),
   };
 }
 
