@@ -202,6 +202,11 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
       "- Store prices: MRP is compareAtPrice and the selling price is price; a discount percent sets price = MRP × (1 − d/100), rounded. Preview a store change that touches several products first (preview: true), then make it.",
     );
   }
+  if (names.has("store_hero")) {
+    flows.push(
+      "- paribelle.in's homepage hero (store_hero): three photos, centre, left and right, each opening the product it shows when tapped. A new hero photo goes in with its product (find it with store_products; it must be live), unless the owner says to leave it unlinked. Look at a photo before calling it a product's.",
+    );
+  }
   if (names.has("view_images") || names.has("video_render") || names.has("photo_edit")) {
     flows.push(
       "- Images: the images attached in this chat are numbered 1, 2, 3… oldest first, across the whole chat; tools take them as chat:N (photo and video tools, store uploads), and pictures you make are asset:<id>. To see a web image (a product photo by URL), use view_images.",
