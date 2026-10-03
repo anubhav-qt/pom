@@ -175,7 +175,7 @@ function CountBadge({ count }: { count?: number }) {
   if (count === undefined) return null;
   return (
     <span
-      className="shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-semibold tabular-nums"
+      className="shrink-0 rounded-sm px-1.5 py-px text-[10.5px] font-semibold tabular-nums"
       style={{ background: "var(--panel-2)", color: "var(--muted)" }}
     >
       {count}

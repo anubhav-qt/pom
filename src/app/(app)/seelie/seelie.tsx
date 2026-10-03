@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, MoreHorizontal, Pin, Plus, Settings2, Sparkles, SquarePen } from "lucide-react";
+import { CalendarClock, Clapperboard, IndianRupee, MoreHorizontal, Package, Pin, Plus, Settings2, Sparkles, SquarePen, TrendingUp, Undo2, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
@@ -262,7 +262,8 @@ export function Seelie() {
 
       {/* Tall enough that the box starts at the foot of the screen (on phones the spacer under it included). */}
       <div className="mx-auto flex min-h-[calc(100dvh-184px+env(safe-area-inset-bottom))] w-full max-w-3xl flex-col sm:min-h-[calc(100dvh-11rem)]">
-        <div className="flex-1 pt-4">
+        {/* A new chat's welcome sits in the middle of the space above the box. */}
+        <div className={!loadingChat && online && empty ? "flex flex-1 flex-col justify-center py-4" : "flex-1 pt-4"}>
           {loadingChat ? (
             <CenteredSpinner />
           ) : !online && !messages.length && !pending ? (
@@ -324,43 +325,43 @@ export function Seelie() {
   );
 }
 
+/** A new chat: a greeting and four things to ask in one tap, all on one screen. */
 function Welcome({ name, owner, canSend }: { name: string; owner: boolean; canSend: boolean }) {
   const first = name.split(/\s+/)[0];
-  const ideas = [
-    "How many orders are waiting to be packed?",
-    "What sold best in the last 30 days?",
-    "Which returns still need checking in?",
-    "How much has Amazon paid us this month?",
-    ...(owner ? ["Which Amazon items aren't on paribelle.in yet?", "Make a reel from these photos"] : []),
+  const ideas: { label: string; ask: string; icon: LucideIcon; send?: false }[] = [
+    { label: "Orders to pack", ask: "How many orders are waiting to be packed?", icon: Package },
+    { label: "Returns to check in", ask: "Which returns still need checking in?", icon: Undo2 },
+    { label: "Best sellers", ask: "What sold best in the last 30 days?", icon: TrendingUp },
+    // A reel needs its photos first: it waits in the box.
+    owner
+      ? { label: "Make a reel", ask: "Make a reel from these photos", icon: Clapperboard, send: false }
+      : { label: "Amazon payouts", ask: "How much has Amazon paid us this month?", icon: IndianRupee },
   ];
   return (
-    <div className="flex flex-col items-center px-1 pb-6 pt-6 text-center sm:px-2 sm:pt-16">
+    <div className="flex flex-col items-center px-1 text-center sm:px-2">
       <div
-        className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
+        className="mb-3 flex h-10 w-10 items-center justify-center rounded-full"
         style={{ background: "radial-gradient(circle at 35% 30%, var(--accent-soft), transparent 70%)", border: "1px solid var(--border)" }}
       >
-        <Sparkles className="h-5 w-5" style={{ color: "var(--accent)" }} />
+        <Sparkles className="h-[18px] w-[18px]" style={{ color: "var(--accent)" }} />
       </div>
       <h1 className="text-xl font-semibold tracking-tight">{first ? `Hi ${first}, what can I do?` : "What can I do?"}</h1>
-      <p className="muted mt-1.5 max-w-md text-sm">
-        Ask about orders, returns, money and stock, or tell Seelie what to change. It asks before it edits anything.
-      </p>
-      <div className="mt-5 grid w-full max-w-xl gap-2 sm:mt-6 sm:grid-cols-2">
-        {ideas.map((idea) => (
+      <div className="mt-5 grid w-full max-w-md grid-cols-2 gap-2">
+        {ideas.map(({ label, ask, icon: Icon, send }) => (
           <button
-            key={idea}
+            key={label}
             type="button"
             disabled={!canSend}
             onClick={() => {
               const s = useSeelie.getState();
-              s.setDraft(idea);
-              // A reel needs its photos first: leave it in the box.
-              if (!idea.startsWith("Make a reel")) void s.send();
+              s.setDraft(ask);
+              if (send !== false) void s.send();
             }}
-            className="rounded-xl border px-3 py-2.5 text-left text-sm transition-colors hover:bg-[var(--accent-soft)] disabled:opacity-50"
+            className="flex items-center gap-2.5 rounded-xl border px-3 py-3 text-left text-sm font-medium transition-colors hover:bg-[var(--accent-soft)] disabled:opacity-50"
             style={{ borderColor: "var(--border)", background: "var(--panel)" }}
           >
-            {idea}
+            <Icon className="h-4 w-4 shrink-0" style={{ color: "var(--accent)" }} />
+            <span className="min-w-0 leading-snug">{label}</span>
           </button>
         ))}
       </div>

@@ -65,7 +65,6 @@ export interface OrderDetail {
     receivedAt: string | null;
     restocked: boolean;
   } | null;
-  raw: unknown;
 }
 
 /** Everything known about one order, for the detail popup. */
@@ -163,7 +162,6 @@ export async function getOrderDetail(orderId: number): Promise<OrderDetail | nul
     returnRecord: returnRow
       ? { ...returnRow, receivedAt: returnRow.receivedAt?.toISOString() ?? null }
       : null,
-    raw: order.raw,
   };
 }
 
