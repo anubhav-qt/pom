@@ -5,6 +5,7 @@ import os from "node:os";
 import { Agent, type AgentEvent, type AgentTool, type BeforeToolCallResult } from "@paribelle/pi-agent";
 import {
   streamSimple,
+  Type,
   type Api,
   type AssistantMessage,
   type ImageContent,
@@ -12,6 +13,7 @@ import {
   type Message,
   type TextContent,
   type ToolResultMessage,
+  type TSchema,
   type Usage,
   type UserMessage,
   type VideoContent,
@@ -358,13 +360,46 @@ function chatImages(run: LiveRun): ImageContent[] {
   return images;
 }
 
+/**
+ * What an approval card leads with: the model's own one-line, plain-words account of the
+ * change ("Put the blue kurta on paribelle.in for ₹1,499"), for whoever approves it, who may
+ * not read code. The exact call stays one tap below it.
+ */
+const ASK = "ask";
+const askSchemas = new WeakMap<SeelieTool, TSchema>();
+
+function withAsk(tool: SeelieTool): TSchema {
+  const schema = tool.parameters as TSchema & { type?: string; properties?: Record<string, TSchema>; required?: string[] };
+  if (tool.kind === "read" || schema.type !== "object" || !schema.properties || ASK in schema.properties) return schema;
+  let out = askSchemas.get(tool);
+  if (!out) {
+    const ask = Type.String({
+      maxLength: 200,
+      description:
+        "For the person approving this, who may not be technical: one short sentence in everyday words saying what will happen, e.g. \"Put the blue cotton kurta on paribelle.in as a draft for ₹1,499\". No ids, codes, field names or jargon." +
+        (typeof tool.kind === "function" ? " Needed when this call changes something; leave it out when it only reads." : ""),
+    });
+    // A fixed kind always asks; one worked out from the arguments may only read.
+    out = { ...schema, properties: { ...schema.properties, [ASK]: ask }, required: typeof tool.kind === "string" ? [...(schema.required ?? []), ASK] : schema.required };
+    askSchemas.set(tool, out);
+  }
+  return out;
+}
+
+/** The arguments as the tool itself takes them (without `ask`). */
+function withoutAsk(params: unknown) {
+  if (!params || typeof params !== "object" || !(ASK in params)) return params;
+  const { [ASK]: _, ...rest } = params as Record<string, unknown>;
+  return rest;
+}
+
 function agentTool(run: LiveRun, tool: SeelieTool, scope?: Scope): AgentTool {
   const sequential = tool.kind !== "read";
   return {
     name: tool.name,
     label: tool.label,
     description: tool.description,
-    parameters: tool.parameters,
+    parameters: withAsk(tool),
     ...(sequential ? { executionMode: "sequential" as const } : {}),
     execute: async (modelCallId, params, signal, onUpdate) => {
       const toolCallId = scopedId(scope, modelCallId);
@@ -397,7 +432,7 @@ function agentTool(run: LiveRun, tool: SeelieTool, scope?: Scope): AgentTool {
         canWatch: run.canWatch,
       };
       try {
-        const out = await tool.execute(params as never, ctx);
+        const out = await tool.execute(withoutAsk(params) as never, ctx);
         const text = [out.text, out.data === undefined ? null : JSON.stringify(out.data)].filter(Boolean).join("\n") || "Done.";
         const content: (TextContent | ImageContent | VideoContent)[] = [
           { type: "text", text: capText(text) },
@@ -425,12 +460,12 @@ async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: M
     let summary: string | null = null;
     if (tool) {
       try {
-        kind = kindOf(tool, call.arguments);
+        kind = kindOf(tool, withoutAsk(call.arguments));
       } catch {
         kind = typeof tool.kind === "string" ? tool.kind : "write";
       }
       try {
-        summary = (await tool.summary(call.arguments as never, { user: run.user })) || null;
+        summary = (await tool.summary(withoutAsk(call.arguments) as never, { user: run.user })) || null;
       } catch {
         // Arguments it can't summarise: the card shows them as they are.
       }
@@ -903,9 +938,10 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
       .limit(1);
     if (active) throw new SeelieRunError("Seelie is still replying in this chat. Stop it or wait.", 409);
   } else {
+    autoApprove = input.autoApprove === true;
     const [chat] = await db
       .insert(seelieChats)
-      .values({ userId: user.id, title: "", model: modelId, thinking })
+      .values({ userId: user.id, title: "", model: modelId, thinking, autoApprove })
       .returning({ id: seelieChats.id });
     chatId = chat.id;
     isNew = true;

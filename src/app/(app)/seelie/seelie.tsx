@@ -46,6 +46,8 @@ export function Seelie() {
     const s = useSeelie.getState();
     void s.loadChats();
     if (!s.status) void s.loadStatus().then(() => useSeelie.getState().loadLimits());
+    // Back from another screen after a blip: catch up on what happened meanwhile.
+    else if (s.status.online && s.chatId && !s.pending) void s.resume();
     if (s.chatId === null && !s.messages.length && !s.pending) {
       const last = lastChatId();
       if (last) void s.openChat(last);
@@ -89,8 +91,45 @@ export function Seelie() {
     if (stick.current) window.scrollTo({ top: document.documentElement.scrollHeight });
   }, [messages, tools, partial, pending, loadingChat, error]);
 
+  // When a phone's keyboard goes down (a message just sent), iOS leaves the page scrolled
+  // past its end: the reply sits off the top and the box floats mid-screen. Settle it.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let frame = 0;
+    const settle = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const max = document.documentElement.scrollHeight - window.innerHeight;
+        if (stick.current) window.scrollTo({ top: document.documentElement.scrollHeight });
+        else if (window.scrollY > max) window.scrollTo({ top: max });
+      });
+    };
+    vv.addEventListener("resize", settle);
+    return () => {
+      vv.removeEventListener("resize", settle);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
   const empty = !chatId && !messages.length && !pending && !partial;
   const online = status?.online ?? true;
+
+  // Seelie runs on the ThinkPad; for a moment now and then (catching up, restarting) the
+  // page is answered from the cloud, where it's offline. Look again until it's back, then
+  // pick the chat up where it was.
+  useEffect(() => {
+    if (online) return;
+    const timer = setInterval(async () => {
+      await useSeelie.getState().loadStatus();
+      const s = useSeelie.getState();
+      if (s.status?.online) {
+        void s.loadLimits();
+        void s.resume();
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [online]);
   const models = status?.catalog?.models.length ?? 0;
   const disabled = !status
     ? "Starting…"
@@ -116,21 +155,24 @@ export function Seelie() {
     })),
   ];
 
-  const chatMenu: DropdownOption[] = chatId
-    ? [
-        { id: "rename", label: "Rename" },
-        { id: "pin", label: pinned ? "Unpin" : "Pin to the top" },
-        { id: "auto", label: autoApprove ? "Ask before OMS edits" : "Auto-approve OMS edits" },
-        { id: "delete", label: "Delete", dividerBefore: true },
-      ]
-    : [];
+  // Phones keep Routines in here (the rail has room for its icon from `sm` up).
+  const chatMenu: DropdownOption[] = [
+    { id: "routines", label: "Routines" },
+    ...(chatId
+      ? [
+          { id: "rename", label: "Rename", dividerBefore: true },
+          { id: "pin", label: pinned ? "Unpin" : "Pin to the top" },
+          { id: "delete", label: "Delete", dividerBefore: true },
+        ]
+      : []),
+  ];
 
   function onChatMenu(id: string) {
     const s = useSeelie.getState();
+    if (id === "routines") return setRoutines(true);
     if (!chatId) return;
     if (id === "rename") setRenaming(true);
     else if (id === "pin") void s.pin(chatId, !pinned);
-    else if (id === "auto") void s.setAutoApprove(!autoApprove);
     else if (id === "delete") setDeleting(true);
   }
 
@@ -146,14 +188,20 @@ export function Seelie() {
         }}
         actions={
           <>
-            {chatId ? (
+            {/* Also before a chat's first message: the new chat starts with it. */}
+            <div className="flex shrink-0" title="OMS edits run without asking in this chat. Amazon, paribelle.in, posts and ads always ask.">
               <Toggle
-                className="hidden items-center sm:flex [&>button]:mt-0"
+                className="items-center gap-2 sm:gap-3 [&>button]:mt-0"
                 checked={autoApprove}
                 onChange={(v) => void useSeelie.getState().setAutoApprove(v)}
-                label="Auto-approve OMS edits"
+                label={
+                  <>
+                    <span className="whitespace-nowrap text-[13px] sm:hidden">Auto-approve</span>
+                    <span className="hidden sm:inline">Auto-approve OMS edits</span>
+                  </>
+                }
               />
-            ) : null}
+            </div>
             {/* Phones: a new chat one tap away (from `sm` up the chat list is close enough). */}
             {!empty ? (
               <button
@@ -165,20 +213,19 @@ export function Seelie() {
                 <SquarePen className="h-[17px] w-[17px]" />
               </button>
             ) : null}
-            {chatId ? (
-              <DropdownMenu
-                align="right"
-                trigger={
-                  <span className="nav-icon-btn h-8 w-8" aria-label="Chat options">
-                    <MoreHorizontal className="h-[18px] w-[18px]" />
-                  </span>
-                }
-                options={chatMenu}
-                activeId=""
-                onSelect={onChatMenu}
-              />
-            ) : null}
-            <button type="button" className="nav-icon-btn h-8 w-8" aria-label="Routines" title="Routines" onClick={() => setRoutines(true)}>
+            <DropdownMenu
+              align="right"
+              className={chatId ? "relative shrink-0" : "relative shrink-0 sm:hidden"}
+              trigger={
+                <span className="nav-icon-btn h-8 w-8" aria-label="Chat options">
+                  <MoreHorizontal className="h-[18px] w-[18px]" />
+                </span>
+              }
+              options={chatMenu}
+              activeId=""
+              onSelect={onChatMenu}
+            />
+            <button type="button" className="nav-icon-btn hidden h-8 w-8 sm:flex" aria-label="Routines" title="Routines" onClick={() => setRoutines(true)}>
               <CalendarClock className="h-[18px] w-[18px]" />
             </button>
             <button type="button" className="nav-icon-btn h-8 w-8" aria-label="Seelie settings" onClick={() => setSettings(true)}>
@@ -188,16 +235,15 @@ export function Seelie() {
         }
       />
 
-      <div className="mx-auto flex min-h-[calc(100dvh-13rem)] w-full max-w-3xl flex-col sm:min-h-[calc(100dvh-11rem)]">
+      {/* Tall enough that the box starts at the foot of the screen (on phones the spacer under it included). */}
+      <div className="mx-auto flex min-h-[calc(100dvh-184px+env(safe-area-inset-bottom))] w-full max-w-3xl flex-col sm:min-h-[calc(100dvh-11rem)]">
         <div className="flex-1 pt-4">
           {loadingChat ? (
             <CenteredSpinner />
+          ) : !online && !messages.length && !pending ? (
+            <Empty title="Seelie is away for a moment" hint="Seelie runs on the ThinkPad, which isn't answering right now. This page reconnects by itself." />
           ) : empty ? (
-            online ? (
-              <Welcome name={status?.me.name ?? ""} owner={status?.me.owner ?? false} canSend={!disabled} />
-            ) : (
-              <Empty title="Seelie is offline here" hint="Seelie runs on the ThinkPad. Open the OMS there to talk to it; your chats can still be read here." />
-            )
+            <Welcome name={status?.me.name ?? ""} owner={status?.me.owner ?? false} canSend={!disabled} />
           ) : (
             <Timeline />
           )}
@@ -211,9 +257,9 @@ export function Seelie() {
         </div>
 
         {!online ? (
-          empty ? null : (
-            <p className="muted sticky bottom-[calc(56px+env(safe-area-inset-bottom))] py-4 text-center text-xs sm:bottom-0">
-              Seelie is offline here (it runs on the ThinkPad). Chats can still be read.
+          !messages.length && !pending ? null : (
+            <p className="muted sticky bottom-[calc(56px+env(safe-area-inset-bottom))] py-4 text-center text-xs sm:bottom-0" style={{ background: "var(--bg)" }}>
+              Seelie is away for a moment (it runs on the ThinkPad). Reconnecting…
             </p>
           )
         ) : (
@@ -240,6 +286,9 @@ export function Seelie() {
             />
           </>
         )}
+        {/* Phones: room below the docked box for the nav bar under it (the page's own bottom
+            padding is less), so the box never has to ride up over the latest message. */}
+        <div aria-hidden className="dock-spacer h-[calc(56px+env(safe-area-inset-bottom)-2rem)] shrink-0 sm:hidden" />
       </div>
 
       {settings ? <SettingsModal onClose={() => setSettings(false)} /> : null}

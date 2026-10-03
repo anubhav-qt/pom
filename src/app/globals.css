@@ -620,7 +620,8 @@ input[type="checkbox"]:disabled {
 
 /* While Seelie's box is written in on a phone (the keyboard is up), the bottom
    nav steps aside so the box can sit on the keyboard. */
-html[data-typing] .mobile-nav {
+html[data-typing] .mobile-nav,
+html[data-typing] .dock-spacer {
   display: none;
 }
 

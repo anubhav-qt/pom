@@ -16,10 +16,10 @@ export interface CrumbSegment {
 /**
  * The second rail under the header: a category and, beside it, that category's
  * own sub-list ("To Ship › Unshipped", "Customer returns › To do"), each half a
- * small dropdown. Below `sm` it is one sticky line at the top of the page; from
- * `sm` up it is portaled into the header's third band, with the search box at
- * its right end. Orders and Returns both use it, so the two rails are the same
- * object with different contents.
+ * small dropdown. It is portaled into the header's third band, so header and rail
+ * are one sticky block that can't come apart when a phone overscrolls; from `sm` up
+ * the search box sits at its right end. Orders and Returns both use it, so the two
+ * rails are the same object with different contents.
  *
  * No chevron follows either label — tapping the text is the affordance.
  */
@@ -119,32 +119,46 @@ export function RailCrumb({
     </>
   );
 
-  return (
+  const phoneRow = (
     <>
+      {crumb}
+      {actions ? <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div> : null}
+    </>
+  );
+
+  // Until the header's slot is found (the first paint), the phone row stands in the page
+  // where the header will grow to hold it, so nothing jumps.
+  if (!slot) {
+    return (
       <div
         className="no-print sticky z-30 -mx-4 -mt-6 flex items-center gap-1.5 px-4 py-2.5 sm:hidden"
         style={{ top: 56, borderTop: "1px solid var(--border)", background: "var(--panel)" }}
       >
-        {crumb}
-        {actions ? <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div> : null}
+        {phoneRow}
       </div>
-      {slot
-        ? createPortal(
-            <div style={{ borderTop: "1px solid var(--border)" }}>
-              <div className="mx-auto hidden max-w-7xl items-center gap-1.5 px-4 py-2.5 sm:flex sm:px-6">
-                {crumb}
-                <div className="flex-1" />
-                {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
-                {search ? (
-                  <div className="hidden sm:block">
-                    <HeaderSearch />
-                  </div>
-                ) : null}
+    );
+  }
+
+  return (
+    <>
+      {/* The page's top padding is the rail's room: the rail is in the header now. */}
+      <div aria-hidden className="-mt-6 sm:hidden" />
+      {createPortal(
+        <div style={{ borderTop: "1px solid var(--border)" }}>
+          <div className="flex items-center gap-1.5 px-4 py-2.5 sm:hidden">{phoneRow}</div>
+          <div className="mx-auto hidden max-w-7xl items-center gap-1.5 px-4 py-2.5 sm:flex sm:px-6">
+            {crumb}
+            <div className="flex-1" />
+            {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+            {search ? (
+              <div className="hidden sm:block">
+                <HeaderSearch />
               </div>
-            </div>,
-            slot,
-          )
-        : null}
+            ) : null}
+          </div>
+        </div>,
+        slot,
+      )}
     </>
   );
 }

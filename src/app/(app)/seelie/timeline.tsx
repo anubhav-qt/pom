@@ -1,7 +1,7 @@
 "use client";
 
 import type { AssistantMessage, ImageContent, TextContent, ToolCall, ToolResultMessage } from "@paribelle/pi-ai";
-import { AlertTriangle, ChevronDown, Download, Music, Paperclip, Share2, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Download, ExternalLink, FileText, Music, Paperclip, Share2, X } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 
 import { ZoomImg } from "@/components/image-lightbox";
@@ -134,7 +134,7 @@ const ATTACHED = /^Attached: (\{.*\})$/;
 interface Attachment {
   name: string;
   kind: string;
-  /** Where it plays from, for a clip or a sound. */
+  /** Where it plays (a clip or a sound) or opens (a PDF) from. */
   src: string | null;
 }
 
@@ -145,7 +145,7 @@ function attachmentOf(text: string): Attachment | null {
     const a = JSON.parse(m[1]) as { ref?: string; kind?: string; name?: string };
     const id = /^asset:(\d+)$/.exec(a.ref ?? "")?.[1];
     if (!id) return null;
-    const plays = a.kind === "video" || a.kind === "audio";
+    const plays = a.kind === "video" || a.kind === "audio" || a.kind === "document";
     return { name: a.name ?? `asset:${id}`, kind: a.kind ?? "file", src: plays ? withBasePath(`/api/seelie/assets/${id}`) : null };
   } catch {
     return null;
@@ -182,6 +182,11 @@ function UserBubble({ entry, pending, chatId }: { entry?: ChatMessage; pending?:
                 <span className="min-w-0 max-w-[10rem] truncate text-xs">{a.name}</span>
                 <audio src={a.src} controls preload="none" className="h-8 w-full max-w-full sm:w-auto sm:max-w-[14rem]" />
               </div>
+            ) : (a.kind === "document" || a.kind === "pdf") && a.src ? (
+              <a key={i} href={a.src} target="_blank" rel="noopener" title={`Open ${a.name}`} className="surface-2 flex max-w-full items-center gap-1.5 px-2.5 py-1.5 text-xs">
+                <FileText className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--muted)" }} />
+                <span className="min-w-0 truncate">{a.name}</span>
+              </a>
             ) : (
               <span key={i} className="surface-2 flex items-center gap-1.5 px-2.5 py-1.5 text-xs">
                 <Paperclip className="h-3.5 w-3.5" style={{ color: "var(--muted)" }} />
@@ -349,6 +354,13 @@ const ASKS: Record<ToolKind, string> = {
   forget: "This deletes something Seelie remembers for you.",
 };
 
+/** A change's plain one-liner (the model's `ask`), and the arguments the tool itself takes. */
+function splitAsk(args: unknown): { ask: string | null; rest: unknown } {
+  if (!args || typeof args !== "object" || Array.isArray(args) || !("ask" in args)) return { ask: null, rest: args };
+  const { ask, ...rest } = args as Record<string, unknown>;
+  return { ask: typeof ask === "string" && ask.trim() ? ask.trim() : null, rest };
+}
+
 function humanize(name: string) {
   return name.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 }
@@ -410,15 +422,17 @@ const ToolStep = memo(function ToolStep({
   };
   const awaiting = row.status === "awaiting";
   const [open, setOpen] = useState(false);
+  const { ask, rest } = splitAsk(row.args);
   const out = readResult(result?.result);
   const video = videoOf(out?.data);
   const pictures = picturesOf(out?.data);
+  const documents = documentsOf(out?.data);
 
   return (
     <Step tone={STATUS_TONE[row.status]} last={last}>
       <StepHead
         label={row.label}
-        line={row.status === "running" && row.progress ? row.progress : row.summary}
+        line={row.status === "running" && row.progress ? row.progress : (ask ?? row.summary)}
         took={duration(row)}
         open={open}
         onToggle={() => setOpen((v) => !v)}
@@ -432,29 +446,34 @@ const ToolStep = memo(function ToolStep({
       ) : null}
 
       {pictures.length ? <Pictures pictures={pictures} /> : null}
+      {documents.length ? <Documents documents={documents} /> : null}
 
       {open || awaiting ? (
         <div className="surface-2 mt-2 overflow-hidden" style={awaiting ? { borderColor: "color-mix(in srgb, var(--warn) 45%, transparent)" } : undefined}>
-          {awaiting ? <Approval row={row} /> : null}
-          <div className="space-y-2.5 px-3 py-2.5">
-            <Section title={awaiting ? "What it will do" : "Asked"}>
-              <Args args={row.args} />
-            </Section>
-            {row.status === "denied" ? <p className="muted text-xs">Not allowed{row.decidedBy ? ` by ${row.decidedBy}` : ""}.</p> : null}
-            {out ? (
-              <Section title={out.isError ? "Error" : "Result"}>
-                {out.text ? <Pre text={out.text} tone={out.isError ? "danger" : undefined} /> : null}
-                {out.data !== undefined ? <DataView data={out.data} /> : null}
-                {out.images.length && chatId && result ? (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {out.images.map(({ index }) => (
-                      <ZoomImg key={index} src={imageUrl(chatId, result.seq, index)} alt={`Image ${index}`} className="h-24 w-24 rounded-lg object-cover" />
-                    ))}
-                  </div>
-                ) : null}
+          {awaiting ? <Approval row={row} ask={ask} open={open} onToggle={() => setOpen((v) => !v)} /> : null}
+          {open ? (
+            <div className="space-y-2.5 px-3 py-2.5">
+              <Section title={awaiting ? "Exactly what it runs" : "Asked"}>
+                {/* The headline was the plain words: the tool's own line goes with the details. */}
+                {ask && row.summary ? <p className="mb-1.5 break-words font-mono text-[12px]">{row.summary}</p> : null}
+                <Args args={rest} />
               </Section>
-            ) : null}
-          </div>
+              {row.status === "denied" ? <p className="muted text-xs">Not allowed{row.decidedBy ? ` by ${row.decidedBy}` : ""}.</p> : null}
+              {out ? (
+                <Section title={out.isError ? "Error" : "Result"}>
+                  {out.text ? <Pre text={out.text} tone={out.isError ? "danger" : undefined} /> : null}
+                  {out.data !== undefined ? <DataView data={out.data} /> : null}
+                  {out.images.length && chatId && result ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {out.images.map(({ index }) => (
+                        <ZoomImg key={index} src={imageUrl(chatId, result.seq, index)} alt={`Image ${index}`} className="h-24 w-24 rounded-lg object-cover" />
+                      ))}
+                    </div>
+                  ) : null}
+                </Section>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </Step>
@@ -599,6 +618,67 @@ function picturesOf(data: unknown): CardPicture[] {
 
 const assetUrl = (id: number, query: string) => withBasePath(`/api/seelie/assets/${id}?${query}`);
 
+interface CardDocument {
+  id: number;
+  name: string;
+  pages?: number;
+  kb?: number;
+  locked?: boolean;
+}
+
+/** The PDFs a tool made, anywhere in its result (one, or a split's list). */
+function documentsOf(data: unknown): CardDocument[] {
+  const found = new Map<number, CardDocument>();
+  const walk = (v: unknown, depth: number) => {
+    if (!v || typeof v !== "object" || depth > 3 || found.size >= 24) return;
+    if (Array.isArray(v)) return v.forEach((x) => walk(x, depth + 1));
+    const o = v as Record<string, unknown>;
+    const id = typeof o.ref === "string" ? /^asset:(\d+)$/.exec(o.ref)?.[1] : undefined;
+    if (id && o.kind === "document" && typeof o.source === "string" && MADE.has(o.source)) {
+      found.set(Number(id), {
+        id: Number(id),
+        name: typeof o.name === "string" ? o.name : (o.ref as string),
+        ...(typeof o.pages === "number" ? { pages: o.pages } : {}),
+        ...(typeof o.kb === "number" ? { kb: o.kb } : {}),
+        ...(o.locked === true ? { locked: true } : {}),
+      });
+      return;
+    }
+    for (const x of Object.values(o)) walk(x, depth + 1);
+  };
+  walk(data, 0);
+  return [...found.values()];
+}
+
+/** What a PDF tool made: open it in the browser's viewer, or save it. */
+function Documents({ documents }: { documents: CardDocument[] }) {
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      {documents.map((d) => (
+        <div key={d.id} className="surface-2 flex max-w-md items-center gap-2.5 px-2.5 py-2">
+          <FileText className="h-5 w-5 shrink-0" style={{ color: "var(--muted)" }} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13px] font-medium" title={d.name}>
+              {d.name}
+            </p>
+            <p className="muted text-[11px] tabular-nums">
+              {[d.pages ? `${d.pages} page${d.pages === 1 ? "" : "s"}` : null, d.kb ? (d.kb >= 1024 ? `${(d.kb / 1024).toFixed(1)} MB` : `${d.kb} KB`) : null, d.locked ? "password-locked" : null]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          </div>
+          <a href={assetUrl(d.id, "")} target="_blank" rel="noopener" className="btn shrink-0 p-1.5" aria-label={`Open ${d.name}`} title="Open">
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <a href={assetUrl(d.id, "download=1")} download className="btn shrink-0 p-1.5" aria-label={`Download ${d.name}`} title="Download">
+            <Download className="h-3.5 w-3.5" />
+          </a>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** What a photo tool made, each with Download (the full file). */
 function Pictures({ pictures }: { pictures: CardPicture[] }) {
   return (
@@ -701,14 +781,19 @@ function VideoActions({ video }: { video: CardVideo }) {
   );
 }
 
-function Approval({ row }: { row: ToolRow }) {
+/**
+ * The approval: what will happen in plain words (anyone can approve it), whom it touches,
+ * Deny and Approve, and one tap down, exactly what will run.
+ */
+function Approval({ row, ask, open, onToggle }: { row: ToolRow; ask: string | null; open: boolean; onToggle: () => void }) {
   const decide = useSeelie((s) => s.decide);
   return (
     // Deny and Approve share the step's width, big enough for a thumb.
-    <div className="space-y-2 border-b px-3 py-2.5" style={{ borderColor: "var(--border)", background: "var(--warn-soft)" }}>
-      <p className="text-[13px]">
-        <span className="font-medium">Seelie is asking first.</span> <span className="muted">{ASKS[row.kind]}</span>
-      </p>
+    <div className={cn("space-y-2 px-3 py-2.5", open && "border-b")} style={{ borderColor: "var(--border)", background: "var(--warn-soft)" }}>
+      <div>
+        <p className="text-[14px] font-medium leading-snug">{ask ?? row.summary ?? row.label}</p>
+        <p className="muted mt-0.5 text-xs">Seelie is asking first. {ASKS[row.kind]}</p>
+      </div>
       <div className="flex items-center gap-2">
         <button type="button" className="btn btn-white flex-1 px-3 py-2 text-[13px] sm:py-1.5" onClick={() => void decide(row, false)}>
           Deny
@@ -722,6 +807,10 @@ function Approval({ row }: { row: ToolRow }) {
           Always in this chat
         </button>
       ) : null}
+      <button type="button" onClick={onToggle} aria-expanded={open} className="muted flex items-center gap-1 text-xs hover:text-[var(--text)]">
+        {open ? "Hide the details" : "See exactly what it runs"}
+        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+      </button>
     </div>
   );
 }
