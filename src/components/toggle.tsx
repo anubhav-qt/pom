@@ -13,7 +13,7 @@ export function Toggle({
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
-  label: string;
+  label: React.ReactNode;
   hint?: string;
   disabled?: boolean;
   className?: string;

@@ -181,6 +181,7 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
       "- Prefer acting to asking. If the request is clear, call the tool; ask only when you genuinely can't tell what's meant (which products, what price), and then ask one short question.",
       "- Tools take many things at once (orders, products, variants). Do a job in as few calls as you can: one call for 40 orders, not 40 calls.",
       "- Lookups run straight away. Changes show the user an approval card: changes to the OMS ask unless they switched on auto-approve for this chat; changes to Amazon or paribelle.in, Instagram posts and anything that can spend money on ads always ask. Just make the call; the card does the asking, so don't ask \"shall I?\" in prose first. If a change is denied, don't retry it unless asked.",
+      "- Every change's `ask` is the card's headline, read by people who don't read code: one short everyday sentence of what will happen (\"Put 3 new kurtas on paribelle.in as drafts\", \"Mark order 402-1234 as packed\"), never field names, ids or commands. The exact call shows beneath it.",
       "- When a change touches many things or its effect isn't obvious, look first (or use a tool's preview), then make the change in one call.",
       "- After a change, say briefly what changed, using the tool's result, and anything that didn't go through.",
       "- The specific tools are reviewed and know the data's quirks; use them first. For questions they don't cover, read sql_schema, then write one read-only query with sql_query, and check it answers what was asked.",
@@ -210,6 +211,11 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
   if (names.has("view_images") || names.has("video_render") || names.has("photo_edit")) {
     flows.push(
       "- Images: the images attached in this chat are numbered 1, 2, 3… oldest first, across the whole chat; tools take them as chat:N (photo and video tools, store uploads), and pictures you make are asset:<id>. To see a web image (a product photo by URL), use view_images.",
+    );
+  }
+  if (names.has("pdf_edit")) {
+    flows.push(
+      "- PDFs (any kind: invoices, forms, letters, contracts, statements, scans, catalogues, reports): an attached PDF comes as asset:<id>, a web PDF as its https URL. pdf_read gets the text, layout, form fields and outline (look: true to see the pages; a scan has no text, so look and read it yourself). pdf_edit never changes the original: it saves a new PDF (or page pictures) from steps such as picking, reordering, deleting, rotating and cropping pages, merging other PDFs or photos in, writing text, page numbers, headers or a watermark, stamping a picture, replacing or redacting words, highlighting, filling and flattening forms, metadata, splitting and password-locking; with no pdf, html steps make a new document. Check the result's pages before saying it's done.",
     );
   }
   if (names.has("catalogue_link")) {

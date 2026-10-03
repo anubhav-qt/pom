@@ -37,6 +37,14 @@ export function isOms(path: string) {
   return path === "/pom" || path.startsWith("/pom/");
 }
 
+/** Seelie's API: its chats and media live on the ThinkPad only, so Vercel can only say it's offline. */
+export function isSeelie(path: string) {
+  return /^\/pom\/api\/(seelie|cron\/seelie)(\/|$)/.test(path);
+}
+
+/** How long the health check after a failed request waits. */
+const PROBE_MS = 4000;
+
 export default {
   fetch: (req: Request, env: Env) => handle(req, env),
 };
@@ -46,10 +54,26 @@ export function handle(req: Request, env: Env, fetcher: typeof fetch = fetch, do
   const url = new URL(req.url);
   const edgeKey = env.EDGE_KEY ?? "";
 
+  // After a request that reached the ThinkPad failed: does it answer a cheap page through the
+  // gate (which also says standby while it catches up)? Anything short of a 5xx is an answer.
+  const probe = (host: string, path: string) => async () => {
+    const res = await fetcher(relay(new Request(`https://${host}${path}`), env.THINKPAD_ORIGIN, edgeKey), {
+      signal: AbortSignal.timeout(PROBE_MS),
+    });
+    await res.body?.cancel();
+    return res.status < 500 && !res.headers.has("x-paribelle-standby") && !res.headers.has("x-paribelle-gate");
+  };
+
   if (url.host === env.API_HOST) {
     return failover(
       req,
-      { primary: env.THINKPAD_ORIGIN, edgeKey, fetch: fetcher, fallback: (r) => fetcher(relay(r, env.RENDER_ORIGIN, edgeKey)) },
+      {
+        primary: env.THINKPAD_ORIGIN,
+        edgeKey,
+        fetch: fetcher,
+        probe: probe(url.host, "/api/v1/health"),
+        fallback: (r) => fetcher(relay(r, env.RENDER_ORIGIN, edgeKey)),
+      },
       down.shop,
     );
   }
@@ -63,8 +87,16 @@ export function handle(req: Request, env: Env, fetcher: typeof fetch = fetch, do
   const oms = isOms(url.pathname);
   return failover(
     req,
-    // The OMS's pages (reports, PDFs) can take a while even when all is well.
-    { primary: env.THINKPAD_ORIGIN, edgeKey, fetch: fetcher, timeoutMs: oms ? 15_000 : 8000, fallback: toVercel },
+    {
+      primary: env.THINKPAD_ORIGIN,
+      edgeKey,
+      fetch: fetcher,
+      // The OMS's pages (reports, PDFs) can take a while even when all is well.
+      timeoutMs: oms ? 15_000 : 8000,
+      probe: oms ? probe(url.host, "/pom/api/health") : probe(url.host, "/robots.txt"),
+      primaryOnly: isSeelie(url.pathname),
+      fallback: toVercel,
+    },
     oms ? down.oms : down.shop,
   );
 }

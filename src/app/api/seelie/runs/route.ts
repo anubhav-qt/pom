@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       assets: Array.isArray(body.assets) ? body.assets.filter((id): id is number => typeof id === "number") : [],
       model: typeof body.model === "string" ? body.model : undefined,
       thinking: typeof body.thinking === "string" ? body.thinking : undefined,
+      autoApprove: body.autoApprove === true,
     });
     return sse(await followRun(user, runId, 0));
   } catch (err) {

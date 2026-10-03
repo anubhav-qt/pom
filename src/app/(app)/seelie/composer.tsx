@@ -1,12 +1,12 @@
 "use client";
 
-import { AlertTriangle, ArrowDown, ArrowUp, Brain, ChevronDown, Music, Paperclip, Square, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Brain, ChevronDown, FileText, Music, Paperclip, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
 import { contextTokens, formatTokens } from "@/lib/seelie/context";
 import { ACTIVE_RUN } from "@/lib/seelie/types";
-import { MAX_DRAFT_CLIPS, MAX_DRAFT_IMAGES, useSeelie, type DraftClip, type DraftImage } from "@/lib/stores/seelie-store";
+import { isPdf, MAX_DRAFT_CLIPS, MAX_DRAFT_IMAGES, useSeelie, type DraftClip, type DraftImage } from "@/lib/stores/seelie-store";
 import { cn } from "@/lib/utils";
 
 /**
@@ -121,7 +121,7 @@ export function Composer({
   }, [chatId]);
 
   async function take(files: File[]) {
-    addClips(files.filter((f) => f.type.startsWith("video/") || f.type.startsWith("audio/")));
+    addClips(files.filter((f) => f.type.startsWith("video/") || f.type.startsWith("audio/") || isPdf(f)));
     const room = MAX_DRAFT_IMAGES - useSeelie.getState().draftImages.length;
     const picked = files.filter((f) => f.type.startsWith("image/")).slice(0, Math.max(0, room));
     if (!picked.length) return;
@@ -241,7 +241,7 @@ export function Composer({
             submit();
           }}
           onPaste={(e) => {
-            const files = Array.from(e.clipboardData.files).filter((f) => /^(image|video|audio)\//.test(f.type));
+            const files = Array.from(e.clipboardData.files).filter((f) => /^(image|video|audio)\//.test(f.type) || isPdf(f));
             if (!files.length) return;
             if (!e.clipboardData.getData("text/plain")) e.preventDefault();
             void take(files);
@@ -256,7 +256,7 @@ export function Composer({
           <input
             ref={fileRef}
             type="file"
-            accept={seesImages ? "image/*,video/*,audio/*" : "video/*,audio/*"}
+            accept={seesImages ? "image/*,video/*,audio/*,application/pdf,.pdf" : "video/*,audio/*,application/pdf,.pdf"}
             multiple
             hidden
             onChange={(e) => {
@@ -270,8 +270,8 @@ export function Composer({
             disabled={!!disabled || full}
             className="nav-icon-btn h-9 w-9 disabled:opacity-40 sm:h-8 sm:w-8"
             style={{ color: "var(--muted)" }}
-            aria-label="Add photos, clips or sounds"
-            title={`${seesImages ? `Photos (up to ${MAX_DRAFT_IMAGES}), clips` : "Clips"} and sounds (up to ${MAX_DRAFT_CLIPS}, 300 MB each)`}
+            aria-label="Add photos, clips, sounds or PDFs"
+            title={`${seesImages ? `Photos (up to ${MAX_DRAFT_IMAGES}), clips` : "Clips"}, sounds and PDFs (up to ${MAX_DRAFT_CLIPS}, 300 MB each)`}
           >
             <Paperclip className="h-[18px] w-[18px]" />
           </button>
@@ -334,7 +334,7 @@ export function Composer({
   );
 }
 
-/** A clip or sound on its way: a still or a note icon, the upload's progress, and a remove button. */
+/** A clip, sound or PDF on its way: a still or an icon, the upload's progress, and a remove button. */
 function ClipChip({ clip, onRemove }: { clip: DraftClip; onRemove: () => void }) {
   const uploading = clip.assetId === null && !clip.error;
   return (
@@ -347,7 +347,7 @@ function ClipChip({ clip, onRemove }: { clip: DraftClip; onRemove: () => void })
         <video src={clip.preview} muted playsInline preload="metadata" className="h-full w-12 shrink-0 bg-black object-cover" />
       ) : (
         <span className="flex h-full w-12 shrink-0 items-center justify-center" style={{ color: "var(--muted)" }}>
-          <Music className="h-5 w-5" />
+          {clip.kind === "pdf" ? <FileText className="h-5 w-5" /> : <Music className="h-5 w-5" />}
         </span>
       )}
       <div className="min-w-0 flex-1">

@@ -17,7 +17,7 @@ import {
 import { MAX_CLIP_BYTES, uploadClip } from "@/app/(app)/seelie/upload";
 import { withBasePath } from "@/lib/base-path";
 import type { AccountLimits } from "@/lib/seelie/limits";
-import { ACTIVE_RUN, type ChatMessage, type ChatSummary, type ImageInput, type RunInfo, type StreamEvent, type ToolRow } from "@/lib/seelie/types";
+import { ACTIVE_RUN, type ChatMessage, type ChatSummary, type ChatView, type ImageInput, type RunInfo, type StreamEvent, type ToolRow } from "@/lib/seelie/types";
 
 /**
  * Seelie's screen state, kept outside React so a reply keeps streaming while the
@@ -33,11 +33,11 @@ export interface DraftImage extends ImageInput {
   preview: string;
 }
 
-/** A clip or sound going with the message: uploaded as soon as it's picked. */
+/** A clip, sound or PDF going with the message: uploaded as soon as it's picked. */
 export interface DraftClip {
   key: string;
   name: string;
-  kind: "video" | "audio";
+  kind: "video" | "audio" | "pdf";
   bytes: number;
   /** 0–1 while it uploads. */
   progress: number;
@@ -84,6 +84,8 @@ interface SeelieState {
   loadLimits: (force?: boolean) => Promise<void>;
   loadChats: () => Promise<void>;
   openChat: (chatId: string | null) => Promise<void>;
+  /** Back online after a blip: bring the open (or last) chat up to date without clearing it. */
+  resume: () => Promise<void>;
   send: () => Promise<void>;
   stop: () => Promise<void>;
   decide: (row: ToolRow, approve: boolean, alwaysThisChat?: boolean) => Promise<void>;
@@ -227,6 +229,21 @@ export const useSeelie = create<SeelieState>((set, get) => {
     }
   }
 
+  /** Seelie answered from somewhere it doesn't run (the ThinkPad was busy for a moment): the screen waits for it. */
+  function markOffline() {
+    const status = get().status;
+    if (status?.online) set({ status: { ...status, online: false } });
+  }
+
+  /** Follow a run again after a dropped connection, while it's still going. False when it isn't worth it. */
+  async function retry(gen: number, runId: string, attempt: number) {
+    const run = get().run;
+    if (gen !== generation || !run || run.id !== runId || !ACTIVE_RUN.includes(run.status) || attempt >= 30) return false;
+    await new Promise((r) => setTimeout(r, Math.min(1000 * (attempt + 1), 5000)));
+    if (gen === generation) await follow(runId, gen, attempt + 1);
+    return true;
+  }
+
   /** Read a run's event stream until it ends; reconnect if the connection drops mid-run. */
   async function consume(response: Response, gen: number, runId: string, attempt = 0) {
     const reader = response.body?.getReader();
@@ -257,11 +274,7 @@ export const useSeelie = create<SeelieState>((set, get) => {
       // Dropped connection or a chat switch; handled below.
     }
     if (ended || gen !== generation) return;
-    const run = get().run;
-    if (!run || run.id !== runId || !ACTIVE_RUN.includes(run.status) || attempt >= 30) return;
-    await new Promise((r) => setTimeout(r, Math.min(1000 * (attempt + 1), 5000)));
-    if (gen !== generation) return;
-    await follow(runId, gen, attempt + 1);
+    await retry(gen, runId, attempt);
   }
 
   async function follow(runId: string, gen: number, attempt = 0) {
@@ -274,14 +287,34 @@ export const useSeelie = create<SeelieState>((set, get) => {
         cache: "no-store",
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        if (gen === generation) set({ error: body?.error ?? `Couldn't follow the reply (${res.status}).` });
+        const body = (await res.json().catch(() => null)) as { error?: string; offline?: boolean } | null;
+        if (gen !== generation) return;
+        if (body?.offline) markOffline();
+        // Offline, restarting, or a gateway between: the run carries on there, so keep trying.
+        if ((body?.offline || res.status >= 502) && (await retry(gen, runId, attempt))) return;
+        set({ error: body?.error ?? `Couldn't follow the reply (${res.status}).` });
         return;
       }
       await consume(res, gen, runId, attempt);
     } catch {
-      if (gen === generation && !abort.signal.aborted) await consume(new Response(null), gen, runId, attempt);
+      if (!abort.signal.aborted) await retry(gen, runId, attempt);
     }
+  }
+
+  /** Show a chat as the server has it, and follow its reply if one is being written. */
+  function showView(view: ChatView, gen: number) {
+    set({
+      loadingChat: false,
+      title: view.title,
+      autoApprove: view.autoApprove,
+      pinned: view.pinned,
+      messages: view.messages,
+      tools: Object.fromEntries(view.tools.map((t) => [t.callId, t])),
+      partial: view.partial,
+      run: view.activeRun ?? view.runs.at(-1) ?? null,
+      ...chooseModel(view.model ?? get().model, view.thinking ?? get().thinking),
+    });
+    if (view.activeRun) void follow(view.activeRun.id, gen);
   }
 
   function chooseModel(model: string | null, thinking: string | null) {
@@ -318,7 +351,8 @@ export const useSeelie = create<SeelieState>((set, get) => {
     showThinking: typeof window === "undefined" ? true : readFlag(SHOW_THINKING_KEY, true),
 
     async loadStatus(force = false) {
-      const status = await statusAction(force);
+      const status = await statusAction(force).catch(() => null);
+      if (!status) return;
       set({ status });
       const { model, thinking } = chooseModel(get().model, get().thinking);
       set({ model, thinking });
@@ -362,26 +396,38 @@ export const useSeelie = create<SeelieState>((set, get) => {
         set(chooseModel(get().model, get().thinking));
         return;
       }
-      const res = await chatAction(chatId);
+      const res = await chatAction(chatId).catch(() => null);
       if (gen !== generation) return;
+      // Unreachable or offline for now: keep the chat, and open it again once Seelie is back.
+      if (!res || (!res.ok && res.offline)) {
+        if (res) markOffline();
+        set({ loadingChat: false, ...(res ? {} : { error: "Couldn't reach the server. It will try again when Seelie is back." }) });
+        return;
+      }
       if (!res.ok) {
         remember(LAST_CHAT_KEY, null);
         set({ loadingChat: false, chatId: null, error: res.error });
         return;
       }
-      const view = res.data;
-      set({
-        loadingChat: false,
-        title: view.title,
-        autoApprove: view.autoApprove,
-        pinned: view.pinned,
-        messages: view.messages,
-        tools: Object.fromEntries(view.tools.map((t) => [t.callId, t])),
-        partial: view.partial,
-        run: view.activeRun ?? view.runs.at(-1) ?? null,
-        ...chooseModel(view.model ?? get().model, view.thinking ?? get().thinking),
-      });
-      if (view.activeRun) void follow(view.activeRun.id, gen);
+      showView(res.data, gen);
+    },
+
+    async resume() {
+      void get().loadChats();
+      const s = get();
+      const chatId = s.chatId ?? lastChatId();
+      if (!chatId) return;
+      if (s.chatId !== chatId || !s.messages.length) return get().openChat(chatId);
+      // A reply being sent shows as pending; leave it to its own stream.
+      if (s.pending) return;
+      const gen = ++generation;
+      streamAbort?.abort();
+      streamAbort = null;
+      deltaQueue = [];
+      const res = await chatAction(chatId).catch(() => null);
+      if (gen !== generation || !res?.ok) return;
+      set({ error: null });
+      showView(res.data, gen);
     },
 
     async send() {
@@ -409,6 +455,8 @@ export const useSeelie = create<SeelieState>((set, get) => {
             assets: clips.map((c) => c.assetId),
             model: s.model ?? undefined,
             thinking: s.thinking ?? undefined,
+            // Switched on before the chat existed.
+            autoApprove: s.chatId ? undefined : s.autoApprove,
           }),
           signal: abort.signal,
           cache: "no-store",
@@ -418,7 +466,8 @@ export const useSeelie = create<SeelieState>((set, get) => {
         return;
       }
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        const body = (await res.json().catch(() => null)) as { error?: string; offline?: boolean } | null;
+        if (body?.offline) markOffline();
         if (gen === generation) set({ pending: null, draft: text, draftImages: images, draftClips: clips, error: body?.error ?? `Couldn't send (${res.status}).` });
         return;
       }
@@ -503,14 +552,14 @@ export const useSeelie = create<SeelieState>((set, get) => {
     },
     addClips(files) {
       const room = MAX_CLIPS - get().draftClips.length;
-      const picked = files.filter((f) => /^(video|audio)\//.test(f.type)).slice(0, Math.max(0, room));
+      const picked = files.filter((f) => /^(video|audio)\//.test(f.type) || isPdf(f)).slice(0, Math.max(0, room));
       const patch = (key: string, change: Partial<DraftClip>) =>
         set({ draftClips: get().draftClips.map((c) => (c.key === key ? { ...c, ...change } : c)) });
       for (const file of picked) {
         const clip: DraftClip = {
           key: crypto.randomUUID(),
           name: file.name,
-          kind: file.type.startsWith("audio/") ? "audio" : "video",
+          kind: isPdf(file) ? "pdf" : file.type.startsWith("audio/") ? "audio" : "video",
           bytes: file.size,
           progress: 0,
           assetId: null,
@@ -557,3 +606,6 @@ export const useSeelie = create<SeelieState>((set, get) => {
 
 export const MAX_DRAFT_IMAGES = MAX_IMAGES;
 export const MAX_DRAFT_CLIPS = MAX_CLIPS;
+
+/** Phones and some browsers leave a file's type empty; the name tells then. */
+export const isPdf = (f: File) => f.type === "application/pdf" || (!f.type && /\.pdf$/i.test(f.name));

@@ -136,6 +136,8 @@ export interface StartRunInput {
   assets?: number[];
   model?: string;
   thinking?: string;
+  /** A new chat's auto-approve, switched on before its first message. */
+  autoApprove?: boolean;
   /** Sent by a routine (its name and schedule in words), not typed by the owner. */
   routine?: { name: string; schedule: string; manual: boolean };
 }

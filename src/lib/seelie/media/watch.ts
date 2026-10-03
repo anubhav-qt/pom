@@ -39,7 +39,7 @@ export async function watchBlock(ref: string): Promise<VideoContent> {
 
   const cache = await mediaFolder("cache");
   const media = await resolveRef(base, { chatImages: async () => [], workDir: cache });
-  if (media.kind !== "video" && media.kind !== "audio") throw new MediaError(`${base} is ${media.kind === "image" ? "an image: look at it with video_assets info" : "subtitles"}, not something to watch.`);
+  if (media.kind !== "video" && media.kind !== "audio") throw new MediaError(`${base} is ${media.kind === "image" ? "an image: look at it with video_assets info" : media.kind === "document" ? "a PDF: read it with pdf_read" : "subtitles"}, not something to watch.`);
   const length = Math.min(WATCH_MAX_SECONDS, (to ?? media.duration ?? WATCH_MAX_SECONDS) - from);
   if (media.duration && from >= media.duration) throw new MediaError(`${base} is ${media.duration} s long; ${from} s is past its end.`);
 

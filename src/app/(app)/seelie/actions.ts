@@ -14,7 +14,7 @@ import {
   type LoginProvider,
   type LoginStatus,
 } from "@/lib/seelie/cliproxy";
-import { seelieConfig } from "@/lib/seelie/config";
+import { SeelieOfflineError, seelieConfig } from "@/lib/seelie/config";
 import { adsContext, capRoom } from "@/lib/seelie/ads";
 import { chooseMeta, connectMeta, disconnectMeta, metaStatus, refreshMeta, type MetaStatus } from "@/lib/seelie/meta";
 import { getLimits, type AccountLimits } from "@/lib/seelie/limits";
@@ -40,7 +40,7 @@ import type { ChatSummary, ChatView } from "@/lib/seelie/types";
  * (a thrown error reaches the browser as a generic message in production).
  */
 
-export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
+export type Result<T> = { ok: true; data: T } | { ok: false; error: string; offline?: true };
 
 async function attempt<T>(fn: () => Promise<T>): Promise<Result<T>> {
   try {
@@ -55,13 +55,20 @@ async function attempt<T>(fn: () => Promise<T>): Promise<Result<T>> {
 
 /* Chats ------------------------------------------------------------------- */
 
+// Chats live on the ThinkPad only. When the edge hands a request to Vercel for a moment
+// (the ThinkPad catching up or restarting), say so, so the screen waits instead of
+// forgetting the chat.
+const offline = () => ({ ok: false, error: new SeelieOfflineError().message, offline: true }) as const;
+
 export async function chatsAction(): Promise<Result<ChatSummary[]>> {
   const user = await requireUser();
+  if (!seelieConfig()) return offline();
   return attempt(() => listChats(user));
 }
 
 export async function chatAction(chatId: string): Promise<Result<ChatView>> {
   const user = await requireUser();
+  if (!seelieConfig()) return offline();
   return attempt(() => getChatView(user, chatId));
 }
 

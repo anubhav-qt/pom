@@ -1,4 +1,5 @@
 import { currentUser } from "@/lib/auth";
+import { requireSeelieConfig } from "@/lib/seelie/config";
 import { followRun } from "@/lib/seelie/engine";
 import { failure, sse, unauthorized } from "@/lib/seelie/http";
 
@@ -11,6 +12,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const user = await currentUser();
   if (!user) return unauthorized();
   try {
+    // Runs live on the ThinkPad: anywhere else, say offline (the screen waits and tries again).
+    requireSeelieConfig();
     const after = Number(new URL(request.url).searchParams.get("after") ?? 0);
     return sse(await followRun(user, (await params).id, Number.isFinite(after) ? after : 0));
   } catch (err) {
