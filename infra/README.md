@@ -289,6 +289,10 @@ When a Supabase database passes `PRUNE_AT_MB` (400), the sync deletes its oldest
   docker compose run --rm sync node src/main.ts reseed-cloud shop   # fills an empty cloud database from the ThinkPad
   docker compose up -d sync
   ```
+  *Another ThinkPad (or a second stack) is syncing this cloud database*: the cloud lock is held.
+  A session left holding it by a dropped connection (Supabase's pooler keeps it open) is ended
+  by the sync itself once it has been idle for 3 minutes (`SYNC_STALE_LOCK_SEC`); a halt that
+  stays means a live second sync, so stop it.
 - **Everything goes to the fallback** and the Worker's logs say *the gate refused the edge
   key*: `EDGE_KEY` differs between `infra/.env` and the Worker.
 - **The ThinkPad's disk is lost.** Put `.env` back and run `./first-start.sh`: it copies the
