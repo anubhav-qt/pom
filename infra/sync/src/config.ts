@@ -46,6 +46,10 @@ export interface Settings {
   bootGraceMs: number;
   /** A gap this long between ticks means the laptop slept: catch up before serving. */
   suspendGapMs: number;
+  /** How often the cloud lock's connection says it's still there (Pair.takeStaleLock). */
+  lockPingMs: number;
+  /** A cloud lock whose session has done nothing for this long is a dead sync's, and is taken over. */
+  staleLockSec: number;
   metaRefreshMs: number;
   cloudChangeRetentionSec: number;
   localChangeRetentionSec: number;
@@ -137,6 +141,8 @@ export function loadSettings(env = process.env): Settings {
     seqHeadroom: num(env.SYNC_SEQ_HEADROOM, 100_000),
     bootGraceMs: num(env.SYNC_BOOT_GRACE_MS, 120_000),
     suspendGapMs: num(env.SYNC_SUSPEND_GAP_MS, 10_000),
+    lockPingMs: num(env.SYNC_LOCK_PING_MS, 30_000),
+    staleLockSec: num(env.SYNC_STALE_LOCK_SEC, 180),
     metaRefreshMs: num(env.SYNC_META_REFRESH_MS, 60_000),
     cloudChangeRetentionSec: num(env.SYNC_CLOUD_CHANGE_RETENTION_SEC, 600),
     localChangeRetentionSec: num(env.SYNC_LOCAL_CHANGE_RETENTION_SEC, 7 * 86400),

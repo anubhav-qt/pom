@@ -78,6 +78,7 @@ export class Pair {
   private shape: Shape | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private cloudLock: pg.PoolClient | null = null;
+  private lockPing: ReturnType<typeof setInterval> | null = null;
   private localLock: pg.PoolClient | null = null;
   private startedAt = Date.now();
   private cloudFailingSince: number | null = null;
@@ -319,7 +320,9 @@ export class Pair {
         );
       }
       const got = await c.query<{ ok: boolean }>(`select pg_try_advisory_lock(${LOCK_KEY}) as ok`);
-      if (!got.rows[0].ok) throw new Halt("another ThinkPad (or a second stack) is syncing this cloud database");
+      if (!got.rows[0].ok && !(await this.takeStaleLock(c))) {
+        throw new Halt("another ThinkPad (or a second stack) is syncing this cloud database");
+      }
     } catch (e) {
       // Not back into the pool: if this client is what failed, the next check would get it again.
       c.release(true);
@@ -327,8 +330,56 @@ export class Pair {
     }
     this.cloudLock = c;
     c.on("error", () => {
-      this.cloudLock = null;
+      if (this.cloudLock === c) this.dropLocks();
     });
+    // Keeps the lock's session busy, so takeStaleLock elsewhere never takes it for a dead one.
+    // A ping that fails means the lock may be gone with its connection: the next cycle takes it again.
+    let pinging = false;
+    this.lockPing = setInterval(() => {
+      if (pinging || this.cloudLock !== c) return;
+      pinging = true;
+      c.query("select 1")
+        .catch(() => {
+          if (this.cloudLock === c) this.dropLocks();
+        })
+        .finally(() => {
+          pinging = false;
+        });
+    }, this.settings.lockPingMs);
+    this.lockPing.unref();
+  }
+
+  /**
+   * Takes over the cloud lock when the session holding it has done nothing for
+   * `staleLockSec`: a sync whose connection vanished (the ThinkPad's internet
+   * dropped) while Supabase's pooler kept its session, and the lock, open. On
+   * 2026-10-04 that halted both pairs for three hours, until the sessions were
+   * ended by hand. A live sync pings its lock's session (prepareCloud), so a
+   * second ThinkPad still halts this one. If the database refuses, the lock
+   * stays where it is and the sync halted; a lost connection is thrown, as an
+   * outage.
+   */
+  private async takeStaleLock(c: pg.PoolClient): Promise<boolean> {
+    try {
+      const r = await c.query<{ pid: number; idle: string; ended: boolean }>(
+        `select a.pid, date_trunc('second', now() - a.state_change)::text as idle, pg_terminate_backend(a.pid, 5000) as ended
+         from pg_locks l join pg_stat_activity a on a.pid = l.pid
+         where l.locktype = 'advisory' and l.granted and l.objsubid = 1
+           and l.database = (select oid from pg_database where datname = current_database())
+           and ((l.classid::bigint << 32) | l.objid::bigint) = ${LOCK_KEY}::bigint
+           and a.pid <> pg_backend_pid() and a.state = 'idle'
+           and a.state_change < now() - make_interval(secs => $1)`,
+        [this.settings.staleLockSec],
+      );
+      if (!r.rows.length) return false;
+      log("warn", "ended a dead sync's session that held the cloud lock", { pair: this.name, ...r.rows[0] });
+      const got = await c.query<{ ok: boolean }>(`select pg_try_advisory_lock(${LOCK_KEY}) as ok`);
+      return got.rows[0].ok;
+    } catch (e) {
+      if (!(e as { code?: string })?.code) throw e;
+      log("error", "could not take over the cloud lock", { pair: this.name, error: errText(e) });
+      return false;
+    }
   }
 
   /**
@@ -876,6 +927,10 @@ export class Pair {
   }
 
   private dropLocks() {
+    if (this.lockPing) {
+      clearInterval(this.lockPing);
+      this.lockPing = null;
+    }
     if (this.cloudLock) {
       this.cloudLock.release(true);
       this.cloudLock = null;

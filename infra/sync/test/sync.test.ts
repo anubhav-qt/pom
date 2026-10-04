@@ -529,6 +529,74 @@ test("two syncs can't work the same databases", async () => {
   }
 });
 
+/** A session holding the cloud lock, as a sync's lock connection does; `ping` keeps it busy like a live one. */
+async function holdCloudLock(url: string, ping: boolean) {
+  const c = new pg.Client({ connectionString: url });
+  c.on("error", () => {});
+  await c.connect();
+  await c.query(`select pg_advisory_lock(hashtext('paribelle_sync'))`);
+  const pid = (await c.query<{ pid: number }>(`select pg_backend_pid() as pid`)).rows[0].pid;
+  const timer = ping ? setInterval(() => c.query("select 1").catch(() => {}), 100) : null;
+  return {
+    pid,
+    async end() {
+      if (timer) clearInterval(timer);
+      await c.end().catch(() => {});
+    },
+  };
+}
+
+test("a cloud lock left by a vanished sync is taken over once its session is idle long enough", async () => {
+  const { pair, cfg, settings, cloud } = await fresh({ settings: { staleLockSec: 1 } });
+  await settle(pair);
+  await pair.close();
+  // Its connection dropped, but the pooler kept the session, and the lock, open.
+  const dead = await holdCloudLock(cfg.cloudUrl, false);
+  try {
+    await new Promise((r) => setTimeout(r, 1500));
+    const again = new Pair(cfg, settings);
+    current!.pair = again;
+    await settle(again);
+    assert.equal(again.status.halted, null);
+    const left = await cloud.query(`select count(*)::int as n from pg_stat_activity where pid = $1`, [dead.pid]);
+    assert.equal(left.rows[0].n, 0, "the dead session was ended");
+  } finally {
+    await dead.end();
+  }
+});
+
+test("a cloud lock held by a live sync still halts this one", async () => {
+  const { pair, cfg, settings, cloud } = await fresh({ settings: { staleLockSec: 1 } });
+  await settle(pair);
+  await pair.close();
+  const live = await holdCloudLock(cfg.cloudUrl, true);
+  try {
+    await new Promise((r) => setTimeout(r, 1500));
+    const again = new Pair(cfg, settings);
+    current!.pair = again;
+    await again.exclusive(() => again.cycle());
+    assert.match(again.status.halted ?? "", /another ThinkPad/);
+    const left = await cloud.query(`select count(*)::int as n from pg_stat_activity where pid = $1`, [live.pid]);
+    assert.equal(left.rows[0].n, 1, "the live session was left alone");
+  } finally {
+    await live.end();
+  }
+});
+
+test("a sync keeps its own cloud lock's session busy", async () => {
+  const { pair, cloud } = await fresh({ settings: { lockPingMs: 100 } });
+  await settle(pair);
+  await new Promise((r) => setTimeout(r, 1000));
+  const r = await cloud.query<{ idle: number }>(
+    `select extract(epoch from now() - a.state_change)::float8 as idle
+     from pg_locks l join pg_stat_activity a on a.pid = l.pid
+     where l.locktype = 'advisory' and l.granted and a.pid <> pg_backend_pid()
+       and ((l.classid::bigint << 32) | l.objid::bigint) = hashtext('paribelle_sync')::bigint`,
+  );
+  assert.equal(r.rows.length, 1);
+  assert.ok(r.rows[0].idle < 0.5, `the lock's session was idle ${r.rows[0].idle}s`);
+});
+
 test("randomised: interleaved writes, cycles and outages always converge", async () => {
   const { pair, local, cloud } = await fresh({ settings: { pageSize: 20 } });
   await settle(pair);
