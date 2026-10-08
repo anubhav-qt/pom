@@ -1,26 +1,29 @@
 import "server-only";
 
 import { randomBytes } from "node:crypto";
-import { rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, rename, rm, stat, writeFile } from "node:fs/promises";
 
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { reelTracks, seelieVideos } from "@/db/schema";
 import { withBasePath } from "@/lib/base-path";
+import { probe } from "@/lib/reels/ffmpeg";
 
+import type { Composition } from "./composition";
 import { mediaFolder, mediaPath, MediaError, videoFile } from "./files";
-import { makeWatchCopy, renderGraph, stillsAt, type RenderInput, type RenderSpec } from "./render";
-import type { RefContext } from "./refs";
+import { makeWatchCopy, stillsAt } from "./render";
 
 /**
- * Seelie's video library. A video is a title, what was asked for, and every render of
- * it: the graph and inputs that made each version are kept, so any version can be
- * rendered again or changed. Files: videos/<id>/v<n>.mp4, v<n>.jpg (poster) and
+ * Seelie's video library. A video is a title, what was asked for, its composition (the
+ * storyboard Seelie works on, composition.ts), and every render of it: each version keeps
+ * the composition that made it, so any version can be rendered again or built on.
+ * Versions from before compositions kept an ffmpeg graph instead; those can't be
+ * rendered again. Files: videos/<id>/v<n>.mp4, v<n>.jpg (poster) and
  * v<n>-watch.mp4 (the small copy the model watches). Drafts beyond the latest five
  * lose their files; finals keep theirs.
  *
- * Songs: each library song makes one reel or video. A final render that uses `song:<id>`
+ * Songs: each library song makes one reel or video. A final render whose composition uses `song:<id>`
  * claims it (reel_tracks.used_at, with used_by_job left empty, which keeps the Reels
  * screen off it) and the video holds it in track_id, so later versions may use it again.
  * Drafts may use a song only this video could claim. Moving a video to another song
@@ -30,11 +33,15 @@ import type { RefContext } from "./refs";
 export interface VideoVersion {
   version: number;
   quality: "draft" | "final";
-  /** What made it: enough to render it again. */
-  inputs: RenderInput[];
-  graph: string;
+  /** What made it: enough to render it again or build on it. */
+  composition?: Composition;
+  /** What the checks said about it when it rendered. */
+  findings?: string[];
+  /** A version from the ffmpeg-graph renderer (retired 2026-10): its recipe, for reference. */
+  inputs?: { ref: string }[];
+  graph?: string;
   files?: Record<string, string>;
-  /** The size asked for; a draft's file is smaller (width/height below). */
+  /** The size asked for. */
   canvas: { width: number; height: number };
   fps: number;
   /** The file's. */
@@ -142,7 +149,9 @@ export function videoSummary(video: VideoRow, version?: number) {
 /* Songs                                                                      */
 /* -------------------------------------------------------------------------- */
 
-const songsIn = (inputs: RenderInput[]) => [...new Set(inputs.map((i) => /^song:(\d+)$/.exec(i.ref.trim())?.[1]).filter(Boolean).map(Number))];
+/** The library songs a composition uses. */
+export const songsIn = (c: Pick<Composition, "song" | "sounds">) =>
+  [...new Set([c.song?.ref, ...(c.sounds ?? []).map((s) => s.ref)].map((r) => /^song:(\d+)$/.exec(r?.trim() ?? "")?.[1]).filter(Boolean).map(Number))];
 
 /** The library songs `video` may use (all the unused ones for a new video), its own first. */
 export async function songsFor(video: Pick<VideoRow, "trackId"> | null) {
@@ -167,9 +176,9 @@ export async function songsFor(video: Pick<VideoRow, "trackId"> | null) {
     .orderBy(sql`${reelTracks.id} = ${own ?? -1} desc`, reelTracks.title);
 }
 
-/** Throws unless every library song in `inputs` is one this video may use. */
-async function checkSongs(video: VideoRow, inputs: RenderInput[]): Promise<number | null> {
-  const songs = songsIn(inputs);
+/** Throws unless every library song `c` uses is one this video may use. */
+export async function checkSongs(video: VideoRow, c: Pick<Composition, "song" | "sounds">): Promise<number | null> {
+  const songs = songsIn(c);
   if (songs.length > 1) throw new MediaError("A video uses one library song (each song makes one video). Mix other sounds from assets.");
   if (!songs.length) return null;
   const id = songs[0];
@@ -221,53 +230,57 @@ async function releaseSong(id: number, video: VideoRow) {
 /* Rendering a version                                                        */
 /* -------------------------------------------------------------------------- */
 
-export async function createVideo(input: { chatId: string | null; userId: number | null; title: string; prompt: string | null }) {
+export async function createVideo(input: { chatId: string | null; userId: number | null; title: string; prompt: string | null; composition?: Composition | null }) {
   const [row] = await db
     .insert(seelieVideos)
-    .values({ chatId: input.chatId, userId: input.userId, title: input.title.slice(0, 200), prompt: input.prompt?.slice(0, 4000) ?? null })
+    .values({ chatId: input.chatId, userId: input.userId, title: input.title.slice(0, 200), prompt: input.prompt?.slice(0, 4000) ?? null, composition: input.composition ?? null })
     .returning();
   return row;
 }
 
 /**
- * Render `spec` as the video's next version: the MP4, its poster and its watch copy.
- * A final that uses a library song claims it. Returns the updated row and the version.
+ * Record a rendered MP4 (`file`, made from `c`) as the video's next version, with its
+ * poster and watch copy. A final that uses a library song claims it. Returns the updated
+ * row and the version.
  */
-export async function renderVersion(
+export async function addVersion(
   videoId: number,
-  spec: RenderSpec,
-  ctx: Omit<RefContext, "workDir"> & { signal: AbortSignal; progress: (text: string) => void },
+  file: string,
+  input: { quality: "draft" | "final"; composition: Composition; findings: string[] },
+  progress: (text: string) => void,
 ): Promise<{ video: VideoRow; version: VideoVersion }> {
   const before = await getVideo(videoId);
   if (!before) throw new MediaError(`There's no video:${videoId}.`);
-  const song = await checkSongs(before, spec.inputs);
+  const c = input.composition;
+  const song = await checkSongs(before, c);
 
   await mediaFolder("videos", String(videoId));
   const temp = `render-${randomBytes(6).toString("hex")}`;
   const tempFile = (ext: string) => mediaPath("videos", String(videoId), `${temp}${ext}`);
   try {
-    const out = await renderGraph(spec, tempFile(".mp4"), ctx);
-    ctx.progress("Making the poster and the watch copy…");
-    await makeWatchCopy(tempFile(".mp4"), tempFile("-watch.mp4"), { maxSeconds: out.seconds, hasAudio: true });
-    const [poster] = await stillsAt(tempFile(".mp4"), [Math.min(out.seconds * 0.3, 3)], 720);
+    await copyFile(file, tempFile(".mp4"));
+    const info = await probe(tempFile(".mp4"));
+    const sound = !!c.song || !!c.sounds?.length;
+    progress("Making the poster and the watch copy…");
+    await makeWatchCopy(tempFile(".mp4"), tempFile("-watch.mp4"), { maxSeconds: info.duration || c.duration, hasAudio: sound });
+    const [poster] = await stillsAt(tempFile(".mp4"), [Math.min(c.duration * 0.3, 3)], 720);
     await writeFile(tempFile(".jpg"), poster);
 
-    if (spec.quality === "final" && song !== null && !(await claimSong(song, videoId))) {
+    if (input.quality === "final" && song !== null && !(await claimSong(song, videoId))) {
       throw new MediaError(`song:${song} went into another reel or video while this rendered. Pick another song.`);
     }
 
     const item: Omit<VideoVersion, "version"> = {
-      quality: spec.quality,
-      inputs: spec.inputs,
-      graph: spec.graph,
-      ...(spec.files && Object.keys(spec.files).length ? { files: spec.files } : {}),
-      canvas: { width: spec.width, height: spec.height },
-      fps: spec.fps,
-      width: out.width,
-      height: out.height,
-      seconds: out.seconds,
-      bytes: out.bytes,
-      sound: out.sound,
+      quality: input.quality,
+      composition: c,
+      ...(input.findings.length ? { findings: input.findings.slice(0, 30) } : {}),
+      canvas: { width: c.width, height: c.height },
+      fps: c.fps,
+      width: info.width || c.width,
+      height: info.height || c.height,
+      seconds: Math.round((info.duration || c.duration) * 100) / 100,
+      bytes: (await stat(tempFile(".mp4"))).size,
+      sound,
       ...(song !== null ? { song } : {}),
       renderedAt: new Date().toISOString(),
     };
@@ -277,7 +290,7 @@ export async function renderVersion(
       .set({
         version: sql`${seelieVideos.version} + 1`,
         versions: sql`${seelieVideos.versions} || jsonb_build_array(${JSON.stringify(item)}::jsonb || jsonb_build_object('version', ${seelieVideos.version} + 1))`,
-        ...(spec.quality === "final" ? { trackId: song } : {}),
+        ...(input.quality === "final" ? { trackId: song } : {}),
         updatedAt: new Date(),
       })
       .where(eq(seelieVideos.id, videoId))
@@ -287,7 +300,7 @@ export async function renderVersion(
     await rename(tempFile("-watch.mp4"), videoFile(videoId, n, "watch"));
     await rename(tempFile(".jpg"), videoFile(videoId, n, "poster"));
 
-    if (spec.quality === "final" && before.trackId !== null && before.trackId !== song) await releaseSong(before.trackId, row);
+    if (input.quality === "final" && before.trackId !== null && before.trackId !== song) await releaseSong(before.trackId, row);
     const video = await pruneDrafts(row);
     return { video, version: versionOf(video, n) };
   } finally {
@@ -322,11 +335,12 @@ async function pruneDrafts(video: VideoRow): Promise<VideoRow> {
 /* Changing a video                                                           */
 /* -------------------------------------------------------------------------- */
 
-export async function updateVideo(id: number, patch: { title?: string; liked?: boolean | null; notes?: string | null }) {
+export async function updateVideo(id: number, patch: { title?: string; liked?: boolean | null; notes?: string | null; composition?: Composition | null }) {
   const [row] = await db
     .update(seelieVideos)
     .set({
       ...(patch.title !== undefined ? { title: patch.title.slice(0, 200) } : {}),
+      ...(patch.composition !== undefined ? { composition: patch.composition } : {}),
       ...(patch.liked !== undefined ? { liked: patch.liked } : {}),
       ...(patch.notes !== undefined ? { notes: patch.notes?.slice(0, 4000) ?? null } : {}),
       updatedAt: new Date(),

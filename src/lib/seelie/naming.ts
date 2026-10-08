@@ -25,7 +25,7 @@ export function provisionalTitle(text: string, fallback: string) {
   return line.length > MAX_TITLE ? `${line.slice(0, MAX_TITLE - 3).trimEnd()}…` : line;
 }
 
-const INSTRUCTION = `You name chats in Seelie, the AI agent of Paribelle's order management system (an Indian women's ethnic wear brand selling on Amazon, Flipkart, Meesho, Myntra and paribelle.in).
+const INSTRUCTION = `You name chats in Seelie, the AI agent of PariBelle's order management system (an Indian women's ethnic wear brand selling on Amazon, Flipkart, Meesho, Myntra and paribelle.in).
 Answer with only the chat's name: 2 to 6 words, sentence case, no quotes, no full stop, no emoji. Name the task or subject, the way a person would label the chat in a list (e.g. "Restock plan for Anarkali kurtas", "Flipkart returns this week", "Reel for the yellow set").
 Keep product names, SKUs, order ids and marketplace names as written. Write in the language the user wrote in.
 If the conversation doesn't yet say what it's about (a greeting, a thank you), answer ${SKIP}.`;

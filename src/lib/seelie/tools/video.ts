@@ -1,31 +1,39 @@
 import "server-only";
 
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 
 import { Type, type ImageContent, type VideoContent } from "@paribelle/pi-ai";
 import { desc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { reelTracks, seelieAssets } from "@/db/schema";
+import { reelTracks, seelieAssets, seelieChats } from "@/db/schema";
 import type { TrackAnalysis } from "@/lib/reels/beats";
 
-import { assetSummary, extOf, kindOfMime, mediaFolder, MediaError, SAFE_NAME, saveAsset, videoFile } from "../media/files";
-import { checkGraph, GraphError } from "../media/graph";
+import { heroMoments, postChecks, renderComposition, sketchComposition, songMap } from "../media/compose";
+import { findingLines, MAX_SECONDS, storyboardLines, TRANSITIONS, validate, videoBeats, type Composition, type Scene } from "../media/composition";
+import { assetSummary, extOf, kindOfMime, mediaFolder, MediaError, saveAsset, videoFile } from "../media/files";
+import { addGoogleFont, fontFaces } from "../media/fonts";
+import { GraphError } from "../media/graph";
 import {
+  addVersion,
+  checkSongs,
   createVideo,
   deleteVideo,
   getVideo,
   listVideos,
-  renderVersion,
   songsFor,
   updateVideo,
   versionOf,
   versionsOf,
   videoSummary,
+  type VideoRow,
   type VideoVersion,
 } from "../media/library";
 import { REF_PATTERN, resolveRef } from "../media/refs";
-import { checkSpec, MAX_SECONDS, stillsAt, type RenderSpec } from "../media/render";
+import { stillsAt } from "../media/render";
+import { describeJob, renderQueue, stopRender } from "../media/renderer";
+import { contactSheet } from "../media/sheet";
+import { PALETTE, templateDocs } from "../media/templates";
 import { WATCH_MAX_SECONDS, WATCH_REF, watchBlock } from "../media/watch";
 import { fetchPublic, toJpeg } from "./images";
 import { defineTool, ToolError, type ToolContext } from "./types";
@@ -102,49 +110,22 @@ async function importUrl(raw: string, ctx: ToolContext) {
   return assetSummary(row);
 }
 
-/** A Google font from Fontsource (static TTFs per weight; every Google font is OFL or Apache). */
-async function addFont(family: string, weights: number[] | undefined, subset: string | undefined, italic: boolean, ctx: ToolContext) {
-  const id = family.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  if (!id) throw new ToolError("Which font family?");
-  const meta = await fetchPublic(`https://api.fontsource.org/v1/fonts/${id}`, ctx.signal, { maxBytes: 2_000_000 }).catch(() => {
-    throw new ToolError(`There's no Google font "${family}" (fonts.google.com lists them).`);
-  });
-  const info = JSON.parse(meta.bytes.toString("utf8")) as { family: string; subsets: string[]; weights: number[]; styles: string[]; license: string; type: string };
-  if (info.type !== "google") throw new ToolError(`${info.family} isn't a Google font.`);
-  const sub = subset ?? "latin";
-  if (!info.subsets.includes(sub)) throw new ToolError(`${info.family} has no ${sub} characters; it has ${info.subsets.join(", ")}.`);
-  if (italic && !info.styles.includes("italic")) throw new ToolError(`${info.family} has no italic.`);
-  const want = (weights?.length ? weights : [400, 700]).filter((w) => info.weights.includes(w));
-  if (!want.length) throw new ToolError(`${info.family} comes in weights ${info.weights.join(", ")}.`);
-
-  const dir = await mediaFolder("fonts");
-  const saved: string[] = [];
-  for (const w of want.slice(0, 6)) {
-    const style = italic ? "italic" : "normal";
-    const { bytes } = await fetchPublic(`https://cdn.jsdelivr.net/fontsource/fonts/${id}@latest/${sub}-${w}-${style}.ttf`, ctx.signal, { maxBytes: 5_000_000 });
-    const name = `${info.family.replace(/[^A-Za-z0-9]+/g, "")}-${w}${italic ? "-italic" : ""}${sub === "latin" ? "" : `-${sub}`}.ttf`;
-    if (!SAFE_NAME.test(name)) continue;
-    await writeFile(`${dir}/${name}`, bytes);
-    saved.push(`$font/${name}`);
-  }
-  return { family: info.family, license: info.license, added: saved, otherSubsets: info.subsets.filter((s) => s !== sub) };
-}
-
 export const videoAssets = defineTool({
   name: "video_assets",
   label: "Media",
   description: [
     "What the video tools can use, by ref: chat:<n> (images attached in this chat, oldest first), asset:<id> (clips, images, sounds, subtitles in Seelie's media),",
-    "song:<id> (library songs, ~70 s around the hook, with their beat map), video:<id>[@<version>] (library videos), brand:endcard (Paribelle's 1080x1920 end card).",
+    "song:<id> (library songs, ~70 s around the hook, with their beat map), video:<id>[@<version>] (library videos), brand:endcard (PariBelle's 1080x1920 end card).",
     "list: this chat's media (scope 'all' for everything). info: details of refs; images are shown to you; songs give bpm, beats, bars, phrases, lifts and hook in seconds.",
     "songs: library songs still free (each song makes one reel or video; pass videoId to include the one it holds).",
-    `import: save images, clips (up to ${MAX_SECONDS * 4} s is fine) or sounds from public https URLs as assets. fonts: the fonts ($font/<file>) and looks ($lut/<file>) graphs may use.`,
+    `import: save images, clips (up to ${MAX_SECONDS * 4} s is fine) or sounds from public https URLs as assets. fonts: the font families a composition may use (CSS font-family), their files ($font/<file> for photo_edit and pdf_edit) and looks ($lut/<file>).`,
     "add_font: download a Google font by family (weights, default 400 and 700; subset e.g. devanagari for Hindi text, as one file per subset; italic).",
+    "templates: PariBelle's scene templates with their params, and the brand's palette and fonts.",
     "save_frame: keep a still from a clip or video (ref, at seconds) as an image asset, e.g. to cut out or restyle.",
     "Product photos from the catalogue or paribelle.in: import their https URLs first.",
   ].join(" "),
   parameters: Type.Object({
-    action: StringEnum(["list", "info", "songs", "import", "fonts", "add_font", "save_frame"]),
+    action: StringEnum(["list", "info", "songs", "import", "fonts", "add_font", "save_frame", "templates"]),
     scope: optional(StringEnum(["chat", "all"])),
     refs: optional(Type.Array(Type.String(), { maxItems: 12 })),
     videoId: optional(Type.Integer()),
@@ -170,7 +151,9 @@ export const videoAssets = defineTool({
               ? "Songs left"
               : a.action === "fonts"
                 ? "Fonts and looks"
-                : "Media in this chat",
+                : a.action === "templates"
+                  ? "Video templates"
+                  : "Media in this chat",
   async execute(a, ctx) {
     return media(async () => {
       switch (a.action) {
@@ -257,17 +240,34 @@ export const videoAssets = defineTool({
         }
 
         case "fonts": {
-          const fonts = await readdir(await mediaFolder("fonts"));
+          const faces = await fontFaces();
           const luts = await readdir(await mediaFolder("luts"));
+          const families = new Map<string, string[]>();
+          for (const f of faces) families.set(f.family, [...(families.get(f.family) ?? []), `${f.weight}${f.style === "italic" ? " italic" : ""}`]);
           return {
-            data: { fonts: fonts.map((f) => `$font/${f}`), looks: luts.map((f) => `$lut/${f}`) },
-            text: fonts.length ? undefined : "No fonts yet: add_font adds Google fonts.",
+            data: {
+              families: Object.fromEntries(families),
+              files: faces.map((f) => `$font/${f.file}`),
+              looks: luts.map((f) => `$lut/${f}`),
+            },
+            text: faces.length ? undefined : "No fonts yet (the brand's are fetched with the first storyboard): add_font adds Google fonts.",
           };
         }
 
+        case "templates":
+          return {
+            text: [
+              "Scenes fill these in (video_plan scenes[].template + params). A reel opens with hook (the product and the hook words from the first frame). Every template keeps text inside the reel's safe area, puts words over photos on solid boxes and moves on its own; add your own html/css/script to a scene for anything more.",
+              "The brand: headlines in var(--font-display) (Cormorant Garamond), text in var(--font-text) (Jost), the wordmark in var(--font-logo) (Italiana). Colours as var(--name):",
+              Object.keys(PALETTE).join(", "),
+              "In a scene's own CSS: sizes as calc(var(--u) * N) on a 1080-wide grid; the safe area is var(--safe-top), var(--safe-bottom), var(--safe-x).",
+            ].join("\n"),
+            data: templateDocs(),
+          };
+
         case "add_font": {
           if (!a.family) throw new ToolError("Which font family?");
-          return { data: await addFont(a.family, a.weights, a.subset, a.italic === true, ctx) };
+          return { data: await addGoogleFont(a.family, a.weights, a.subset, a.italic === true, ctx.signal) };
         }
 
         case "save_frame": {
@@ -346,99 +346,251 @@ export const videoWatch = defineTool({
 });
 
 /* -------------------------------------------------------------------------- */
-/* video_render                                                               */
+/* video_plan and video_render                                                */
 /* -------------------------------------------------------------------------- */
 
-const InputSchema = Type.Object({
-  ref: Type.String({ description: "chat:<n>, asset:<id>, song:<id>, video:<id>[@<v>] or brand:endcard" }),
-  start: optional(Type.Number({ minimum: 0, description: "Seconds into the clip or sound to start from." })),
-  duration: optional(Type.Number({ minimum: 0.04, description: "Seconds to read; how long an image lasts (default: the whole video)." })),
-  loop: optional(Type.Boolean({ description: "Repeat until the video ends." })),
+const SceneSchema = Type.Object({
+  id: Type.String({ description: "Short and unique: hook, hero, price (lowercase letters, digits, dashes)." }),
+  start: optional(Type.Number({ minimum: 0, description: "Seconds into the video." })),
+  duration: optional(Type.Number({ minimum: 0.1 })),
+  intent: optional(Type.String({ maxLength: 300, description: "What the scene does, with a motion verb for each element (\"the kurta SLAMS in on the drop, the price DRIFTS up\")." })),
+  template: optional(Type.String({ description: "A PariBelle template (video_assets templates lists them and their params)." })),
+  params: optional(Type.Record(Type.String(), Type.Unknown(), { description: "The template's params." })),
+  html: optional(Type.String({ maxLength: 40_000, description: "Your own scene, or more on top of a template. Media as src=\"asset:12\" / url(chat:2)." })),
+  css: optional(Type.String({ maxLength: 40_000, description: "CSS for this scene only (nested under it): .title { … }." })),
+  script: optional(Type.String({ maxLength: 40_000, description: "GSAP on `tl` in the scene's own seconds (0 = its start): tl.from(q(\".title\"), { y: 80 * U, opacity: 0, duration: 0.8, ease: \"expo.out\" }, 0.3). Also D, W, H, U, K, beats, bars, root." })),
+  enter: optional(StringEnum([...TRANSITIONS], { description: "How it comes in (default cut)." })),
+  hero: optional(Type.Number({ minimum: 0, description: "Its best moment in its own seconds, for sketches and the contact sheet (default 60% in)." })),
+});
+
+const LayerSchema = Type.Object({
+  id: Type.String(),
+  start: Type.Number({ minimum: 0 }),
+  duration: Type.Number({ minimum: 0.1 }),
+  html: Type.String({ maxLength: 20_000 }),
+  css: optional(Type.String({ maxLength: 20_000 })),
+  script: optional(Type.String({ maxLength: 20_000 })),
+});
+
+const SongSchema = Type.Object({
+  ref: Type.String({ description: "song:<id>" }),
+  from: optional(Type.Number({ minimum: 0, description: "Second of the song (its beat map's time) the video starts at." })),
+  volume: optional(Type.Number({ minimum: 0, maximum: 3.98 })),
+  fadeIn: optional(Type.Number({ minimum: 0 })),
+  fadeOut: optional(Type.Number({ minimum: 0 })),
+});
+
+const SoundSchema = Type.Object({
+  ref: Type.String({ description: "An audio asset (asset:<id>)." }),
+  at: Type.Number({ minimum: 0 }),
+  from: optional(Type.Number({ minimum: 0 })),
+  duration: optional(Type.Number({ minimum: 0.1 })),
+  volume: optional(Type.Number({ minimum: 0, maximum: 3.98 })),
+  fadeIn: optional(Type.Number({ minimum: 0 })),
+  fadeOut: optional(Type.Number({ minimum: 0 })),
+});
+
+const SetSchema = Type.Object({
+  width: optional(Type.Integer()),
+  height: optional(Type.Integer()),
+  fps: optional(Type.Integer()),
+  duration: optional(Type.Number({ description: `Seconds, up to ${MAX_SECONDS}.` })),
+  song: optional(SongSchema),
+  noSong: optional(Type.Boolean({ description: "Take the song out." })),
+  sounds: optional(Type.Array(SoundSchema, { maxItems: 8 })),
+  css: optional(Type.String({ maxLength: 20_000, description: "CSS every scene shares." })),
+  overlays: optional(Type.Array(LayerSchema, { maxItems: 6, description: "Layers over the scenes for a stretch (a running caption, a logo)." })),
+});
+
+const EMPTY: Composition = { width: 1080, height: 1920, fps: 30, duration: 0, scenes: [] };
+
+/** A composition with `a`'s changes: a whole one, then settings, then scenes added, changed or removed by id. */
+function applyPlan(base: Composition, a: { composition?: Composition; set?: Partial<Composition> & { noSong?: boolean }; scenes?: Partial<Scene>[]; remove?: string[] }): Composition {
+  let c: Composition = structuredClone(a.composition ?? base);
+  if (a.set) {
+    const { noSong, ...rest } = a.set;
+    c = { ...c, ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)) };
+    if (noSong) delete c.song;
+  }
+  for (const s of a.scenes ?? []) {
+    const i = c.scenes.findIndex((x) => x.id === s.id);
+    if (i >= 0) c.scenes[i] = { ...c.scenes[i], ...Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined)) } as Scene;
+    else c.scenes.push(s as Scene);
+  }
+  if (a.remove?.length) c.scenes = c.scenes.filter((s) => !a.remove!.includes(s.id));
+  c.scenes.sort((x, y) => (x.start ?? 0) - (y.start ?? 0));
+  return c;
+}
+
+/** The composition a version was made from ("video:12" or "video:12@3"). */
+async function recipeOf(ref: string): Promise<Composition> {
+  const m = /^video:(\d+)(?:@(\d+))?$/.exec(ref.trim());
+  if (!m) throw new ToolError(`from is a library video (video:<id> or video:<id>@<version>).`);
+  const video = await getVideo(Number(m[1]));
+  if (!video) throw new ToolError(`There's no video:${m[1]}.`);
+  const c = m[2] ? versionOf(video, Number(m[2])).composition : video.version ? versionOf(video).composition : (video.composition as Composition | null);
+  if (!c) throw new ToolError(`video:${m[1]}${m[2] ? `@${m[2]}` : ""} was made with the old ffmpeg renderer and has no composition to start from.`);
+  return c;
+}
+
+const jobFor = (ctx: ToolContext, video: { id: number; title: string }, what: string) => ({ chatId: ctx.chatId, runId: ctx.runId, videoId: video.id, what: `${what} of video:${video.id} "${video.title}"` });
+
+/** What to look for on a contact sheet before going on: what the owner would otherwise have to point out. */
+const REVIEW_SHEET = [
+  "The contact sheet (each scene at its best moment) is in this card. Go through it as someone scrolling Reels would, and fix what fails with video_plan before rendering:",
+  "1) the first frame shows the product and the hook words, and the first two seconds show what the hook promises; 2) no words over a face; 3) every word is big enough to read on a phone and stays up long enough to read twice;",
+  "4) each label matches the photo under it (the colour, the view); 5) every claim (fabric, work, origin, price, offer, delivery, numbers) is in the product's data from this chat, word for word in meaning;",
+  "6) the product fills the frame in most scenes and no two scenes look alike. Then render a draft.",
+].join(" ");
+
+export const videoPlan = defineTool({
+  name: "video_plan",
+  label: "Storyboard",
+  description: [
+    "Write or change a video's storyboard: its composition of timed scenes, each a PariBelle template filled in (video_assets templates) or your own HTML/CSS/GSAP, or both, plus the song, sounds and overlays. Saved on the video (a new one when videoId is left out: give a title and the prompt).",
+    "composition: the whole thing (first time, or to start over); from: start from a library video's composition (\"make another like video:12\"); set: canvas, fps, duration, song, sounds, css, overlays; scenes: add scenes or change them by id (only the fields you give); remove: scene ids.",
+    `Scenes follow each other with no gaps and the last ends at duration (up to ${MAX_SECONDS} s); a scene's enter transition overlaps the one before for you. Times inside a scene are its own (0 = its start).`,
+    "It checks the plan (timing, the song's beats, params), then the renderer checks the layout (text overflow, hidden or clipped text, the reel's covered bands, contrast, motion) and takes a still of every scene at its best moment: a contact sheet the owner sees in this card.",
+    "Once the checks are clean and the contact sheet looks right, render a draft straight away (video_render); the owner judges the draft, not the plan.",
+  ].join(" "),
+  parameters: Type.Object({
+    videoId: optional(Type.Integer()),
+    title: optional(Type.String({ maxLength: 200 })),
+    prompt: optional(Type.String({ maxLength: 4000, description: "A new video: what was asked for, in the person's words." })),
+    from: optional(Type.String({ description: "video:<id>[@<version>] to start from." })),
+    composition: optional(
+      Type.Object({
+        width: Type.Integer({ description: "1080 for reels" }),
+        height: Type.Integer({ description: "1920 for reels" }),
+        fps: Type.Integer({ description: "30" }),
+        duration: Type.Number(),
+        song: optional(SongSchema),
+        sounds: optional(Type.Array(SoundSchema, { maxItems: 8 })),
+        css: optional(Type.String({ maxLength: 20_000 })),
+        scenes: Type.Array(SceneSchema, { minItems: 1, maxItems: 24 }),
+        overlays: optional(Type.Array(LayerSchema, { maxItems: 6 })),
+      }),
+    ),
+    set: optional(SetSchema),
+    scenes: optional(Type.Array(SceneSchema, { maxItems: 24 })),
+    remove: optional(Type.Array(Type.String(), { maxItems: 24 })),
+    sketch: optional(Type.Boolean({ description: "Check it and take the stills (default true)." })),
+  }),
+  kind: "read",
+  summary: (a) => `Storyboard ${a.videoId ? `of video:${a.videoId}` : `"${a.title ?? "a new video"}"`}`,
+  async execute(a, ctx) {
+    return media(async () => {
+      let video = a.videoId ? await getVideo(a.videoId) : null;
+      if (a.videoId && !video) throw new ToolError(`There's no video:${a.videoId}. video_library list shows them.`);
+      const base = a.from ? await recipeOf(a.from) : ((video?.composition as Composition | null) ?? (video?.version ? versionOf(video).composition : null) ?? EMPTY);
+      const c = applyPlan(base, { composition: a.composition as Composition | undefined, set: a.set as never, scenes: a.scenes as Partial<Scene>[] | undefined, remove: a.remove });
+      if (!c.scenes.length) throw new ToolError("The storyboard has no scenes yet: give composition, or scenes.");
+
+      if (!video) video = await createVideo({ chatId: ctx.chatId, userId: ctx.user.id, title: a.title?.trim() || "Untitled video", prompt: a.prompt ?? null, composition: c });
+      else video = await updateVideo(video.id, { composition: c, ...(a.title?.trim() ? { title: a.title.trim() } : {}) });
+
+      const map = await songMap(c);
+      const verdict = validate(c, map);
+      // A song another video already holds stops the render: say so now, while there's time to pick or add another.
+      const songProblem = await checkSongs(video, c).then(
+        () => null,
+        (err: unknown) => (err instanceof Error ? err.message : String(err)),
+      );
+      if (songProblem) verdict.warnings.unshift(`Can't render with this song: ${songProblem}`);
+      const head = `Storyboard of video:${video.id} "${video.title}" (saved): ${c.duration} s, ${c.width}x${c.height}, ${c.fps} fps${c.song ? `, ${c.song.ref} from ${c.song.from ?? 0} s` : ", no song"}.`;
+      const lines = [head, ...storyboardLines(c)];
+      if (verdict.errors.length) {
+        return { text: [...lines, "", "Must fix before it can be sketched or rendered:", ...verdict.errors.map((e) => `- ${e}`), ...(verdict.warnings.length ? ["Also:", ...verdict.warnings.map((w) => `- ${w}`)] : [])].join("\n"), error: true };
+      }
+      if (map) {
+        const { beats, bars } = videoBeats(c, map);
+        lines.push(`Beats in the video: ${beats.slice(0, 48).join(", ")}${beats.length > 48 ? "…" : ""}. Bars start at: ${bars.join(", ")}.`);
+      }
+      if (verdict.warnings.length) lines.push("", "Worth fixing:", ...verdict.warnings.map((w) => `- ${w}`));
+      if (a.sketch === false) return { text: lines.join("\n") };
+
+      const sketch = await sketchComposition(c, jobFor(ctx, video, "Sketches"), ctx);
+      const errors = sketch.findings.filter((f) => f.severity === "error");
+      if (sketch.findings.length) lines.push("", `The check found ${errors.length} error${errors.length === 1 ? "" : "s"} (they stop a render) and ${sketch.findings.length - errors.length} warning(s):`, ...findingLines(sketch.findings));
+      else lines.push("", "The check found nothing wrong: layout, the reel's safe zones, contrast, motion.");
+      lines.push("", REVIEW_SHEET);
+      return { text: lines.join("\n"), images: sketch.sheet ? [jpegBlock(sketch.sheet)] : [] };
+    });
+  },
 });
 
 export const videoRender = defineTool({
   name: "video_render",
   label: "Render video",
   description: [
-    "Render a video from an ffmpeg filter graph (-filter_complex syntax) you write. Input i is [i:v] / [i:a] in the order of `inputs`.",
-    "The graph must end in [vout] and may end in [aout] for sound; the OMS scales/pads [vout] to width x height, sets fps and encodes H.264/AAC.",
-    `Limits: at most ${MAX_SECONDS} s and 1080p (long side 1920, short side 1080, even sizes), 12-60 fps, 40 inputs. Images are still inputs that last 'duration' s.`,
-    "Files only through placeholders: drawtext fontfile=$font/<file> (video_assets fonts), lut3d file=$lut/<file>, subtitles/ass $asset/<id> or $file/<name> (text you pass in files),",
-    "sendcmd $file/<name>, subtitles fontsdir=$fonts. Filters that open other files or URLs (movie, amovie) aren't available.",
-    "quality draft (fast, 960 px, default) while you work; final (full size) once it's right. Every render is a new version of a library video (videoId; omit it and give a title to start one).",
-    "fromVersion re-renders that version's recipe with whatever you change. A final that uses song:<id> claims the song for this video.",
-    "You get the render back to watch (or stills at `frames`): always watch a draft before calling it done.",
+    "Render a video's storyboard (video_plan) as its next version: drafts while you work (they cost nothing and claim nothing), a final once the owner has seen a draft and said go (a final claims its library song).",
+    "The renderer checks the layout first; errors stop the render and come back to fix with video_plan (ignore: [codes] only for a finding that's wrong about this video). After it renders: checks on the file (black or frozen stretches; loudness is evened for Instagram),",
+    "a contact sheet of every scene and the watch copy, both attached: look at both before deciding what to change. The owner sees each version play in the chat.",
+    "One render runs at a time across all chats: if others are ahead, this waits for them (up to 5 minutes, then says what's in the way). video_library rendering shows what's running; stop_render stops it.",
   ].join(" "),
   parameters: Type.Object({
-    videoId: optional(Type.Integer()),
-    title: optional(Type.String({ maxLength: 200 })),
-    prompt: optional(Type.String({ description: "A new video: what was asked for, in the person's words." })),
-    fromVersion: optional(Type.Integer({ minimum: 1 })),
-    inputs: optional(Type.Array(InputSchema, { maxItems: 40 })),
-    graph: optional(Type.String({ maxLength: 100_000 })),
-    files: optional(Type.Array(Type.Object({ name: Type.String(), content: Type.String() }), { maxItems: 10 })),
-    width: optional(Type.Integer()),
-    height: optional(Type.Integer()),
-    fps: optional(Type.Number()),
-    duration: optional(Type.Number({ description: "Seconds." })),
+    videoId: Type.Integer(),
     quality: optional(StringEnum(["draft", "final"])),
-    watch: optional(Type.Boolean({ description: "Get the render back to watch (default true)." })),
+    ignore: optional(Type.Array(Type.String(), { maxItems: 10, description: "Check codes to accept for this render." })),
+    watch: optional(Type.Boolean({ description: "Get the watch copy back (default true)." })),
     frames: optional(Type.Array(Type.Number({ minimum: 0 }), { maxItems: 8, description: "Stills at these seconds as well." })),
   }),
   kind: "read",
-  summary: (a) => `${a.quality === "final" ? "Final" : "Draft"} render of ${a.videoId ? `video:${a.videoId}` : `"${a.title ?? "a new video"}"`}${a.fromVersion ? ` from v${a.fromVersion}` : ""}`,
+  summary: (a) => `${a.quality === "final" ? "Final" : "Draft"} render of video:${a.videoId}`,
   async execute(a, ctx) {
     return media(async () => {
-      let video = a.videoId ? await getVideo(a.videoId) : null;
-      if (a.videoId && !video) throw new ToolError(`There's no video:${a.videoId}. video_library list shows them.`);
-      let base: VideoVersion | null = null;
-      if (a.fromVersion !== undefined) {
-        if (!video) throw new ToolError("fromVersion needs the videoId it belongs to.");
-        base = versionOf(video, a.fromVersion);
-      }
-      const inputs = a.inputs ?? base?.inputs;
-      const graph = a.graph ?? base?.graph;
-      const duration = a.duration ?? base?.seconds;
-      if (!inputs?.length) throw new ToolError("inputs: which media go in?");
-      if (!graph) throw new ToolError("graph: the filter graph to render.");
-      if (!duration) throw new ToolError("duration: how many seconds?");
-      for (const input of inputs) if (!REF_PATTERN.test(input.ref.trim())) throw new ToolError(`"${input.ref}" isn't a ref (video_assets list shows them).`);
-      const spec: RenderSpec = {
-        inputs: inputs.map((i) => ({ ...i, ref: i.ref.trim() })),
-        graph,
-        files: a.files ? Object.fromEntries(a.files.map((f) => [f.name, f.content])) : base?.files,
-        width: a.width ?? base?.canvas.width ?? 1080,
-        height: a.height ?? base?.canvas.height ?? 1920,
-        fps: a.fps ?? base?.fps ?? 30,
-        duration,
-        quality: a.quality ?? "draft",
-      };
-      // Refuse a bad graph before a new video is made for it.
-      checkSpec(spec);
-      checkGraph(spec.graph, spec.inputs.length, spec.files ?? {});
-
-      if (!video) {
-        video = await createVideo({ chatId: ctx.chatId, userId: ctx.user.id, title: a.title?.trim() || "Untitled video", prompt: a.prompt ?? null });
-      } else if (a.title?.trim() && a.title.trim() !== video.title) {
-        video = await updateVideo(video.id, { title: a.title.trim() });
-      }
+      const video = await getVideo(a.videoId);
+      if (!video) throw new ToolError(`There's no video:${a.videoId}. video_library list shows them.`);
+      let c = video.composition as Composition | null;
+      if (!c?.scenes?.length) throw new ToolError(`video:${video.id} has no storyboard: write one with video_plan first.`);
+      const verdict = validate(c, await songMap(c));
+      if (verdict.errors.length) throw new ToolError(`The storyboard can't render yet:\n${verdict.errors.map((e) => `- ${e}`).join("\n")}`);
+      await checkSongs(video, c);
+      const quality = a.quality ?? "draft";
 
       const started = Date.now();
-      const { video: row, version } = await renderVersion(video.id, spec, { chatImages: ctx.chatImages, signal: ctx.signal, progress: ctx.progress });
-      const took = round((Date.now() - started) / 1000, 1);
-
-      const videos: VideoContent[] = [];
-      const images: ImageContent[] = [];
-      const ref = `video:${row.id}@${version.version}`;
-      if (a.watch !== false) {
-        if (ctx.canWatch) videos.push(await watchBlock(ref));
-        else if (!a.frames?.length) images.push(...(await stillsAt(videoFile(row.id, version.version), spread(0, version.seconds, 6), 768)).map(jpegBlock));
+      const r = await renderComposition(c, quality, jobFor(ctx, video, quality === "final" ? "Final render" : "Draft render"), ctx, a.ignore ?? []);
+      if (r.blocked) {
+        return {
+          text: ["Not rendered: the check found errors. Fix them with video_plan (or, when one is wrong about this video, render again with ignore: [its code]).", ...findingLines(r.blocked)].join("\n"),
+          error: true,
+        };
       }
-      if (a.frames?.length) images.push(...(await stillsAt(videoFile(row.id, version.version), a.frames, 768)).map(jpegBlock));
+      let row: VideoRow;
+      let version: VideoVersion;
+      let post: string[];
+      try {
+        const checked = await postChecks(r.file!, c);
+        post = checked.notes;
+        if (checked.volume !== null && c.song) {
+          c = { ...c, song: { ...c.song, volume: checked.volume } };
+          await updateVideo(video.id, { composition: c });
+        }
+        ({ video: row, version } = await addVersion(video.id, r.file!, { quality, composition: c, findings: [...findingLines(r.findings), ...post.map((p) => `- ${p}`)] }, ctx.progress));
+      } finally {
+        await r.clear();
+      }
+      const took = round((Date.now() - started) / 1000, 1);
+      const ref = `video:${row.id}@${version.version}`;
+      const file = videoFile(row.id, version.version);
 
-      const seen = videos.length ? " Its watch copy is attached: watch it before deciding what to change." : images.length ? " Stills from it are attached." : "";
+      const moments = heroMoments(c);
+      const stills = await stillsAt(file, moments.map((m) => m.at), 540);
+      const images: ImageContent[] = [jpegBlock(await contactSheet(stills.map((image, i) => ({ image, label: moments[i].label })), { columns: Math.min(6, stills.length) }))];
+      const videos: VideoContent[] = [];
+      if (a.watch !== false && ctx.canWatch) videos.push(await watchBlock(ref));
+      if (a.frames?.length) images.push(...(await stillsAt(file, a.frames, 768)).map(jpegBlock));
+
+      const notes = [...findingLines(r.findings), ...post.map((p) => `- ${p}`)];
       return {
-        text: `Rendered ${ref} (${version.quality}, ${version.width}x${version.height}, ${version.seconds} s) in ${took} s.${seen}`,
+        text: [
+          `Rendered ${ref} (${version.quality}, ${version.width}x${version.height}, ${version.seconds} s) in ${took} s.`,
+          notes.length ? `What the checks found:\n${notes.join("\n")}` : "Checks passed: layout, the reel's safe zones, contrast, motion, loudness, no black or frozen stretches.",
+          `The contact sheet${videos.length ? " and the watch copy are" : " is"} attached. Watch it as a viewer: would the first second stop you, does the hook's promise show, can every word be read in the time it's up, do the cuts land on the beat, is the product on screen to the end, is anything blank, soft or repeated? Fix what's off and render again.`,
+          version.quality === "final" ? "" : "When it's right, it's already attached in the chat: tell the owner in one or two short lines what it is and ask for their go-ahead or changes before the final.",
+        ]
+          .filter(Boolean)
+          .join("\n"),
         data: videoSummary(row, version.version),
         videos,
         images,
@@ -455,13 +607,14 @@ export const videoLibrary = defineTool({
   name: "video_library",
   label: "Video library",
   description: [
-    "Seelie's video library: every video rendered, each version with the graph and inputs that made it.",
-    "list: this chat's videos (scope 'all' for every one). get: a video with its versions and a version's recipe (inputs, graph, files) to change and render again.",
+    "Seelie's video library: every video, with its storyboard (video_plan) and each rendered version with the composition that made it.",
+    "list: this chat's videos (scope 'all' for every one). get: a video with its versions, its storyboard, and what the checks said (version: that version's composition, to build on with video_plan from).",
     "show: play a version (default the latest) for the owner in the chat, with Download and Share: how you show a video when asked to see it.",
-    "rename: a new title. feedback: record what the owner said about it (liked, notes, in their words); it guides later videos. delete: remove it and its files.",
+    "rename: a new title. feedback: record what the owner said about it (liked, notes, in their words); it guides later videos. delete: remove it and its files (only when the owner asks for that video to go).",
+    "rendering: the renderer's queue, in any chat (what, where, how far). stop_render: stop the one running, e.g. when the owner wants theirs first. Deleting a video never stops or frees a render.",
   ].join(" "),
   parameters: Type.Object({
-    action: StringEnum(["list", "get", "show", "rename", "feedback", "delete"]),
+    action: StringEnum(["list", "get", "show", "rename", "feedback", "delete", "rendering", "stop_render"]),
     scope: optional(StringEnum(["chat", "all"])),
     videoId: optional(Type.Integer()),
     version: optional(Type.Integer()),
@@ -469,22 +622,53 @@ export const videoLibrary = defineTool({
     liked: optional(Type.Boolean()),
     notes: optional(Type.String({ maxLength: 4000 })),
   }),
-  kind: (a) => (a.action === "delete" ? "write" : "read"),
-  summary: (a) =>
-    a.action === "list"
-      ? "Videos"
-      : a.action === "delete"
-        ? `Delete video:${a.videoId} and its files`
-        : a.action === "rename"
-          ? `Rename video:${a.videoId} to "${a.title ?? ""}"`
-          : a.action === "feedback"
-            ? `Note on video:${a.videoId}`
-            : `${a.action === "show" ? "Show " : ""}video:${a.videoId}${a.version ? `@${a.version}` : ""}`,
+  kind: (a) => (a.action === "delete" || a.action === "stop_render" ? "write" : "read"),
+  summary: async (a) => {
+    switch (a.action) {
+      case "list":
+        return "Videos";
+      case "rendering":
+        return "What's rendering";
+      case "stop_render": {
+        const now = (await renderQueue().catch(() => [])).find((j) => j.status === "running");
+        return now ? `Stop the render running now: ${now.what}` : "Stop the render running now";
+      }
+      case "delete": {
+        // What the video really is, beside the model's own words on the card.
+        const video = a.videoId ? await getVideo(a.videoId).catch(() => null) : null;
+        if (!video) return `Delete video:${a.videoId}`;
+        const versions = versionsOf(video);
+        const finals = versions.filter((v) => v.quality === "final").length;
+        const made = versions.length ? `${plural(versions.length, "version")}${finals ? `, ${plural(finals, "final")}` : ", drafts only"}` : "not rendered yet";
+        return `Delete video:${video.id} "${video.title}" (${made}) and its files`;
+      }
+      case "rename":
+        return `Rename video:${a.videoId} to "${a.title ?? ""}"`;
+      case "feedback":
+        return `Note on video:${a.videoId}`;
+      default:
+        return `${a.action === "show" ? "Show " : ""}video:${a.videoId}${a.version ? `@${a.version}` : ""}`;
+    }
+  },
   async execute(a, ctx) {
     return media(async () => {
       if (a.action === "list") {
         const rows = await listVideos({ limit: 40, chatId: a.scope === "all" ? undefined : ctx.chatId });
         return { data: rows.map((v) => videoSummary(v)), text: rows.length ? undefined : "No videos yet." };
+      }
+      if (a.action === "rendering") {
+        const queue = await renderQueue();
+        if (!queue.length) return { text: "Nothing is rendering." };
+        const lines: string[] = [];
+        for (const job of queue) {
+          const [chat] = job.chatId && job.chatId !== ctx.chatId ? await db.select({ title: seelieChats.title }).from(seelieChats).where(eq(seelieChats.id, job.chatId)) : [];
+          lines.push(`- ${describeJob(job, { chatId: ctx.chatId, runId: ctx.runId })}${chat?.title ? ` ("${chat.title}")` : ""}`);
+        }
+        return { text: `The renderer's queue (one at a time, in this order):\n${lines.join("\n")}` };
+      }
+      if (a.action === "stop_render") {
+        const stopped = await stopRender();
+        return { text: stopped ? `Stopped: ${stopped.what}.` : "Nothing was rendering." };
       }
       if (!a.videoId) throw new ToolError("Which video (videoId)?");
       const video = await getVideo(a.videoId);
@@ -496,8 +680,11 @@ export const videoLibrary = defineTool({
             data: {
               ...videoSummary(video, v?.version),
               prompt: video.prompt,
-              versions: versionsOf(video).map((x) => ({ version: x.version, quality: x.quality, seconds: x.seconds, ...(x.pruned ? { pruned: true } : {}), at: x.renderedAt })),
-              ...(v ? { recipe: { inputs: v.inputs, graph: v.graph, files: v.files, width: v.canvas.width, height: v.canvas.height, fps: v.fps, duration: v.seconds } } : {}),
+              versions: versionsOf(video).map((x) => ({ version: x.version, quality: x.quality, seconds: x.seconds, ...(x.pruned ? { pruned: true } : {}), ...(x.composition ? {} : { renderer: "old ffmpeg graph" }), at: x.renderedAt })),
+              storyboard: video.composition ?? null,
+              ...(v?.composition && a.version !== undefined ? { versionComposition: v.composition } : {}),
+              ...(v && !v.composition ? { oldRecipe: { inputs: v.inputs, graph: v.graph, files: v.files } } : {}),
+              ...(v?.findings?.length ? { checks: v.findings } : {}),
             },
           };
         }
@@ -513,9 +700,11 @@ export const videoLibrary = defineTool({
         case "feedback":
           if (a.liked === undefined && a.notes === undefined) throw new ToolError("Give liked and/or notes.");
           return { data: videoSummary(await updateVideo(video.id, { liked: a.liked, notes: a.notes })) };
-        case "delete":
+        case "delete": {
+          if ((await renderQueue()).some((j) => j.videoId === video.id)) throw new ToolError(`video:${video.id} is rendering or waiting to. Stop the render first (stop_render) if the owner wants the video gone.`);
           await deleteVideo(video.id);
           return { text: `Deleted video:${video.id} "${video.title}".` };
+        }
       }
     });
   },

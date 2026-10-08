@@ -766,7 +766,7 @@ export const photoEdit = defineTool({
     "colour_match: move a region's colour (mask, default subject) onto the original photo's (ref; refMask subject | select | box | all on that photo); keepLightness (default true) keeps the scene's light; reports ΔE00 before and after.",
     "watermark: remove Gemini's visible sparkle (left alone when there is none). upscale: factor 2-4 (Real-ESRGAN, pictures up to 1600 px).",
     "compose: layers (ref, x, y, width as fractions; cutout true cuts its subject out first; opacity, rotate, shadow) and texts (text, x, y, size as a fraction of the height, colour, font $font/<file>, align, maxWidth, background, shadow).",
-    "Never put text on a marketplace main image. ffmpeg: a still graph (as in video_render: [0:v] is the picture, inputs are extra refs as [1:v]..., end at [vout]). canvas: a blank width x height (colour, else transparent) to compose on; refs can then be left out.",
+    "Never put text on a marketplace main image. ffmpeg: a still graph in -filter_complex syntax ([0:v] is the picture, extra refs as [1:v]..., end at [vout]; drawtext fontfile=$font/<file>, lut3d file=$lut/<file>). canvas: a blank width x height (colour, else transparent) to compose on; refs can then be left out.",
     "Output: format (default PNG with transparency, else JPEG), quality, maxBytes (JPEG/WebP quality is lowered to fit); a preset sets its format and size limit.",
   ].join(" "),
   parameters: Type.Object({

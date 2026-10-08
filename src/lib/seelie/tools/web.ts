@@ -45,7 +45,7 @@ export const webSearch = defineTool({
           systemInstruction: {
             parts: [
               {
-                text: `${todayLine()} You research for Paribelle, an Indian women's ethnic-wear label. Search the web and answer from what you find: specific names, numbers and dates, newest first when it's about trends. Say when the results don't settle something. No preamble.`,
+                text: `${todayLine()} You research for PariBelle, an Indian women's ethnic-wear label. Search the web and answer from what you find: specific names, numbers and dates, newest first when it's about trends. Say when the results don't settle something. No preamble.`,
               },
             ],
           },

@@ -1062,6 +1062,8 @@ export const seelieVideos = pgTable(
     prompt: text("prompt"),
     /** The latest version (0 before the first render). */
     version: integer("version").notNull().default(0),
+    /** The storyboard being worked on (`Composition` in src/lib/seelie/media/composition.ts). */
+    composition: jsonb("composition"),
     /** Every render, oldest first (`VideoVersion` in src/lib/seelie/media/library.ts). */
     versions: jsonb("versions").notNull().default([]),
     /** The library song it uses. Each song makes one video or reel. */

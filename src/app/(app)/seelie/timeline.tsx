@@ -2,7 +2,7 @@
 
 import type { AssistantMessage, ImageContent, TextContent, ToolCall, ToolResultMessage } from "@paribelle/pi-ai";
 import { AlertTriangle, ChevronDown, Download, ExternalLink, FileText, Music, Paperclip, Share2, X } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { ZoomImg } from "@/components/image-lightbox";
 import { Spinner } from "@/components/ui";
@@ -27,15 +27,63 @@ const imageUrl = (chatId: string, seq: number, index: number) => withBasePath(`/
 /** A step on the line: a thought or a tool call. */
 type StepItem = { type: "thinking"; text: string; live: boolean } | { type: "tool"; call: ToolCall };
 
+/** What a big request's dot holds: its steps, and what Seelie said between them. */
+type GroupItem = StepItem | { type: "text"; text: string } | { type: "error"; text: string } | { type: "stopped" };
+
 /** The chat in reading order. Steps in a row share one line, across a turn's model calls. */
 type Piece =
   | { type: "user"; entry?: ChatMessage; pending?: Pending }
   | { type: "text"; text: string }
   | { type: "steps"; steps: StepItem[] }
+  | { type: "group"; items: GroupItem[] }
+  | { type: "outcome"; items: GroupItem[]; text: string | null }
   | { type: "error"; text: string }
   | { type: "stopped" };
 
-function piecesOf(messages: ChatMessage[], pending: Pending | null, partial: AssistantMessage | null, showThinking: boolean): Piece[] {
+/** Tools that make something (a video, pictures, a PDF): a request using one is big work. */
+const MAKERS = /^(video_plan|video_render|photoshoot|photo_edit|pdf_edit)$/;
+/** Or a request with this many steps. */
+const MANY_STEPS = 6;
+
+/**
+ * A big request (a video, a photoshoot, many steps) folds into one bigger dot: everything
+ * from its first step to its last, with what Seelie said in between. After it comes the
+ * outcome: the closing reply with what it made (videos, pictures, PDFs) attached.
+ */
+export function grouped(pieces: Piece[], tools: Record<string, ToolRow>): Piece[] {
+  const out: Piece[] = [];
+  let i = 0;
+  while (i < pieces.length) {
+    if (pieces[i].type === "user") {
+      out.push(pieces[i++]);
+      continue;
+    }
+    let j = i;
+    while (j < pieces.length && pieces[j].type !== "user") j++;
+    const span = pieces.slice(i, j);
+    i = j;
+    let first = -1;
+    let last = -1;
+    span.forEach((p, k) => {
+      if (p.type !== "steps") return;
+      if (first < 0) first = k;
+      last = k;
+    });
+    const calls = span.flatMap((p) => (p.type === "steps" ? p.steps : [])).flatMap((s) => (s.type === "tool" ? [s.call] : []));
+    const children = calls.reduce((n, c) => n + (c.name === "helpers" ? Object.values(tools).filter((t) => t.parent === c.id).length : 0), 0);
+    if (first < 0 || !(calls.some((c) => MAKERS.test(c.name)) || calls.length + children >= MANY_STEPS)) {
+      out.push(...span);
+      continue;
+    }
+    const items = span.slice(first, last + 1).flatMap((p): GroupItem[] => (p.type === "steps" ? p.steps : p.type === "text" || p.type === "error" || p.type === "stopped" ? [p] : []));
+    const after = span.slice(last + 1);
+    const said = after.flatMap((p) => (p.type === "text" ? [p.text] : []));
+    out.push(...span.slice(0, first), { type: "group", items }, { type: "outcome", items, text: said.length ? said.join("\n\n") : null }, ...after.filter((p) => p.type !== "text"));
+  }
+  return out;
+}
+
+export function piecesOf(messages: ChatMessage[], pending: Pending | null, partial: AssistantMessage | null, showThinking: boolean): Piece[] {
   const pieces: Piece[] = [];
   const step = (s: StepItem) => {
     const last = pieces[pieces.length - 1];
@@ -82,12 +130,18 @@ export function Timeline() {
   const working = Object.values(tools).some((t) => t.runId === run?.id && (t.status === "running" || t.status === "awaiting"));
   const partialHasContent = !!partial?.content.some((c) => (c.type === "text" ? c.text : c.type === "thinking" ? c.thinking : true));
   const pieces = useMemo(
-    () => piecesOf(messages, pending, partialHasContent ? partial : null, showThinking),
-    [messages, pending, partial, partialHasContent, showThinking],
+    () => grouped(piecesOf(messages, pending, partialHasContent ? partial : null, showThinking), tools),
+    [messages, pending, partial, partialHasContent, showThinking, tools],
   );
   const waiting = active && !partialHasContent && !working ? (run?.status === "waiting" ? "Waiting for your answer…" : "Seelie is working…") : null;
-  // Between steps, the wait is the next dot on their line.
-  const onLine = !!waiting && pieces[pieces.length - 1]?.type === "steps";
+  // Between steps, the wait is the next dot on their line (or the big dot's line, while it has no reply yet).
+  const tail = pieces[pieces.length - 1];
+  const lineAt = tail?.type === "outcome" && !tail.text ? pieces.length - 2 : pieces.length - 1;
+  const onLine = !!waiting && (pieces[lineAt]?.type === "steps" || pieces[lineAt]?.type === "group");
+  let lastGroup = -1;
+  pieces.forEach((p, k) => {
+    if (p.type === "group") lastGroup = k;
+  });
 
   return (
     <div className="space-y-3 pb-4">
@@ -111,7 +165,25 @@ export function Timeline() {
               </p>
             );
           case "steps":
-            return <Steps key={key} steps={p.steps} tools={tools} results={results} chatId={chatId} trailing={onLine && i === pieces.length - 1 ? waiting : null} />;
+            return <Steps key={key} steps={p.steps} tools={tools} results={results} chatId={chatId} trailing={onLine && i === lineAt ? waiting : null} />;
+          case "group": {
+            const firstCall = p.items.find((s): s is Extract<GroupItem, { type: "tool" }> => s.type === "tool");
+            return (
+              <Group
+                key={`group:${firstCall?.call.id ?? i}`}
+                items={p.items}
+                tools={tools}
+                results={results}
+                chatId={chatId}
+                live={active && i === lastGroup}
+                trailing={onLine && i === lineAt ? waiting : null}
+              />
+            );
+          }
+          case "outcome": {
+            const firstCall = p.items.find((s): s is Extract<GroupItem, { type: "tool" }> => s.type === "tool");
+            return <Outcome key={`outcome:${firstCall?.call.id ?? i}`} items={p.items} text={p.text} results={results} />;
+          }
         }
       })}
       {waiting && !onLine ? (
@@ -286,18 +358,222 @@ function Steps({
   );
 }
 
-/** One dot, coloured by how the step went; the line runs on to the next dot. */
-function Step({ tone, last, children }: { tone: Tone; last: boolean; children: React.ReactNode }) {
+/** One dot, coloured by how the step went; the line runs on to the next dot. `big`: a big request's dot. */
+function Step({ tone, last, big, children }: { tone: Tone; last: boolean; big?: boolean; children: React.ReactNode }) {
   const t = TONE[tone];
   return (
-    <li className={cn("relative min-w-0 pl-5", !last && "pb-2.5")}>
-      {last ? null : <span aria-hidden className="absolute -bottom-[3px] left-1 top-[17px] w-px" style={{ background: "var(--border-strong)" }} />}
-      <span aria-hidden className="absolute left-0 top-[5.5px] h-[9px] w-[9px]">
+    <li className={cn("relative min-w-0", big ? "pl-6" : "pl-5", !last && "pb-2.5")}>
+      {last ? null : <span aria-hidden className={cn("absolute -bottom-[3px] left-1 w-px", big ? "top-[19px]" : "top-[17px]")} style={{ background: "var(--border-strong)" }} />}
+      <span aria-hidden className={cn("absolute", big ? "-left-0.5 top-[3.5px] h-[13px] w-[13px]" : "left-0 top-[5.5px] h-[9px] w-[9px]")}>
         {t.ping ? <span className="absolute inset-0 rounded-full opacity-60 motion-safe:animate-ping" style={{ background: t.color }} /> : null}
         <span className="absolute inset-0 rounded-full" style={t.hollow ? { border: `1.5px solid ${t.color}` } : { background: t.color }} />
       </span>
       {children}
     </li>
+  );
+}
+
+/** "12 s", "4 min". */
+function lasted(ms: number) {
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s} s` : `${Math.round(s / 60)} min`;
+}
+
+/**
+ * A big request as one bigger dot: what it's making and where it's at. A step waiting for a
+ * yes shows its approval under it until it's decided; everything else is one tap away. What
+ * it made shows in the outcome after it.
+ */
+function Group({
+  items,
+  tools,
+  results,
+  chatId,
+  live,
+  trailing,
+}: {
+  items: GroupItem[];
+  tools: Record<string, ToolRow>;
+  results: Results;
+  chatId: string | null;
+  live: boolean;
+  trailing: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const calls = items.flatMap((s) => (s.type === "tool" ? [s.call] : []));
+  const ids = new Set(calls.map((c) => c.id));
+  const rows = Object.values(tools).filter((t) => ids.has(t.callId) || (t.parent ? ids.has(t.parent) : false));
+  const awaiting = rows.filter((t) => t.status === "awaiting");
+  const running = rows.filter((t) => t.status === "running");
+  const isLive = live || running.length > 0 || awaiting.length > 0;
+  const steps = calls.length + rows.filter((t) => t.parent).length;
+  const failed = calls.filter((c) => (tools[c.id]?.status ?? (results.get(c.id)?.result.isError ? "error" : null)) === "error").length;
+
+  // What it's making: the videos its storyboards and renders name, or the kind of work.
+  const names = new Set(calls.map((c) => c.name));
+  const videos = new Set<string>();
+  for (const c of calls) {
+    if (c.name !== "video_plan" && c.name !== "video_render") continue;
+    const id = (c.arguments as { videoId?: unknown }).videoId;
+    const named = typeof id === "number" ? String(id) : /\bvideo:(\d+)/.exec(readResult(results.get(c.id)?.result)?.text ?? "")?.[1];
+    if (named) videos.add(named);
+  }
+  const title =
+    names.has("video_plan") || names.has("video_render")
+      ? `${isLive ? "Making" : "Made"} ${videos.size > 1 ? `${videos.size} videos` : "the video"}`
+      : names.has("photoshoot")
+        ? "Photoshoot"
+        : names.has("photo_edit")
+          ? `${isLive ? "Editing" : "Edited"} photos`
+          : names.has("pdf_edit")
+            ? `${isLive ? "Working on" : "Made"} the PDF`
+            : isLive
+              ? "Working on it"
+              : "Worked through it";
+
+  const current = running.at(-1);
+  const thinking = items.some((s) => s.type === "thinking" && s.live);
+  const line = awaiting.length
+    ? `Waiting for your OK: ${awaiting[0].label}`
+    : current
+      ? `${current.label}${current.progress ? ` · ${current.progress}` : ""}`
+      : thinking
+        ? "Thinking…"
+        : isLive
+          ? (trailing ?? "Working…")
+          : `${steps} steps${failed ? ` · ${failed} didn't work` : ""}`;
+  const starts = rows.flatMap((t) => (t.startedAt ? [new Date(t.startedAt).getTime()] : []));
+  const ends = rows.flatMap((t) => (t.endedAt ? [new Date(t.endedAt).getTime()] : []));
+  const took = !isLive && starts.length && ends.length ? lasted(Math.max(...ends) - Math.min(...starts)) : null;
+
+  const count = items.length + (trailing ? 1 : 0);
+  const callOf = (t: ToolRow): ToolCall => ({ type: "toolCall", id: t.callId, name: t.tool, arguments: (t.args ?? {}) as ToolCall["arguments"] });
+
+  return (
+    <ol className="w-full sm:w-2/5 sm:min-w-[16rem]">
+      <Step tone={awaiting.length ? "ask" : isLive ? "live" : "ok"} last big>
+        <StepHead label={title} line={line} took={took} open={open} onToggle={() => setOpen((v) => !v)} />
+
+        {open ? (
+          <ol className="mt-2">
+            {items.map((s, k) => {
+              const last = k === count - 1;
+              switch (s.type) {
+                case "thinking":
+                  return <ThinkingStep key={`thinking:${k}`} text={s.text} live={s.live} last={last} />;
+                case "tool":
+                  return s.call.name === "helpers" ? (
+                    <HelpersStep key={s.call.id} call={s.call} row={tools[s.call.id]} result={results.get(s.call.id)} tools={tools} chatId={chatId} last={last} />
+                  ) : (
+                    <ToolStep key={s.call.id} call={s.call} row={tools[s.call.id]} result={results.get(s.call.id)} chatId={chatId} last={last} />
+                  );
+                case "text":
+                  return (
+                    <Step key={`text:${k}`} tone="thought" last={last}>
+                      <Markdown text={s.text} className="text-[13px]" />
+                    </Step>
+                  );
+                case "error":
+                  return (
+                    <Step key={`error:${k}`} tone="bad" last={last}>
+                      <p className="text-xs leading-5" style={{ color: "var(--danger)" }}>
+                        {s.text}
+                      </p>
+                    </Step>
+                  );
+                case "stopped":
+                  return (
+                    <Step key={`stopped:${k}`} tone="off" last={last}>
+                      <p className="muted text-xs leading-5">Stopped.</p>
+                    </Step>
+                  );
+              }
+            })}
+            {trailing ? (
+              <Step tone="live" last>
+                <p className="muted text-xs leading-5">{trailing}</p>
+              </Step>
+            ) : null}
+          </ol>
+        ) : awaiting.length ? (
+          <ol className="mt-2">
+            {awaiting.map((t, k) => (
+              <ToolStep key={t.callId} call={callOf(t)} row={t} chatId={chatId} last={k === awaiting.length - 1} />
+            ))}
+          </ol>
+        ) : null}
+      </Step>
+    </ol>
+  );
+}
+
+/** What a big request made, newest last: each video once (its latest render), pictures and PDFs once. */
+function madeBy(items: GroupItem[], results: Results) {
+  const vids = new Map<string, CardVideo>();
+  const pics = new Map<number, CardPicture>();
+  const docs = new Map<number, CardDocument>();
+  for (const s of items) {
+    if (s.type !== "tool") continue;
+    const data = readResult(results.get(s.call.id)?.result)?.data;
+    const v = videoOf(data);
+    if (v) {
+      const key = v.src.split("?")[0];
+      vids.delete(key);
+      vids.set(key, v);
+    }
+    for (const p of picturesOf(data)) pics.set(p.id, p);
+    for (const d of documentsOf(data)) docs.set(d.id, d);
+  }
+  return { videos: [...vids.values()], pictures: [...pics.values()], documents: [...docs.values()] };
+}
+
+/** A big request's outcome: Seelie's short reply (a longer one folds to two lines) and what it made. */
+function Outcome({ items, text, results }: { items: GroupItem[]; text: string | null; results: Results }) {
+  const made = useMemo(() => madeBy(items, results), [items, results]);
+  if (!text && !made.videos.length && !made.pictures.length && !made.documents.length) return null;
+  return (
+    <div>
+      {text ? <Brief text={text} /> : null}
+      {made.videos.length ? (
+        <div className="mt-2 flex flex-wrap items-start gap-3">
+          {made.videos.map((v) => (
+            <div key={v.src} className="max-w-full">
+              <video src={v.src} poster={v.poster} controls playsInline preload="metadata" className="max-h-[26rem] w-auto max-w-full rounded-xl bg-black" />
+              <VideoActions video={v} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {made.pictures.length ? <Pictures pictures={made.pictures} /> : null}
+      {made.documents.length ? <Documents documents={made.documents} /> : null}
+    </div>
+  );
+}
+
+/** A reply cut to its first two lines, with More for the rest. */
+function Brief({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [long, setLong] = useState(false);
+  const [open, setOpen] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && !open) setLong(el.scrollHeight > el.clientHeight + 2);
+  }, [text, open]);
+  return (
+    <div>
+      <div
+        ref={ref}
+        className={open ? undefined : "max-h-[3.3rem] overflow-hidden"}
+        style={!open && long ? { maskImage: "linear-gradient(180deg, #000 55%, transparent)", WebkitMaskImage: "linear-gradient(180deg, #000 55%, transparent)" } : undefined}
+      >
+        <Markdown text={text} />
+      </div>
+      {long ? (
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="muted mt-1 text-xs hover:underline">
+          {open ? "Less" : "More"}
+        </button>
+      ) : null}
+    </div>
   );
 }
 

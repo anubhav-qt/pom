@@ -2,6 +2,7 @@
 #   sync   test the sync against its stand-ins, publish ghcr.io/<owner>/paribelle-sync
 #   edge   test the edge Worker, deploy it (paribelle-edge: www.paribelle.in, api.paribelle.in)
 #   oms    publish the OMS's image, ghcr.io/<owner>/pom
+#   render publish Seelie's video renderer, ghcr.io/<owner>/pom-render (infra/render)
 #   thinkpad  tell the ThinkPad the images are up, so it updates now (infra/hook.mjs);
 #          without the call it still does within 5 minutes (infra/update.sh)
 # Vercel builds the OMS from the same push, as before, for the fallback, and migrates the
@@ -105,8 +106,31 @@ jobs:
           cache-from: type=gha,scope=oms
           cache-to: type=gha,mode=max,scope=oms
 
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v5
+      - id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/pom-render" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: docker/build-push-action@v6
+        with:
+          context: infra/render
+          platforms: linux/amd64
+          build-args: RELEASE=${{ github.sha }}
+          tags: |
+            ${{ steps.name.outputs.image }}:latest
+            ${{ steps.name.outputs.image }}:${{ github.sha }}
+          push: true
+          cache-from: type=gha,scope=render
+          cache-to: type=gha,mode=max,scope=render
+
   thinkpad:
-    needs: [sync, oms]
+    needs: [sync, oms, render]
     # Whatever did publish is worth picking up, even if the other image failed.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest

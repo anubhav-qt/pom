@@ -17,7 +17,7 @@ import { returnsDesk, returnsUpdate } from "./returns";
 import { routines } from "./routines";
 import { songs } from "./songs";
 import { sqlQuery, sqlSchema } from "./sql";
-import { videoAssets, videoLibrary, videoRender, videoWatch } from "./video";
+import { videoAssets, videoLibrary, videoPlan, videoRender, videoWatch } from "./video";
 import {
   storeAmazonGap,
   storeApi,
@@ -77,11 +77,12 @@ const ALL = [
   storeHsn,
   storeApiRoutes,
   storeApi,
-  // Media (videos and reels are Seelie's own edits through video_render; the Reels screen's
-  // Gemini-directed maker isn't offered, so Seelie never hands a video off to it)
+  // Media (videos and reels are Seelie's own compositions, video_plan then video_render; the
+  // Reels screen's Gemini-directed maker isn't offered, so Seelie never hands a video off to it)
   viewImages,
   videoAssets,
   videoWatch,
+  videoPlan,
   videoRender,
   videoLibrary,
   videoPublish,

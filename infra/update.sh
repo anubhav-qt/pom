@@ -14,7 +14,7 @@ cd "$(dirname "$0")"
 DIR=$(pwd)
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT=paribelle-update
-APPS="api web oms sync"
+APPS="api web oms sync render"
 
 # The note the deploy hook leaves (./.deploy is mounted into it), as it was when this run
 # began: a new one arriving mid-run means another pass at the end.
@@ -101,10 +101,22 @@ token=$(setting GHCR_TOKEN)
   docker login ghcr.io -u "$(setting GHCR_USER)" --password-stdin >/dev/null 2>&1 ||
   echo "$(date '+%F %T') ghcr.io refused GHCR_TOKEN: is it expired?"
 
-compose pull --quiet $APPS api-migrate oms-migrate
+compose pull --quiet $(echo " $APPS " | sed 's/ render / /') api-migrate oms-migrate
+# The video renderer's image may not be pullable yet (a new ghcr package starts private): then
+# everything else still updates, and Seelie's renders wait until it is (make the package
+# public once, or set GHCR_TOKEN).
+render_image=$(setting RENDER_IMAGE)
+render_image=${render_image:-ghcr.io/anubhav-qt/pom-render:latest}
+skip=""
+if ! compose pull --quiet render; then
+  echo "$(date '+%F %T') couldn't pull $render_image: is the pom-render package public?"
+  docker image inspect "$render_image" >/dev/null 2>&1 || skip=render
+fi
 stale=""
 replaced=""
 [ "${1:-}" = --pulled ] && stale=" settings"
+# The renderer arrived after the stack was up (or its image only now became pullable): start it.
+[ -n "$skip" ] || [ -n "$(compose ps --quiet render)" ] || stale="$stale render"
 for app in $APPS; do
   running=$(compose ps --quiet "$app")
   [ -n "$running" ] || continue
@@ -116,7 +128,11 @@ done
 
 if [ -n "$stale" ]; then
   echo "$(date '+%F %T') updating:$stale"
-  compose up -d --remove-orphans
+  if [ -n "$skip" ]; then
+    compose up -d --remove-orphans $(compose config --services | grep -vx "$skip")
+  else
+    compose up -d --remove-orphans
+  fi
   # Only the images this update replaced: other projects on this machine (breader) keep theirs.
   [ -z "$replaced" ] || docker image rm $replaced >/dev/null 2>&1 || true
 fi

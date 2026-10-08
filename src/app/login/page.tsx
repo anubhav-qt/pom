@@ -36,7 +36,7 @@ export default async function LoginPage({
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-6">
       <AuthMark />
-      <h1 className="text-xl font-semibold tracking-tight">Paribelle OMS</h1>
+      <h1 className="text-xl font-semibold tracking-tight">PariBelle OMS</h1>
       <p className="muted mt-1 text-sm">Sign in to manage today&rsquo;s orders.</p>
 
       <form action={login} className="panel mt-6 space-y-3.5 p-5">

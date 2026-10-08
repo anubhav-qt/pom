@@ -283,7 +283,7 @@ function PdfButton({ range, channel }: { range: DashRange; channel: FinanceChann
   function print() {
     const title = document.title;
     const who = channel === DEFAULT_CHANNEL ? "" : ` ${CHANNEL_LABEL[channel]}`;
-    document.title = `Paribelle${who} profit - ${rangeLabel(range)}`;
+    document.title = `PariBelle${who} profit - ${rangeLabel(range)}`;
     const restore = () => {
       document.title = title;
       window.removeEventListener("afterprint", restore);
