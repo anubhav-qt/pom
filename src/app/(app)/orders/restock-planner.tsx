@@ -1045,12 +1045,12 @@ function buildBuySheetSvg(products: PlanProduct[]): string {
     <rect width="${W}" height="${H}" fill="#ffffff"/>
     <text x="${padX}" y="42" font-size="22" font-weight="800" fill="#0f2536">Buy list — wholesaler run</text>
     <text x="${padX}" y="64" font-size="13" fill="#5c7386">${svgEscape(dateLabel)}</text>
-    <text x="${W - padX}" y="42" font-size="14" font-weight="700" fill="#0f2536" text-anchor="end">Paribelle</text>
+    <text x="${W - padX}" y="42" font-size="14" font-weight="700" fill="#0f2536" text-anchor="end">PariBelle</text>
     <line x1="0" y1="${headH - 8}" x2="${W}" y2="${headH - 8}" stroke="#0f2536" stroke-width="1.5"/>
     ${parts.join("")}
     <rect x="${padX}" y="${H - footH + 12}" width="${W - padX * 2}" height="46" rx="10" fill="#0f2536"/>
     <text x="${padX + 18}" y="${H - footH + 40}" font-size="11" font-weight="800" letter-spacing="2" fill="#ffffff" opacity="0.8">TOTAL PIECES TO BUY</text>
     <text x="${W - padX - 18}" y="${H - footH + 42}" font-size="22" font-weight="800" fill="#ffffff" text-anchor="end">${grand}</text>
-    <text x="${padX}" y="${H - 16}" font-size="10" fill="#8ba0b0">Generated ${svgEscape(now.toLocaleString("en-IN"))} · Paribelle OMS · “have” counted by hand</text>
+    <text x="${padX}" y="${H - 16}" font-size="10" fill="#8ba0b0">Generated ${svgEscape(now.toLocaleString("en-IN"))} · PariBelle OMS · “have” counted by hand</text>
   </svg>`;
 }

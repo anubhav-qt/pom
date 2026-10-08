@@ -18,7 +18,7 @@ import { getAsset, mediaPath, MediaError, videoFile, type MediaKind } from "./fi
  *   asset:<id>       a clip, image or sound in Seelie's media (video_assets lists them)
  *   song:<id>        a library song: the ~70 s stretch around its hook
  *   video:<id>       a library video's latest render; video:<id>@<v> a given version
- *   brand:endcard    Paribelle's end card (1080x1920 PNG)
+ *   brand:endcard    PariBelle's end card (1080x1920 PNG)
  */
 
 export interface Resolved {
@@ -103,5 +103,5 @@ export async function resolveRef(ref: string, ctx: RefContext): Promise<Resolved
     return { ref: r, kind: "video", file: videoFile(id, version), name: `${video.title} v${version}`, duration: v.seconds, width: v.width, height: v.height, hasAudio: true };
   }
 
-  return { ref: r, kind: "image", file: END_CARD, name: "Paribelle end card", duration: null, width: 1080, height: 1920, hasAudio: false };
+  return { ref: r, kind: "image", file: END_CARD, name: "PariBelle end card", duration: null, width: 1080, height: 1920, hasAudio: false };
 }

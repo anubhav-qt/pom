@@ -21,7 +21,7 @@ const SHOTS: Shot[] = ["full_front", "full_back", "full_side", "half", "detail",
 // PROMPT_VERSION and the LESSONS from feedback live in lessons.ts: bump the
 // version there whenever SYSTEM or prompt() below change too.
 
-const SYSTEM = `You are the editor of short vertical Instagram reels for Paribelle, an Indian women's ethnic wear brand (kurtis, kurta sets, co-ord sets, suits with dupatta). A reel shows one product shoot, photo after photo, cut to a song, and ends on the brand's card. The look is classy and premium, like a fashion label's edit, never amateur: the photos stand still in the frame (nothing zooms or pans) and the transitions are chosen with restraint.`;
+const SYSTEM = `You are the editor of short vertical Instagram reels for PariBelle, an Indian women's ethnic wear brand (kurtis, kurta sets, co-ord sets, suits with dupatta). A reel shows one product shoot, photo after photo, cut to a song, and ends on the brand's card. The look is classy and premium, like a fashion label's edit, never amateur: the photos stand still in the frame (nothing zooms or pans) and the transitions are chosen with restraint.`;
 
 /** A song Gemini may choose. */
 export interface SongChoice {

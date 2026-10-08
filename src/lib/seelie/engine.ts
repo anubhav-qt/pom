@@ -1,7 +1,5 @@
 import "server-only";
 
-import os from "node:os";
-
 import { Agent, type AgentEvent, type AgentTool, type BeforeToolCallResult } from "@paribelle/pi-agent";
 import {
   streamSimple,
@@ -30,6 +28,7 @@ import { HELPER_MAX_CALLS, helperModel, helperSection, helpersReport, helpersSec
 import { assetSummary } from "./media/files";
 import { hydrateVideos } from "./media/watch";
 import { nameChat, provisionalTitle } from "./naming";
+import { PROCESS_TAG, processAlive } from "./proc";
 import { buildSystemPrompt } from "./prompt";
 import { toolsFor } from "./tools";
 import { kindOf, ToolError, type SeelieTool, type ToolContext } from "./tools/types";
@@ -60,9 +59,12 @@ import {
  * it token by token; the others follow the database.
  */
 
-const OWNER = `${os.hostname()}:${process.pid}`;
-/** A run whose heartbeat is older than this died with its process. */
+/** Which process holds a run (proc.ts): any OMS process can tell whether it's still running. */
+const OWNER = PROCESS_TAG;
+/** A run whose heartbeat is older than this died with its process, unless that process is still running. */
 const STALE_MS = 30_000;
+/** A run that hasn't written its heartbeat for this long is ended even though its process runs: it's stuck. */
+const STUCK_MS = 5 * 60_000;
 const PARTIAL_FLUSH_MS = 400;
 const CONTROL_MS = 1_000;
 const TOOL_TEXT_MAX = 60_000;
@@ -93,6 +95,8 @@ interface LiveRun {
   decided: Map<string, boolean>;
   autoApprove: boolean;
   abortRequested: boolean;
+  /** Another process ended it as interrupted (reapStaleRuns): it stops, and its end stays as written. */
+  endedElsewhere: boolean;
   nextSeq: number;
   /** Everything the chat has said, for tools that need the attached images. */
   history: Message[];
@@ -636,10 +640,19 @@ async function finish(run: LiveRun, failure?: unknown) {
   }
 
   run.partial = null;
+  if (run.endedElsewhere) {
+    status = "interrupted";
+    error = INTERRUPTED;
+  }
   run.info = { ...run.info, status, error, endedAt: now };
   await db
     .update(seelieRuns)
-    .set({ status, error, partial: null, endedAt: new Date(now), usage: sumUsage(run.messages.map((m) => m.message)), heartbeatAt: new Date() })
+    .set({
+      ...(run.endedElsewhere ? {} : { status, error, endedAt: new Date(now) }),
+      partial: null,
+      usage: sumUsage(run.messages.map((m) => m.message)),
+      heartbeatAt: new Date(),
+    })
     .where(eq(seelieRuns.id, run.id))
     .catch(() => {});
   await db.update(seelieChats).set({ updatedAt: new Date() }).where(eq(seelieChats.id, run.chatId)).catch(() => {});
@@ -692,9 +705,16 @@ function startTimers(run: LiveRun) {
         const [control] = await db
           .update(seelieRuns)
           .set({ heartbeatAt: new Date() })
-          .where(eq(seelieRuns.id, run.id))
+          .where(and(eq(seelieRuns.id, run.id), inArray(seelieRuns.status, [...ACTIVE_RUN])))
           .returning({ abortRequested: seelieRuns.abortRequested });
-        if (control?.abortRequested && !run.abortRequested) {
+        if (!control) {
+          // Ended as interrupted by another process while this one stalled: stop, so nothing
+          // (a render in the queue) carries on unseen.
+          run.endedElsewhere = true;
+          abortLocal(run);
+          return;
+        }
+        if (control.abortRequested && !run.abortRequested) {
           run.abortRequested = true;
           run.agent.abort();
         }
@@ -863,10 +883,22 @@ async function runHelper(
 /* Starting a run                                                             */
 /* -------------------------------------------------------------------------- */
 
-/** Mark runs whose process died as interrupted (and their open tool calls as ended). */
-export async function reapStaleRuns(chatId: string) {
+const INTERRUPTED = "The server restarted while this was running.";
+const STUCK = "This reply stopped responding for 5 minutes and was ended.";
+
+/**
+ * Mark runs whose process died as interrupted (and their open tool calls as ended); the ids
+ * marked. A late heartbeat alone isn't death: the ThinkPad runs several OMS processes, and
+ * one that stalls for half a minute (memory running short) still holds its run, so a run
+ * whose process is still there is left alone until it's been silent for 5 minutes.
+ */
+export async function reapStaleRuns(chatId: string): Promise<string[]> {
   const stale = await db
-    .select({ id: seelieRuns.id })
+    .select({
+      id: seelieRuns.id,
+      owner: seelieRuns.owner,
+      stuck: sql<boolean>`${seelieRuns.heartbeatAt} < now() - make_interval(secs => ${STUCK_MS / 1000})`,
+    })
     .from(seelieRuns)
     .where(
       and(
@@ -875,16 +907,28 @@ export async function reapStaleRuns(chatId: string) {
         sql`${seelieRuns.heartbeatAt} < now() - make_interval(secs => ${STALE_MS / 1000})`,
       ),
     );
-  const ids = stale.map((r) => r.id).filter((id) => !registry.has(id));
-  if (ids.length === 0) return;
-  await db
-    .update(seelieRuns)
-    .set({ status: "interrupted", partial: null, endedAt: new Date(), error: "The server restarted while this was running." })
-    .where(inArray(seelieRuns.id, ids));
-  await db
-    .update(seelieToolCalls)
-    .set({ status: "error", endedAt: new Date(), updatedAt: new Date() })
-    .where(and(inArray(seelieToolCalls.runId, ids), inArray(seelieToolCalls.status, ["awaiting", "queued", "running"])));
+  const dead: string[] = [];
+  const stuck: string[] = [];
+  for (const r of stale) {
+    if (registry.has(r.id)) continue;
+    if (processAlive(r.owner) !== true) dead.push(r.id);
+    else if (r.stuck) stuck.push(r.id);
+  }
+  for (const [ids, error] of [
+    [dead, INTERRUPTED],
+    [stuck, STUCK],
+  ] as const) {
+    if (ids.length === 0) continue;
+    await db
+      .update(seelieRuns)
+      .set({ status: "interrupted", partial: null, endedAt: new Date(), error })
+      .where(and(inArray(seelieRuns.id, ids), inArray(seelieRuns.status, [...ACTIVE_RUN])));
+    await db
+      .update(seelieToolCalls)
+      .set({ status: "error", endedAt: new Date(), updatedAt: new Date() })
+      .where(and(inArray(seelieToolCalls.runId, ids), inArray(seelieToolCalls.status, ["awaiting", "queued", "running"])));
+  }
+  return [...dead, ...stuck];
 }
 
 /** What Seelie is told when a routine sends the message instead of the owner. */
@@ -1009,6 +1053,7 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
     decided: new Map(),
     autoApprove,
     abortRequested: false,
+    endedElsewhere: false,
     nextSeq,
     history: [...history, prompt],
     timers: [],
@@ -1108,18 +1153,22 @@ async function ownedRun(user: User, runId: string) {
   return row.run;
 }
 
+/** Stop a run this process holds: its waits on approvals end and the model stops. */
+function abortLocal(run: LiveRun) {
+  if (run.abortRequested) return;
+  run.abortRequested = true;
+  for (const [callId, waiter] of run.waiters) {
+    run.waiters.delete(callId);
+    waiter(null);
+  }
+  run.agent.abort();
+}
+
 export async function stopRun(user: User, runId: string) {
   await ownedRun(user, runId);
   await db.update(seelieRuns).set({ abortRequested: true }).where(eq(seelieRuns.id, runId));
   const run = registry.get(runId);
-  if (run && !run.abortRequested) {
-    run.abortRequested = true;
-    for (const [callId, waiter] of run.waiters) {
-      run.waiters.delete(callId);
-      waiter(null);
-    }
-    run.agent.abort();
-  }
+  if (run) abortLocal(run);
 }
 
 /**
@@ -1278,6 +1327,7 @@ async function pollDatabase(
   let lastToolAt = new Date(0);
   let lastPartial = "";
   let lastStatus = "";
+  let lastReap = 0;
   const deciders = new Map<number, string>();
   const { toolLabels } = await import("./tools");
   const labels = toolLabels();
@@ -1322,16 +1372,22 @@ async function pollDatabase(
     }
 
     let status = run.status as RunStatus;
-    if (ACTIVE_RUN.includes(status) && Date.now() - run.heartbeatAt.getTime() > STALE_MS) {
-      await reapStaleRuns(chatId);
-      status = "interrupted";
+    let error = run.error;
+    // A late heartbeat: ended only when its process is gone (or stuck), checked every few seconds.
+    if (ACTIVE_RUN.includes(status) && Date.now() - run.heartbeatAt.getTime() > STALE_MS && Date.now() - lastReap > 5_000) {
+      lastReap = Date.now();
+      if ((await reapStaleRuns(chatId)).includes(runId)) {
+        const [ended] = await db.select({ error: seelieRuns.error }).from(seelieRuns).where(eq(seelieRuns.id, runId));
+        status = "interrupted";
+        error = ended?.error ?? INTERRUPTED;
+      }
     }
     if (status !== lastStatus) {
       lastStatus = status;
       if (ACTIVE_RUN.includes(status)) send({ t: "status", status });
     }
     if (!ACTIVE_RUN.includes(status)) {
-      send({ t: "end", status, error: run.error ?? (status === "interrupted" ? "The server restarted while this was running." : null) });
+      send({ t: "end", status, error: error ?? (status === "interrupted" ? INTERRUPTED : null) });
       return;
     }
     await new Promise((r) => setTimeout(r, 400));

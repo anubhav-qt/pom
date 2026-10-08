@@ -26,7 +26,7 @@ const RESULT_CHARS = 1_500;
 /** The most of the transcript sent in one go (the oldest part is dropped first). */
 const TRANSCRIPT_CHARS = 600_000;
 
-const INSTRUCTION = `You compact the history of a chat between a shop owner and Seelie, the AI agent of Paribelle's order management system (an Indian women's ethnic wear brand). The chat is a routine: the same request runs on a schedule, and each run's reply is in the history.
+const INSTRUCTION = `You compact the history of a chat between a shop owner and Seelie, the AI agent of PariBelle's order management system (an Indian women's ethnic wear brand). The chat is a routine: the same request runs on a schedule, and each run's reply is in the history.
 Write the summary Seelie will read instead of these older messages. Keep, exactly as written: every number with its date or period (sales, spend, stock, counts, prices), product names, SKUs, order ids, ad and campaign ids; what was decided, approved or denied; what the owner asked for or corrected; anything still open or promised. Group it by run, oldest first, with each run's date. Drop greetings, repetition, and tool mechanics that don't matter later.
 Plain text, no preamble. If an earlier summary is given, fold it in.`;
 

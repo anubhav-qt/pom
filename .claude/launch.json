@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "-p", "3001"],
       "port": 3001
+    },
+    {
+      "name": "dev-local-db",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=tmp/local.env", "node_modules/next/dist/bin/next", "dev", "-p", "3002"],
+      "port": 3002
     }
   ]
 }

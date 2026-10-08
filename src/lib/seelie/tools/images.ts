@@ -32,7 +32,7 @@ export async function fetchPublic(
   const get = (u: URL) =>
     fetch(u, {
       redirect: "manual",
-      headers: { "user-agent": "Seelie/1.0 (Paribelle OMS; +https://paribelle.in)", ...(opts.accept ? { accept: opts.accept } : {}) },
+      headers: { "user-agent": "Seelie/1.0 (PariBelle OMS; +https://paribelle.in)", ...(opts.accept ? { accept: opts.accept } : {}) },
       signal: AbortSignal.any([signal, AbortSignal.timeout(opts.timeoutMs ?? 20_000)]),
     });
   let res = await get(url);

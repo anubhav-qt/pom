@@ -43,9 +43,11 @@ x-api: &api
     APP_GST: "${APP_GST:-}"
   volumes: ["uploads:/app/uploads"]
 
-# The storefront and the OMS run as one process per core (cluster.cjs, PROCESSES).
+# The storefront and the OMS run as one process per core (cluster.cjs, PROCESSES), under a
+# small init that collects what a process that died leaves behind (a render's ffmpeg).
 x-next: &next
   command: ["node", "/cluster.cjs", "server.js"]
+  init: true
   restart: unless-stopped
 
 services:
@@ -179,6 +181,12 @@ services:
   oms:
     <<: *next
     image: ${OMS_IMAGE:-ghcr.io/anubhav-qt/pom:latest}
+    # Seelie's photo edits (ffmpeg, the cut-out and upscaling models) run in here; videos render
+    # in `render`. The cap keeps a heavy edit from taking the whole ThinkPad's memory: past it
+    # the kernel stops ffmpeg first (render.ts), not the site, the database or breader. No swap
+    # past it either, so it can't thrash.
+    mem_limit: "${OMS_MEM_LIMIT:-8g}"
+    memswap_limit: "${OMS_MEM_LIMIT:-8g}"
     environment:
       PROCESSES: "${OMS_PROCESSES:-auto}"
       DATABASE_URL: "postgres://paribelle:${DB_PASSWORD}@db:5432/oms"
@@ -258,6 +266,25 @@ services:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8317"]
       interval: 10s
       start_period: 10s
+    restart: unless-stopped
+
+  # Seelie's video renderer (infra/render): HyperFrames compositions seeked frame by frame in
+  # headless Chrome and encoded with ffmpeg, one job at a time. No network at all: it reads
+  # the jobs the OMS writes into the seelie-media volume and writes back what it made. Its own
+  # memory and CPU caps keep a heavy render from taking the ThinkPad from breader, the site and
+  # the database.
+  render:
+    image: ${RENDER_IMAGE:-ghcr.io/anubhav-qt/pom-render:latest}
+    network_mode: none
+    init: true
+    mem_limit: "${RENDER_MEM_LIMIT:-4g}"
+    memswap_limit: "${RENDER_MEM_LIMIT:-4g}"
+    cpus: "${RENDER_CPUS:-3}"
+    # Chrome keeps its frames in /dev/shm; Docker's 64 MB default crashes it.
+    shm_size: 1g
+    environment:
+      RENDER_WORKERS: "${RENDER_WORKERS:-2}"
+    volumes: ["seelie-media:/data/seelie"]
     restart: unless-stopped
 
   # The only door in (Caddyfile). Lets a request through when it carries the edge key (only

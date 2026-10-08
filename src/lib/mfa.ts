@@ -3,7 +3,7 @@ import "server-only";
 import * as OTPAuth from "otpauth";
 import QRCode from "qrcode";
 
-const ISSUER = "Paribelle OMS";
+const ISSUER = "PariBelle OMS";
 
 export function generateMfaSecret(): string {
   return new OTPAuth.Secret({ size: 20 }).base32;

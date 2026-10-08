@@ -74,7 +74,7 @@ export default async function SettingsPage() {
         }))}
       />
 
-      <p className="muted pt-2 text-center text-xs tabular-nums">Paribelle OMS v{pkg.version}</p>
+      <p className="muted pt-2 text-center text-xs tabular-nums">PariBelle OMS v{pkg.version}</p>
     </div>
   );
 }

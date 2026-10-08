@@ -185,7 +185,7 @@ function buildSheetSvg(
     <rect width="${W}" height="${H}" fill="#ffffff"/>
     <text x="${padX}" y="40" font-size="22" font-weight="700" fill="#0f2536">Collection sheet</text>
     <text x="${padX}" y="62" font-size="13" fill="#5c7386">${esc(meta.dateLabel)}</text>
-    <text x="${W - padX}" y="40" font-size="13" fill="#5c7386" text-anchor="end">Paribelle</text>
+    <text x="${W - padX}" y="40" font-size="13" fill="#5c7386" text-anchor="end">PariBelle</text>
     <text x="${W - padX}" y="62" font-size="12" fill="#8ba0b0" text-anchor="end">${rows.length} products · ${meta.totalUnits} units · ${meta.totalOrders} orders</text>
     <line x1="0" y1="${headerH - 8}" x2="${W}" y2="${headerH - 8}" stroke="#0f2536" stroke-width="1.5"/>
 
@@ -203,7 +203,7 @@ function buildSheetSvg(
     <text x="${x.units}" y="${totalsY + 26}" font-size="15" font-weight="800" fill="#0f2536" text-anchor="end">${meta.totalUnits}</text>
     <text x="${x.orders}" y="${totalsY + 26}" font-size="13" fill="#5c7386" text-anchor="end">${meta.totalOrders}</text>
 
-    <text x="${padX}" y="${H - 24}" font-size="10.5" fill="#8ba0b0">Generated ${esc(meta.stampLabel)} · Paribelle OMS</text>
+    <text x="${padX}" y="${H - 24}" font-size="10.5" fill="#8ba0b0">Generated ${esc(meta.stampLabel)} · PariBelle OMS</text>
   </svg>`;
 }
 

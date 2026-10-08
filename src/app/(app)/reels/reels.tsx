@@ -79,7 +79,7 @@ const canShareFiles = () =>
 
 /**
  * The Reels screen. Photos from a shoot (Gemini picks the keepers) or one
- * supplier video go in; a beat-matched reel with the Paribelle end card comes
+ * supplier video go in; a beat-matched reel with the PariBelle end card comes
  * out. Same frame as the PDF printer: a two-column workspace on desktop, and
  * on phones one screen tall with the actions docked above the bottom bar.
  */

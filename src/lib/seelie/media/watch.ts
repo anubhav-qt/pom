@@ -51,7 +51,7 @@ export async function watchBlock(ref: string): Promise<VideoContent> {
     const [, id, v] = /^video:(\d+)@(\d+)$/.exec(base) ?? [];
     if (id && !fromText) file = videoFile(Number(id), Number(v), "watch");
     else {
-      file = mediaPath("cache", `watch-${key}.mp4`);
+      file = mediaPath("cache", `watch960-${key}.mp4`);
       if (!(await exists(file))) await makeWatchCopy(media.file, file, { from, maxSeconds: length, hasAudio: media.hasAudio });
     }
   } else {

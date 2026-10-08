@@ -89,8 +89,13 @@ stack's network; on Vercel `CLIPROXY_URL` is unset and Seelie shows offline.
 - **paribelle.in.** Seelie's store tools call the API straight (`http://api:3001/api/v1`),
   with the owner's admin login saved, encrypted, in the OMS database.
 - **Chats stay here.** The `seelie_*` tables aren't synced to Supabase (`sync/policy.json`).
-- **Videos.** Seelie renders with the image's ffmpeg, one render at a time, at low priority.
-  Its media (uploaded clips, renders, fonts, photoshoot pictures, local copies of the OMS
+- **Videos.** Seelie writes each video as an HTML composition (Paribelle's templates plus its
+  own HTML and GSAP) and the `render` service makes it: HyperFrames (pinned in
+  `infra/render/package.json`, with the Chrome it was tested with) in its own container, with
+  no network, `RENDER_MEM_LIMIT` (4 GB) and `RENDER_CPUS` (3), one job at a time. The OMS
+  hands it jobs through `render-jobs/` in the media volume; without it running, Seelie says
+  it can't render. Photo edits still use the OMS image's ffmpeg, at low priority.
+  The media (uploaded clips, renders, fonts, photoshoot pictures, local copies of the OMS
   catalogue photos, and the cut-out, inpainting, selection and upscaling models, downloaded
   on first use) lives in the `seelie-media` volume at `/data/seelie`, not in the database
   and not in the backups. yt-dlp is in the image, pinned (`YTDLP_VERSION` and its
@@ -114,7 +119,8 @@ In this order. Nothing changes for visitors until the last step of 2.
 ### 1. GitHub
 
 - **pom**: secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (from 2). Every push to
-  `production` then tests and publishes the sync's and the OMS's images and deploys the Worker.
+  `production` then tests and publishes the sync's, the OMS's and the video renderer's images
+  and deploys the Worker.
 - **paribelle-web**: nothing. Every push to `main` publishes the storefront's image.
 - **paribelle-backend**: nothing. Every push to `main` publishes the API's image (Render keeps
   building `main` itself, as now).

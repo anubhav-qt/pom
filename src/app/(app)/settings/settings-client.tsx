@@ -195,7 +195,7 @@ export function ChannelAccounts({
 
           <div>
             <label className="muted mb-1 block text-xs">Name it something recognisable</label>
-            <input name="label" className="input" placeholder="Paribelle — main" required />
+            <input name="label" className="input" placeholder="PariBelle — main" required />
           </div>
 
           {CREDENTIAL_FIELDS[adding].map((field) =>
