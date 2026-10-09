@@ -1,6 +1,6 @@
 import "server-only";
 
-import { ensureModel, modelSession, MODELS, oneAtATime } from "../media/models";
+import { ensureModel, modelSession, MODELS, oneAtATime, tensor } from "../media/models";
 import { blend, components, crop, feather, grow, resize, resizeMask, type Mask, type Raster } from "./raster";
 
 /**
@@ -21,7 +21,6 @@ async function session(progress: Progress, signal: AbortSignal) {
 /** Fill the hole in one window of the picture (x, y, w, h in px). */
 async function fillWindow(r: Raster, hole: Mask, win: { x: number; y: number; w: number; h: number }, progress: Progress, signal: AbortSignal): Promise<Raster> {
   const model = await session(progress, signal);
-  const ort = await import("onnxruntime-node");
   const part = await resize(crop(r, win.x, win.y, win.w, win.h), SIDE, SIDE);
   const holeCrop: Mask = { w: win.w, h: win.h, a: new Uint8Array(win.w * win.h) };
   for (let y = 0; y < win.h; y++) holeCrop.a.set(hole.a.subarray((win.y + y) * hole.w + win.x, (win.y + y) * hole.w + win.x + win.w), y * win.w);
@@ -36,8 +35,8 @@ async function fillWindow(r: Raster, hole: Mask, win: { x: number; y: number; w:
     for (let c = 0; c < 3; c++) image[c * n + i] = m ? 0 : part.data[i * 4 + c] / 255;
   }
   const out = await model.run({
-    [model.inputNames[0]]: new ort.Tensor("float32", image, [1, 3, SIDE, SIDE]),
-    [model.inputNames[1]]: new ort.Tensor("float32", mask, [1, 1, SIDE, SIDE]),
+    [model.inputNames[0]]: tensor("float32", image, [1, 3, SIDE, SIDE]),
+    [model.inputNames[1]]: tensor("float32", mask, [1, 1, SIDE, SIDE]),
   });
   const res = out[model.outputNames[0]].data as Float32Array;
   let hi = 0;

@@ -183,10 +183,11 @@ services:
     image: ${OMS_IMAGE:-ghcr.io/anubhav-qt/pom:latest}
     # Seelie's photo edits (ffmpeg, the cut-out and upscaling models) run in here; videos render
     # in `render`. The cap keeps a heavy edit from taking the whole ThinkPad's memory: past it
-    # the kernel stops ffmpeg first (render.ts), not the site, the database or breader. No swap
-    # past it either, so it can't thrash.
-    mem_limit: "${OMS_MEM_LIMIT:-8g}"
-    memswap_limit: "${OMS_MEM_LIMIT:-8g}"
+    # the kernel stops ffmpeg or the models' process first (render.ts, models.ts), not the OMS
+    # holding a reply, the site, the database or breader. No swap past it either, so it can't
+    # thrash.
+    mem_limit: "${OMS_MEM_LIMIT:-12g}"
+    memswap_limit: "${OMS_MEM_LIMIT:-12g}"
     environment:
       PROCESSES: "${OMS_PROCESSES:-auto}"
       DATABASE_URL: "postgres://paribelle:${DB_PASSWORD}@db:5432/oms"

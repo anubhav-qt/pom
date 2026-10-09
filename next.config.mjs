@@ -15,12 +15,22 @@ const media = ["./node_modules/ffmpeg-static/ffmpeg*", "./node_modules/@napi-rs/
 const studio = ["./src/lib/seelie/studio/templates/**", "./src/lib/seelie/studio/watermark/**"];
 
 /**
- * onnxruntime-node (Seelie's cut-outs) loads `bin/napi-v6/<platform>/<arch>/`'s binding,
- * which pulls in its shared library by itself: tracing sees neither. Only the ThinkPad's
- * Linux x64 build ships; on Vercel, where Seelie is offline, none of it does.
+ * onnxruntime-node (Seelie's cut-outs and photo models) runs in a process of its own,
+ * scripts/model-host.mjs, which no import points at: tracing sees none of it, nor the
+ * binding it loads from `bin/napi-v6/<platform>/<arch>/` (which pulls in its shared library
+ * by itself). Only the ThinkPad's Linux x64 build ships; on Vercel, where Seelie is offline,
+ * none of it does.
  */
 const onVercel = !!process.env.VERCEL;
-const onnx = onVercel ? [] : ["./node_modules/onnxruntime-node/bin/napi-v6/linux/x64/**"];
+const onnx = onVercel
+  ? []
+  : [
+      "./node_modules/onnxruntime-node/package.json",
+      "./node_modules/onnxruntime-node/dist/**",
+      "./node_modules/onnxruntime-node/bin/napi-v6/linux/x64/**",
+      "./node_modules/onnxruntime-common/package.json",
+      "./node_modules/onnxruntime-common/dist/cjs/**",
+    ];
 
 /** MuPDF (Seelie's PDF tools) reads its wasm from beside its script by URL, which tracing doesn't follow. */
 const mupdf = onVercel ? [] : ["./node_modules/mupdf/dist/mupdf.js", "./node_modules/mupdf/dist/mupdf-wasm.js", "./node_modules/mupdf/dist/mupdf-wasm.wasm"];

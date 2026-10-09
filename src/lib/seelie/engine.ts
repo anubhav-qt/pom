@@ -911,8 +911,10 @@ export async function reapStaleRuns(chatId: string): Promise<string[]> {
   const stuck: string[] = [];
   for (const r of stale) {
     if (registry.has(r.id)) continue;
-    if (processAlive(r.owner) !== true) dead.push(r.id);
-    else if (r.stuck) stuck.push(r.id);
+    if (processAlive(r.owner) !== true) {
+      dead.push(r.id);
+      console.warn(`[seelie] run ${r.id} ended: the process that held it (${r.owner ?? "unknown"}) is gone`);
+    } else if (r.stuck) stuck.push(r.id);
   }
   for (const [ids, error] of [
     [dead, INTERRUPTED],

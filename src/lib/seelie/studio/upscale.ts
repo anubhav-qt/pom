@@ -1,6 +1,6 @@
 import "server-only";
 
-import { ensureModel, modelSession, MODELS, oneAtATime } from "../media/models";
+import { ensureModel, modelSession, MODELS, oneAtATime, tensor } from "../media/models";
 import { alphaMask, hasAlpha, resize, resizeMask, withAlpha, type Raster } from "./raster";
 
 /**
@@ -21,7 +21,6 @@ export async function upscale(r: Raster, factor: 2 | 3 | 4, opts: { progress: Pr
   return oneAtATime(async () => {
     const files = await ensureModel("esrgan", opts.progress, opts.signal);
     const model = await modelSession(files.find((f) => f.endsWith(".onnx"))!, MODELS.esrgan.label, opts.progress);
-    const ort = await import("onnxruntime-node");
     const W = r.w * 4;
     const H = r.h * 4;
     const out = { w: W, h: H, data: new Uint8ClampedArray(W * H * 4) };
@@ -45,7 +44,7 @@ export async function upscale(r: Raster, factor: 2 | 3 | 4, opts: { progress: Pr
             for (let c = 0; c < 3; c++) input[c * n + d] = r.data[s + c] / 255;
           }
         }
-        const res = await model.run({ [model.inputNames[0]]: new ort.Tensor("float32", input, [1, 3, TILE, TILE]) });
+        const res = await model.run({ [model.inputNames[0]]: tensor("float32", input, [1, 3, TILE, TILE]) });
         const up = res[model.outputNames[0]].data as Float32Array;
         const U = TILE * 4;
         const un = U * U;
