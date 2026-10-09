@@ -1,13 +1,12 @@
 import "server-only";
 
+import { type ChildProcess, fork } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, open, rename, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { inflateRawSync } from "node:zlib";
-
-import type { InferenceSession } from "onnxruntime-node";
 
 import { mediaFolder, mediaPath, MediaError } from "./files";
 
@@ -159,26 +158,160 @@ export async function ensureModel(name: ModelName, progress: (text: string) => v
   return out;
 }
 
-const sessions = new Map<string, Promise<InferenceSession>>();
+/* -------------------------------------------------------------------------- */
+/* The models' own process                                                    */
+/* -------------------------------------------------------------------------- */
 
-/** An onnxruntime session for a model file, kept for the life of the process. */
-export async function modelSession(file: string, label: string, progress: (text: string) => void): Promise<InferenceSession> {
-  let s = sessions.get(file);
-  if (!s) {
-    s = (async () => {
-      progress(`Loading ${label}…`);
-      const ort = await import("onnxruntime-node");
-      return ort.InferenceSession.create(file, {
-        graphOptimizationLevel: "all",
-        intraOpNumThreads: Math.max(1, Math.min(4, Math.floor(os.cpus().length / 2))),
-        logSeverityLevel: 3,
-      });
-    })();
-    s.catch(() => sessions.delete(file));
-    sessions.set(file, s);
-  }
-  return s;
+/**
+ * The models run in a process of their own (scripts/model-host.mjs), not in the OMS
+ * process: one at 1024x1024 takes gigabytes, and the OMS container has a memory cap
+ * (infra/compose.yml). Past it the kernel stops the biggest process; in here that was the
+ * OMS process running the model, which is the one holding Seelie's reply ("The server
+ * restarted while this was running."). Out there it's that process the kernel stops
+ * first (oom_score_adj, as for ffmpeg): the tool fails, and the reply carries on. It's
+ * let go after a few idle minutes, so its memory goes back instead of staying with every
+ * OMS process that ever ran a model.
+ */
+
+/** A tensor as it travels to and from the models' process. */
+export interface TensorData {
+  type: string;
+  data: Float32Array | BigInt64Array | Uint8Array | Int32Array;
+  dims: readonly number[];
 }
+
+export const tensor = (type: TensorData["type"], data: TensorData["data"], dims: readonly number[]): TensorData => ({ type, data, dims });
+
+export interface ModelSession {
+  inputNames: readonly string[];
+  outputNames: readonly string[];
+  run(feeds: Record<string, TensorData>): Promise<Record<string, TensorData>>;
+}
+
+/** How long the models' process stays after its last run (it keeps the models loaded until then). */
+const HOST_IDLE_MS = 3 * 60_000;
+const HOST_SCRIPT = path.join(process.cwd(), "scripts", "model-host.mjs");
+const THREADS = Math.max(1, Math.min(4, Math.floor(os.cpus().length / 2)));
+
+interface Pending {
+  label: string;
+  resolve: (value: Record<string, unknown>) => void;
+  reject: (err: Error) => void;
+}
+
+interface Host {
+  child: ChildProcess;
+  pending: Map<number, Pending>;
+  /** The models it has loaded (by file), with their input and output names. */
+  open: Map<string, Promise<{ inputNames: string[]; outputNames: string[] }>>;
+  idle: NodeJS.Timeout | null;
+}
+
+let host: Host | null = null;
+let nextId = 1;
+
+function startHost(): Host {
+  const child = fork(HOST_SCRIPT, [], { serialization: "advanced", execArgv: [], env: hostEnv(), stdio: ["ignore", "inherit", "inherit", "ipc"] });
+  const h: Host = { child, pending: new Map(), open: new Map(), idle: null };
+  if (child.pid && process.platform === "linux") {
+    // When memory runs out, the kernel stops this first, not the OMS.
+    writeFile(`/proc/${child.pid}/oom_score_adj`, "1000").catch(() => {});
+  }
+  child.on("message", (msg: { id: number; error?: string } & Record<string, unknown>) => {
+    const p = h.pending.get(msg.id);
+    if (!p) return;
+    h.pending.delete(msg.id);
+    if (msg.error) p.reject(new MediaError(`${capitalise(p.label)} failed: ${msg.error}`));
+    else p.resolve(msg);
+    if (h.pending.size === 0) settle(h);
+  });
+  const ended = (why: string) => {
+    if (host === h) host = null;
+    if (h.idle) clearTimeout(h.idle);
+    for (const p of h.pending.values()) p.reject(new MediaError(`${capitalise(p.label)} ${why}`));
+    h.pending.clear();
+  };
+  child.on("exit", (code, signal) =>
+    ended(
+      signal === "SIGKILL"
+        ? "ran out of memory and was stopped; nothing else was affected. Try again, or with a smaller picture."
+        : `stopped unexpectedly (${signal ?? `code ${code}`}).`,
+    ),
+  );
+  child.on("error", (err) => {
+    ended(`couldn't start: ${err.message}`);
+    child.kill();
+  });
+  return h;
+}
+
+/** Nothing waiting: the process may go after a while, and doesn't keep the OMS process up. */
+function settle(h: Host) {
+  h.child.unref();
+  h.child.channel?.unref();
+  if (h.idle) clearTimeout(h.idle);
+  h.idle = setTimeout(() => {
+    if (h.pending.size > 0) return;
+    if (host === h) host = null;
+    h.child.disconnect();
+  }, HOST_IDLE_MS);
+  h.idle.unref?.();
+}
+
+function ask<T>(label: string, msg: Record<string, unknown>): Promise<T> {
+  if (!host?.child.connected) host = startHost();
+  const h = host;
+  if (h.idle) {
+    clearTimeout(h.idle);
+    h.idle = null;
+  }
+  h.child.ref();
+  h.child.channel?.ref();
+  const id = nextId++;
+  return new Promise<T>((resolve, reject) => {
+    h.pending.set(id, { label, resolve: resolve as Pending["resolve"], reject });
+    h.child.send({ id, ...msg }, (err) => {
+      if (!err || !h.pending.has(id)) return;
+      h.pending.delete(id);
+      reject(new MediaError(`${capitalise(label)} couldn't be reached: ${err.message}`));
+    });
+  });
+}
+
+/** A model file, loaded in the models' process. */
+export async function modelSession(file: string, label: string, progress: (text: string) => void): Promise<ModelSession> {
+  if (!host?.child.connected) host = startHost();
+  let names = host.open.get(file);
+  if (!names) {
+    progress(`Loading ${label}…`);
+    const opened = ask<{ inputNames: string[]; outputNames: string[] }>(label, { op: "open", file, threads: THREADS });
+    const open = host.open;
+    open.set(file, opened);
+    opened.catch(() => open.delete(file));
+    names = opened;
+  }
+  const { inputNames, outputNames } = await names;
+  return {
+    inputNames,
+    outputNames,
+    run: async (feeds) => {
+      const plain: Record<string, TensorData> = {};
+      for (const [name, t] of Object.entries(feeds)) plain[name] = { type: t.type, data: t.data, dims: [...t.dims] };
+      const res = await ask<{ outputs: Record<string, TensorData> }>(label, { op: "run", file, threads: THREADS, feeds: plain });
+      return res.outputs;
+    },
+  };
+}
+
+function hostEnv() {
+  const keep = ["PATH", "Path", "SystemRoot", "windir", "TEMP", "TMP", "TZ", "LANG", "HOME"];
+  // onnxruntime (1.30) otherwise sends telemetry over HTTPS.
+  const env = { NODE_ENV: "production", ORT_DISABLE_TELEMETRY: "1" } as NodeJS.ProcessEnv;
+  for (const k of keep) if (process.env[k]) env[k] = process.env[k]!;
+  return env;
+}
+
+const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** One model run at a time: each uses several cores. */
 let queue: Promise<unknown> = Promise.resolve();

@@ -1,8 +1,6 @@
 import "server-only";
 
-import type { Tensor } from "onnxruntime-node";
-
-import { ensureModel, modelSession, MODELS, oneAtATime } from "../media/models";
+import { ensureModel, modelSession, MODELS, oneAtATime, tensor, type TensorData } from "../media/models";
 import { boxMask, intersect, resize, type Mask, type Raster } from "./raster";
 
 /**
@@ -19,8 +17,8 @@ const STD = [0.229, 0.224, 0.225];
 type Progress = (text: string) => void;
 
 interface Encoded {
-  embeddings: Tensor;
-  positional: Tensor;
+  embeddings: TensorData;
+  positional: TensorData;
   /** The picture's size at 1024 on the long side (the rest is padding). */
   rw: number;
   rh: number;
@@ -31,7 +29,6 @@ const encoded = new WeakMap<Raster, Promise<Encoded>>();
 async function encode(r: Raster, progress: Progress, signal: AbortSignal): Promise<Encoded> {
   const [encoderFile] = await ensureModel("slimsam", progress, signal);
   const encoder = await modelSession(encoderFile, MODELS.slimsam.label, progress);
-  const ort = await import("onnxruntime-node");
   const scale = SIDE / Math.max(r.w, r.h);
   const rw = Math.round(r.w * scale);
   const rh = Math.round(r.h * scale);
@@ -47,7 +44,7 @@ async function encode(r: Raster, progress: Progress, signal: AbortSignal): Promi
     }
   }
   progress("Looking at the picture…");
-  const out = await encoder.run({ pixel_values: new ort.Tensor("float32", pixels, [1, 3, SIDE, SIDE]) });
+  const out = await encoder.run({ pixel_values: tensor("float32", pixels, [1, 3, SIDE, SIDE]) });
   return { embeddings: out.image_embeddings, positional: out.image_positional_embeddings, rw, rh };
 }
 
@@ -70,7 +67,6 @@ export async function select(r: Raster, prompt: SelectPrompt, opts: { progress: 
     const { embeddings, positional, rw, rh } = await enc;
     const files = await ensureModel("slimsam", opts.progress, opts.signal);
     const decoder = await modelSession(files[1], MODELS.slimsam.label, opts.progress);
-    const ort = await import("onnxruntime-node");
     const scale = rw / r.w;
 
     const pts = [...(prompt.points ?? [])];
@@ -85,8 +81,8 @@ export async function select(r: Raster, prompt: SelectPrompt, opts: { progress: 
       labels[i] = p.on ? 1n : 0n;
     });
     const out = await decoder.run({
-      input_points: new ort.Tensor("float32", coords, [1, 1, pts.length, 2]),
-      input_labels: new ort.Tensor("int64", labels, [1, 1, pts.length]),
+      input_points: tensor("float32", coords, [1, 1, pts.length, 2]),
+      input_labels: tensor("int64", labels, [1, 1, pts.length]),
       image_embeddings: embeddings,
       image_positional_embeddings: positional,
     });

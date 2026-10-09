@@ -3,7 +3,7 @@ import "server-only";
 import type { Canvas, Image } from "@napi-rs/canvas";
 
 import { MediaError } from "./files";
-import { ensureModel, modelSession, MODELS, oneAtATime } from "./models";
+import { ensureModel, modelSession, MODELS, oneAtATime, tensor } from "./models";
 
 /**
  * Background removal with BiRefNet lite (MIT), run on the CPU through onnxruntime-node.
@@ -27,7 +27,6 @@ async function load(progress: (text: string) => void, signal: AbortSignal) {
 async function predict(img: Image | Canvas, opts: { progress: (text: string) => void; signal: AbortSignal }): Promise<Float32Array> {
   const model = await load(opts.progress, opts.signal);
   const { createCanvas } = await import("@napi-rs/canvas");
-  const ort = await import("onnxruntime-node");
   // The model takes 1024x1024, normalised like ImageNet, channels first.
   const square = createCanvas(SIDE, SIDE);
   square.getContext("2d").drawImage(img, 0, 0, SIDE, SIDE);
@@ -38,7 +37,7 @@ async function predict(img: Image | Canvas, opts: { progress: (text: string) => 
     for (let c = 0; c < 3; c++) input[c * n + i] = (px[i * 4 + c] / 255 - MEAN[c]) / STD[c];
   }
   opts.progress("Finding the subject…");
-  const out = await model.run({ [model.inputNames[0]]: new ort.Tensor("float32", input, [1, 3, SIDE, SIDE]) });
+  const out = await model.run({ [model.inputNames[0]]: tensor("float32", input, [1, 3, SIDE, SIDE]) });
   const raw = out[model.outputNames[model.outputNames.length - 1]].data as Float32Array;
   let lo = Infinity;
   let hi = -Infinity;

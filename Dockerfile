@@ -74,6 +74,8 @@ COPY --from=build --chown=oms:oms /app/.next/static ./.next/static
 # It needs only `pg`, which the standalone node_modules already has for the app.
 COPY --from=build --chown=oms:oms /app/drizzle/*.sql ./drizzle/
 COPY --from=build --chown=oms:oms /app/scripts/migrate.mjs ./scripts/migrate.mjs
+# Seelie's photo models run in a process of their own (src/lib/seelie/media/models.ts).
+COPY --from=build --chown=oms:oms /app/scripts/model-host.mjs ./scripts/model-host.mjs
 
 USER oms
 EXPOSE 3000
