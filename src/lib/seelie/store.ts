@@ -25,7 +25,8 @@ import { seal, unseal, type Sealed } from "./sealed";
 const SETTINGS_KEY = "store";
 /** The store's own vendor row, which every product it sells belongs to. */
 export const STORE_VENDOR_ID = process.env.PARIBELLE_STORE_VENDOR_ID?.trim() || "00000000-0000-0000-0000-000000000001";
-const ADMIN_ROLES = ["super_admin", "vendor_admin"];
+/** The API admits super_admin alone: vendor_admin is the old marketplace's vendor role. */
+const ADMIN_ROLES = ["super_admin"];
 const TIMEOUT_MS = 60_000;
 
 export function storeApiUrl(): string | null {
@@ -202,6 +203,10 @@ async function token(api: string, fresh = false): Promise<string> {
     await writeLogin({ ...saved, failedAt: new Date().toISOString() }, null);
     tokens.delete(api);
     throw new StoreError("paribelle.in's password changed. The owner signs Seelie in again from its settings.");
+  }
+  // A login saved while vendor_admin still counted as an admin.
+  if (!result.role || !ADMIN_ROLES.includes(result.role)) {
+    throw new StoreError("The saved paribelle.in login isn't the store's admin account any more. The owner signs Seelie in again from its settings with the admin login.");
   }
   tokens.set(api, { token: result.token, expiresAt: expiryOf(result.token) });
   return result.token;
