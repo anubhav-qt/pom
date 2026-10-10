@@ -327,7 +327,15 @@ export interface OpenApiDoc {
 export function storeDocs(): Promise<OpenApiDoc> {
   const api = storeApiUrl();
   if (!api) return Promise.reject(new StoreError("paribelle.in isn't connected on this server."));
-  docs ??= fetch(docsUrl(api), { signal: AbortSignal.timeout(20_000) })
+  // The API serves its route list to admins only, so this needs the same
+  // sign-in as every other call.
+  docs ??= token(api)
+    .then((bearer) =>
+      fetch(docsUrl(api), {
+        headers: { authorization: `Bearer ${bearer}` },
+        signal: AbortSignal.timeout(20_000),
+      }),
+    )
     .then(async (res) => {
       if (!res.ok) throw new StoreError(`The API's route list isn't available (${res.status}).`);
       return (await res.json()) as OpenApiDoc;

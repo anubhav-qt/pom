@@ -41,6 +41,8 @@ x-api: &api
     APP_EMAIL: "${APP_EMAIL:-}"
     APP_PHONE: "${APP_PHONE:-}"
     APP_GST: "${APP_GST:-}"
+    # A Google sign-in's token is checked as issued for this storefront's client.
+    GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
   volumes: ["uploads:/app/uploads"]
 
 # The storefront and the OMS run as one process per core (cluster.cjs, PROCESSES), under a
