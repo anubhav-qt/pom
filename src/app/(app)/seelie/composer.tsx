@@ -179,7 +179,8 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
 
   const usage = usageFor(limits, model?.provider ?? null);
   const context = model ? contextFor(messages, model.contextWindow, model.name) : null;
-  const placeholder = disabled ?? (running ? "Tell Seelie something while it works…" : chatId ? "Reply to Seelie…" : "Ask Seelie anything…");
+  // A phone's capsule has room for one short line.
+  const placeholder = disabled ?? (running ? (wide ? "Tell Seelie something while it works…" : "Tell Seelie more…") : chatId ? "Reply to Seelie…" : "Ask Seelie anything…");
 
   const textarea = (
     <textarea
@@ -224,7 +225,7 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
         void take(files);
       }}
       placeholder={placeholder}
-      className={cn("sl-field", wide ? "px-4 pb-1.5 pt-3.5" : "py-2 pl-1 pr-1")}
+      className={cn("sl-field", wide ? "px-4 pb-1.5 pt-3.5" : "py-1.5 pl-1 pr-1")}
     />
   );
 
@@ -358,7 +359,18 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
           {attachments}
           <div className="flex items-end gap-1.5">
             <div className="relative shrink-0" onMouseDown={(e) => e.preventDefault()}>
-              <button type="button" className="sl-plus" aria-label="Attach, model and thinking" aria-expanded={menu} onClick={() => setMenu((m) => !m)} disabled={!!disabled}>
+              <button
+                type="button"
+                className="sl-plus"
+                aria-label="Attach, model and thinking"
+                aria-expanded={menu}
+                onClick={() => {
+                  // The keyboard goes down so the whole menu fits above the box.
+                  if (!menu && coarse()) textRef.current?.blur();
+                  setMenu((m) => !m);
+                }}
+                disabled={!!disabled}
+              >
                 <Plus className={cn("h-[18px] w-[18px] transition-transform", menu && "rotate-45")} />
               </button>
               {menu ? (
@@ -494,6 +506,7 @@ function PlusMenu({ onClose, onAttach, onMention, full, context }: { onClose: ()
   const { setModel, setThinking, setShowThinking } = useSeelie.getState();
   const model = catalog?.models.find((m) => m.id === modelId) ?? null;
   const ref = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const away = (e: PointerEvent) => {
       if (ref.current && !ref.current.parentElement?.contains(e.target as Node)) onClose();
@@ -501,8 +514,28 @@ function PlusMenu({ onClose, onAttach, onMention, full, context }: { onClose: ()
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
   }, [onClose]);
+  // Only the model list scrolls, and never the chat behind the menu.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const hold = (e: Event) => {
+      if (!listRef.current?.contains(e.target as Node)) e.preventDefault();
+    };
+    el.addEventListener("touchmove", hold, { passive: false });
+    el.addEventListener("wheel", hold, { passive: false });
+    return () => {
+      el.removeEventListener("touchmove", hold);
+      el.removeEventListener("wheel", hold);
+    };
+  }, []);
+  // The chosen model opens in the middle of the list's three rows.
+  useEffect(() => {
+    const list = listRef.current;
+    const on = list?.querySelector<HTMLElement>(".on");
+    if (list && on) list.scrollTop = on.offsetTop - on.offsetHeight;
+  }, []);
   return (
-    <div ref={ref} className="sl-pop bottom-full left-0 mb-3 w-[min(19rem,calc(100vw-2rem))]">
+    <div ref={ref} className="sl-pop fit bottom-full left-0 mb-3 w-[min(19rem,calc(100vw-2rem))]">
       <button type="button" className="sl-pop-item" onClick={onAttach} disabled={full}>
         <Paperclip className="h-4 w-4" style={{ color: "var(--muted)" }} />
         <span className="text-[13.5px]">Photos, clips, sounds or PDFs</span>
@@ -512,7 +545,7 @@ function PlusMenu({ onClose, onAttach, onMention, full, context }: { onClose: ()
         <span className="text-[13.5px]">A product or an order</span>
       </button>
       <p className="sl-pop-h">Model</p>
-      <div className="max-h-48 overflow-y-auto">
+      <div ref={listRef} className="sl-pop-models">
         {catalog?.models.map((m) => (
           <button key={m.id} type="button" className={cn("sl-pop-item", m.id === modelId && "on")} onClick={() => setModel(m.id)}>
             <span className="min-w-0 flex-1 truncate text-left text-[13px]">{m.name}</span>

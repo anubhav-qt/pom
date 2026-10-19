@@ -638,24 +638,32 @@ html[data-typing] main {
 
 /* ------------------------------------------------------------------ Seelie -- */
 /* The box, pinned in one place at the foot of the screen: above the phone's nav
-   bar, at the window's foot from `sm` up and while the keyboard is up (lifted by
-   --kb on an iPhone, whose keyboard covers the page). --dock-h is its height. */
+   bar, at the window's foot from `sm` up, and on the keyboard while it's up (at
+   --vv-bottom, the foot of what an iPhone's keyboard leaves visible). Its gutters
+   are the page's, so the box is exactly as wide as the chat. --dock-h is its height. */
 .sl-dock {
   position: fixed;
   left: 0;
   right: 0;
   bottom: calc(56px + env(safe-area-inset-bottom));
   z-index: 30;
-  transform: translateY(calc(-1 * var(--kb, 0px)));
+  padding: 0 1rem;
   pointer-events: none;
 }
 @media (min-width: 640px) {
   .sl-dock {
     bottom: 0;
+    padding: 0 1.5rem;
   }
 }
 html[data-typing] .sl-dock {
-  bottom: 0;
+  top: var(--vv-bottom, 100dvh);
+  bottom: auto;
+  transform: translateY(-100%);
+}
+/* The keyboard leaves little room: the job's bar steps aside (the chat shows the job). */
+html[data-typing] .sl-dock .sl-pin {
+  display: none;
 }
 .sl-dock-in {
   position: relative;
@@ -718,6 +726,7 @@ html[data-typing] .sl-spacer {
 .sl-box2.dragging {
   border-color: var(--accent);
 }
+/* No fill until it's pointed at or its menu is open. */
 .sl-plus {
   width: 36px;
   height: 36px;
@@ -725,8 +734,20 @@ html[data-typing] .sl-spacer {
   display: grid;
   place-items: center;
   color: var(--muted);
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 0.3s var(--ease-spring),
+    background-color 0.15s ease;
+}
+@media (hover: hover) {
+  .sl-plus:hover {
+    background: var(--panel-2);
+  }
+}
+.sl-plus[aria-expanded="true"] {
   background: var(--panel-2);
-  transition: transform 0.3s var(--ease-spring);
+  color: var(--text);
 }
 .sl-plus:active {
   transform: scale(0.92);
@@ -796,6 +817,23 @@ html[data-typing] .sl-spacer {
   border-radius: 16px;
   box-shadow: var(--shadow-md);
   animation: rise-in 0.22s var(--ease-apple);
+}
+/* The capsule's + menu shows whole: only its model list scrolls, three rows at a time. */
+.sl-pop.fit {
+  max-height: none;
+  overflow: visible;
+  overscroll-behavior: contain;
+}
+.sl-pop-models {
+  position: relative;
+  max-height: 108px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sl-pop-models .sl-pop-item {
+  height: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 .sl-pop-item {
   display: flex;
