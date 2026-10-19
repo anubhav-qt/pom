@@ -22,7 +22,7 @@ import { Notice, Timeline, useTurns } from "./timeline";
  *
  * The box is pinned to the foot of the screen in one place, empty chat or long one: above
  * the phone's nav bar, at the window's foot from `sm` up and while a phone's keyboard is up
- * (on an iPhone it rides up on the keyboard, which covers the page instead of shrinking it).
+ * (on an iPhone it sits on the keyboard, which covers the page instead of shrinking it).
  * A spacer as tall as the box ends the chat, so the latest message stops just above it.
  */
 
@@ -117,20 +117,18 @@ export function Seelie() {
       root.removeAttribute("data-seelie");
       root.style.removeProperty("--dock-h");
       root.style.removeProperty("--seelie-top");
-      root.style.removeProperty("--kb");
+      root.style.removeProperty("--vv-bottom");
     };
   }, []);
 
-  // An iPhone's keyboard covers the page rather than shrinking it: the box rides up by
-  // the part of the window the keyboard hides (--kb). Android shrinks the page (zero here).
+  // An iPhone's keyboard covers the page rather than shrinking it: while it's up the box
+  // sits on the foot of what's still visible (--vv-bottom, from the top of the page's fixed
+  // layer). Measured from the top, as Safari 26's window height doesn't match that layer's.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
     const root = document.documentElement;
-    const place = () => {
-      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-      root.style.setProperty("--kb", `${kb}px`);
-    };
+    const place = () => root.style.setProperty("--vv-bottom", `${Math.round(vv.offsetTop + vv.height)}px`);
     vv.addEventListener("resize", place);
     vv.addEventListener("scroll", place);
     place();
@@ -332,7 +330,7 @@ export function Seelie() {
 
       {/* Pinned to the foot of the screen, in the same place whatever the chat holds. */}
       <div ref={dockRef} className="sl-dock">
-        <div className="sl-dock-in mx-auto w-full max-w-3xl px-4 sm:px-6">
+        <div className="sl-dock-in mx-auto w-full max-w-3xl">
           {behind && !empty ? (
             <div className="pointer-events-none absolute inset-x-0 -top-11 flex justify-center">
               <button

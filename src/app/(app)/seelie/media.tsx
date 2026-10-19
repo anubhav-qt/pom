@@ -123,18 +123,39 @@ function VideoActions({ video }: { video: CardVideo }) {
     }
   }, []);
 
-  async function share() {
-    setSharing(true);
-    setError(null);
-    try {
+  // The video's file, fetched once: from when the Share button is pointed at or pressed.
+  const file = useRef<File | null>(null);
+  const fetching = useRef<Promise<File> | null>(null);
+  const [ready, setReady] = useState(false);
+
+  function fetchFile(): Promise<File> {
+    fetching.current ??= (async () => {
       const res = await fetch(video.src, { cache: "no-store" });
       if (!res.ok) throw new Error(`Couldn't fetch the video (${res.status}).`);
       const name = `${video.title.replace(/[^\p{L}\p{N} _-]+/gu, "").trim().slice(0, 60) || "video"}.mp4`;
-      const file = new File([await res.blob()], name, { type: "video/mp4" });
-      await navigator.share({ files: [file], title: video.title });
+      file.current = new File([await res.blob()], name, { type: "video/mp4" });
+      return file.current;
+    })().catch((err: unknown) => {
+      fetching.current = null;
+      throw err;
+    });
+    return fetching.current;
+  }
+
+  async function share() {
+    setError(null);
+    // A share sheet opens only straight from a tap, so a fetched video goes at once.
+    const have = file.current;
+    if (!have) setSharing(true);
+    try {
+      await navigator.share({ files: [have ?? (await fetchFile())], title: video.title });
+      setReady(false);
     } catch (err) {
       // Closing the share sheet isn't a failure.
-      if (!(err instanceof DOMException && err.name === "AbortError")) setError(err instanceof Error ? err.message : "Couldn't share it.");
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      // The fetch outlasted the tap: the video's here now, so the next tap opens the sheet.
+      if (err instanceof DOMException && err.name === "NotAllowedError" && file.current) setReady(true);
+      else setError(err instanceof Error ? err.message : "Couldn't share it.");
     } finally {
       setSharing(false);
     }
@@ -164,9 +185,16 @@ function VideoActions({ video }: { video: CardVideo }) {
           </a>
         ) : null}
         {canShare ? (
-          <button type="button" className="btn btn-white px-2.5 py-1.5 text-[13px]" disabled={sharing} onClick={() => void share()}>
+          <button
+            type="button"
+            className={cn("btn px-2.5 py-1.5 text-[13px]", ready ? "btn-primary" : "btn-white")}
+            disabled={sharing}
+            onPointerEnter={() => void fetchFile().catch(() => {})}
+            onPointerDown={() => void fetchFile().catch(() => {})}
+            onClick={() => void share()}
+          >
             {sharing ? <Spinner size="0.9rem" /> : <Share2 className="h-3.5 w-3.5" />}
-            <span className="hidden min-[400px]:inline">Share</span>
+            <span className={ready ? "" : "hidden min-[400px]:inline"}>{ready ? "Ready, share" : "Share"}</span>
           </button>
         ) : null}
         {video.id ? (
