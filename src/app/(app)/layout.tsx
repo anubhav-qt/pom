@@ -6,6 +6,7 @@ import { CornerNotes } from "@/components/corner-note";
 import { ImagesBack } from "@/components/images-back";
 import { RoutineNotes } from "@/components/routine-notes";
 import { ScreenSwitcher } from "@/components/screen-switcher";
+import { SeelieNotes } from "@/components/seelie-notes";
 import { ENABLED_CHANNELS } from "@/config/features";
 import { db } from "@/db";
 import { channelAccounts, orderFulfilment, orders, syncRuns } from "@/db/schema";
@@ -75,6 +76,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <ScreenSwitcher>{children}</ScreenSwitcher>
       </main>
       <CornerNotes>
+        <SeelieNotes />
         <RoutineNotes />
         <ImagesBack />
       </CornerNotes>

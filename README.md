@@ -50,18 +50,19 @@ it takes, its thinking and each tool's result. It asks before it changes anythin
 
 **Runs routines**
 - A routine is a message Seelie gets on a schedule (every few hours, daily, chosen weekdays or a day of the month, India time) and answers in the routine's own chat. Make them in Routines on Seelie's screen, or ask in a chat ("every Monday at 9, send me the ads report").
-- Ad spend, posts, marketplace and paribelle.in changes still wait for you; each routine can auto-approve changes to the OMS. A note anywhere in the OMS says when a routine ran, and whenever one waits for your approval.
+- Instagram posts, ad spend and photoshoots still wait for you; everything else runs. A note anywhere in the OMS says when a routine ran, and whenever one waits for your approval.
 - A routine's chat compacts itself when it passes 60% of the model's context: older runs are summed up for Seelie, the last three stay word for word, and you still see everything.
 
 **Remembers what you ask**
 - Say "remember…", "from now on…" or "don't forget…" and Seelie keeps it, in every chat, until you delete it. Each person's memories are their own.
-- See, edit, add and delete them under Memories in Seelie's settings, or say "forget that" in a chat (it asks first).
+- See, edit, add and delete them under Memories in Seelie's settings, or say "forget that" in a chat.
 
 **How it works**
-- Reading never asks. Changes ask with Approve / Deny, unless you turn on auto-approve for a chat. Marketplace, paribelle.in, Instagram, ad spend and other paid changes always ask.
+- Only Instagram posts, ad spend and photoshoots (new images from the image model) ask, with Approve / Deny. Everything else runs straight away, changes to the OMS, Amazon and paribelle.in included, and each change shows in the chat as a step.
 - Models come from your own subscriptions (Google Antigravity, ChatGPT Codex or Claude) through [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). The composer has a model and thinking-level picker, and settings show each account's 5-hour and weekly limits.
 - Parts of a request that don't need each other go to up to 4 helpers that work at the same time. Each helper has Seelie's tools and runs on Gemini 3.8 Flash when Antigravity serves it, at a thinking level Seelie picks for its job. Each helper shows as a card with its steps and its answer, and its changes ask like any other.
-- Chats are saved and Seelie names them. The composer shows how much of the model's context the chat uses. A reply keeps running when you close the tab and picks up where it was when you come back.
+- Chats are saved and Seelie names them. The composer shows how much of the model's context the chat uses. A reply keeps running when you close the tab and picks up where it was when you come back, and a note anywhere in the OMS says when it's done.
+- A job shows its plan as a checklist (one live card per job on a phone), and the box stays pinned at the bottom. Type while Seelie works: the message steers the job it's on, and more wait in a queue. Change a post's caption, an ad's budget or a shoot's looks on the approval card before saying yes; take back a change with Undo on its card; draw boxes with notes on a photo or a video frame; rate what Seelie made; and @ a product or an order so it never has to guess which one.
 - Seelie runs on the ThinkPad, next to CLIProxyAPI. On the Vercel fallback it shows offline.
 
 ## The rest of POM

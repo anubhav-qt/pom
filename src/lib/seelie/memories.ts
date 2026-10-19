@@ -8,7 +8,7 @@ import { seelieMemories, type User } from "@/db/schema";
 /**
  * What a person told Seelie to remember ("remember that…", "from now on…"): their own,
  * read into every chat they have with Seelie until they delete it (in Seelie's settings,
- * or by asking Seelie, which asks before it forgets).
+ * or by asking Seelie to forget it).
  */
 
 export const MAX_MEMORY = 500;

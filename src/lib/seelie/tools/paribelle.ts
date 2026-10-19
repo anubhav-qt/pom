@@ -15,7 +15,7 @@ import { OrderRef, resolveOrders, StringEnum } from "./util";
 /**
  * paribelle.in's orders and exchanges moved along from the chat, as the order
  * popup and the Returns desk's Exchanges tab do: the store is changed first (it
- * tells the customer), then the OMS takes its answer. Every call asks.
+ * tells the customer), then the OMS takes its answer.
  */
 
 const ORDER_STEPS = ["confirm", "ship", "deliver", "cancel", "cod_refused"] as const;

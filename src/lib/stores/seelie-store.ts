@@ -4,12 +4,12 @@ import type { AssistantMessage } from "@paribelle/pi-ai";
 import { create } from "zustand";
 
 import {
-  autoApproveAction,
   chatAction,
   chatsAction,
   deleteChatsAction,
   limitsAction,
   pinChatAction,
+  reactAction,
   renameChatAction,
   statusAction,
   type SeelieStatus,
@@ -17,7 +17,21 @@ import {
 import { MAX_CLIP_BYTES, uploadClip } from "@/app/(app)/seelie/upload";
 import { withBasePath } from "@/lib/base-path";
 import type { AccountLimits } from "@/lib/seelie/limits";
-import { ACTIVE_RUN, type ChatMessage, type ChatSummary, type ChatView, type ImageInput, type RunInfo, type StreamEvent, type ToolRow } from "@/lib/seelie/types";
+import {
+  ACTIVE_RUN,
+  type ApprovalEdits,
+  type ChatMessage,
+  type ChatSummary,
+  type ChatView,
+  type ImageInput,
+  type Mention,
+  type Reaction,
+  type ReactionInput,
+  type RunInfo,
+  type RunStatus,
+  type StreamEvent,
+  type ToolRow,
+} from "@/lib/seelie/types";
 
 /**
  * Seelie's screen state, kept outside React so a reply keeps streaming while the
@@ -48,10 +62,19 @@ export interface DraftClip {
   preview: string;
 }
 
-interface PendingSend {
+export interface PendingSend {
   text: string;
   images: DraftImage[];
   clips: DraftClip[];
+}
+
+/** A reply that ended, for the note shown when the owner is on another screen. */
+export interface Finished {
+  runId: string;
+  chatId: string;
+  title: string;
+  status: RunStatus;
+  at: number;
 }
 
 interface SeelieState {
@@ -62,7 +85,6 @@ interface SeelieState {
 
   chatId: string | null;
   title: string;
-  autoApprove: boolean;
   pinned: boolean;
   loadingChat: boolean;
   messages: ChatMessage[];
@@ -71,13 +93,21 @@ interface SeelieState {
   run: RunInfo | null;
   /** The message just sent, shown until the server's copy arrives. */
   pending: PendingSend | null;
+  /** A message on its way into the reply being written (read before Seelie's next step). */
+  steering: PendingSend | null;
+  /** Messages sent while Seelie worked that wait for its reply to end (another process holds it, or clips go with them). */
+  queued: PendingSend[];
   error: string | null;
+  /** The latest reply to end, for the note on other screens. */
+  finished: Finished | null;
 
   model: string | null;
   thinking: string | null;
   draft: string;
   draftImages: DraftImage[];
   draftClips: DraftClip[];
+  /** Products and orders picked with @ for the message being written. */
+  draftMentions: Mention[];
   showThinking: boolean;
 
   loadStatus: (force?: boolean) => Promise<void>;
@@ -86,10 +116,16 @@ interface SeelieState {
   openChat: (chatId: string | null) => Promise<void>;
   /** Back online after a blip: bring the open (or last) chat up to date without clearing it. */
   resume: () => Promise<void>;
+  /** Send the message in the box: a new reply, or into the one being written. */
   send: () => Promise<void>;
+  /** Send `text` as the owner's message (Undo, a next step, feedback): into the reply being written, or as a new one. */
+  say: (text: string) => Promise<void>;
+  unqueue: (index: number) => void;
   stop: () => Promise<void>;
-  decide: (row: ToolRow, approve: boolean, alwaysThisChat?: boolean) => Promise<void>;
-  setAutoApprove: (on: boolean) => Promise<void>;
+  decide: (row: ToolRow, approve: boolean, edits?: ApprovalEdits | null) => Promise<void>;
+  react: (input: ReactionInput) => Promise<boolean>;
+  addMention: (mention: Mention) => void;
+  clearFinished: () => void;
   rename: (chatId: string, title: string) => Promise<void>;
   pin: (chatId: string, pinned: boolean) => Promise<void>;
   remove: (chatId: string) => Promise<void>;
@@ -198,7 +234,7 @@ export const useSeelie = create<SeelieState>((set, get) => {
         const messages = s.messages.some((m) => m.seq === event.m.seq)
           ? s.messages.map((m) => (m.seq === event.m.seq ? event.m : m))
           : [...s.messages, event.m].sort((a, b) => a.seq - b.seq);
-        set({ messages, ...(event.m.message.role === "user" ? { pending: null } : {}) });
+        set({ messages, ...(event.m.message.role === "user" ? { pending: null, steering: null } : {}) });
         return;
       }
       case "partial":
@@ -216,17 +252,120 @@ export const useSeelie = create<SeelieState>((set, get) => {
           chats: s.chats?.map((c) => (c.id === s.chatId ? { ...c, title: event.title } : c)) ?? s.chats,
         });
         return;
-      case "end":
+      case "end": {
+        // A message on its way in when the reply ended goes as the next one.
+        const late = s.steering ? [s.steering] : [];
         set({
           run: s.run ? { ...s.run, status: event.status, error: event.error, endedAt: new Date().toISOString() } : null,
           partial: null,
           pending: null,
+          steering: null,
+          queued: [...late, ...s.queued],
           error: event.status === "error" || event.status === "interrupted" ? (event.error ?? "Seelie stopped with an error.") : null,
+          finished: s.run && s.chatId ? { runId: s.run.id, chatId: s.chatId, title: s.title, status: event.status, at: Date.now() } : s.finished,
         });
         void get().loadChats();
         void get().loadLimits();
+        // What was sent meanwhile goes now, as one message, unless the owner stopped the reply.
+        if (event.status !== "aborted" && get().queued.length) queueMicrotask(() => void flushQueue());
         return;
+      }
     }
+  }
+
+  /** Messages kept while Seelie worked, sent together as the next message. */
+  async function flushQueue() {
+    const s = get();
+    if (!s.queued.length || (s.run && ACTIVE_RUN.includes(s.run.status))) return;
+    const all = s.queued;
+    set({ queued: [] });
+    await post({
+      text: all.map((q) => q.text).filter(Boolean).join("\n\n"),
+      images: all.flatMap((q) => q.images).slice(0, MAX_IMAGES),
+      clips: all.flatMap((q) => q.clips).slice(0, MAX_CLIPS),
+    });
+  }
+
+  /** Tell the reply being written something; kept for the next message when this process can't. */
+  async function steer(msg: PendingSend) {
+    const run = get().run;
+    if (!run || !ACTIVE_RUN.includes(run.status) || msg.clips.length) {
+      set({ queued: [...get().queued, msg] });
+      return;
+    }
+    if (get().steering) {
+      set({ queued: [...get().queued, msg] });
+      return;
+    }
+    set({ steering: msg, error: null });
+    const res = await fetch(withBasePath(`/api/seelie/runs/${run.id}/steer`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: msg.text, images: msg.images.map(({ data, mimeType }) => ({ data, mimeType })) }),
+      cache: "no-store",
+    }).catch(() => null);
+    if (res?.ok) return;
+    // Held by another process, or ending: it goes as the next message instead.
+    if (get().steering === msg) set({ steering: null, queued: [...get().queued, msg] });
+    if (res && res.status !== 409) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      set({ error: body?.error ?? `Couldn't pass that on (${res.status}); it goes when Seelie finishes.` });
+    }
+    const after = get().run;
+    if (!after || !ACTIVE_RUN.includes(after.status)) void flushQueue();
+  }
+
+  /** Start a reply to `msg` in the open chat (a new chat when none is open). */
+  async function post(msg: PendingSend) {
+    const s = get();
+    const gen = generation;
+    const { text, images, clips } = msg;
+    set({ pending: msg, error: null });
+    streamAbort?.abort();
+    const abort = new AbortController();
+    streamAbort = abort;
+    let res: Response;
+    const back = (error: string) => {
+      if (gen !== generation) return;
+      const now = get();
+      // The words go back in the box (after anything typed since), so nothing is lost.
+      set({
+        pending: null,
+        draft: [text, now.draft].filter(Boolean).join("\n\n"),
+        draftImages: [...images, ...now.draftImages].slice(0, MAX_IMAGES),
+        draftClips: [...clips, ...now.draftClips].slice(0, MAX_CLIPS),
+        error,
+      });
+    };
+    try {
+      res = await fetch(withBasePath("/api/seelie/runs"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chatId: s.chatId,
+          text,
+          images: images.map(({ data, mimeType }) => ({ data, mimeType })),
+          assets: clips.map((c) => c.assetId),
+          model: s.model ?? undefined,
+          thinking: s.thinking ?? undefined,
+        }),
+        signal: abort.signal,
+        cache: "no-store",
+      });
+    } catch {
+      back("Couldn't reach the server. Check the connection and send again.");
+      return;
+    }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string; offline?: boolean } | null;
+      if (body?.offline) markOffline();
+      back(body?.error ?? `Couldn't send (${res.status}).`);
+      return;
+    }
+    // The first event names the run; until then there's nothing to reconnect to.
+    await consume(res, gen, "", 0);
+    const run = get().run;
+    if (gen === generation && run && ACTIVE_RUN.includes(run.status)) void follow(run.id, gen, 1);
   }
 
   /** Seelie answered from somewhere it doesn't run (the ThinkPad was busy for a moment): the screen waits for it. */
@@ -306,7 +445,6 @@ export const useSeelie = create<SeelieState>((set, get) => {
     set({
       loadingChat: false,
       title: view.title,
-      autoApprove: view.autoApprove,
       pinned: view.pinned,
       messages: view.messages,
       tools: Object.fromEntries(view.tools.map((t) => [t.callId, t])),
@@ -334,7 +472,6 @@ export const useSeelie = create<SeelieState>((set, get) => {
     chats: null,
     chatId: null,
     title: "",
-    autoApprove: false,
     pinned: false,
     loadingChat: false,
     messages: [],
@@ -342,12 +479,16 @@ export const useSeelie = create<SeelieState>((set, get) => {
     partial: null,
     run: null,
     pending: null,
+    steering: null,
+    queued: [],
     error: null,
+    finished: null,
     model: null,
     thinking: null,
     draft: "",
     draftImages: [],
     draftClips: [],
+    draftMentions: [],
     showThinking: typeof window === "undefined" ? true : readFlag(SHOW_THINKING_KEY, true),
 
     async loadStatus(force = false) {
@@ -379,18 +520,28 @@ export const useSeelie = create<SeelieState>((set, get) => {
       streamAbort = null;
       deltaQueue = [];
       remember(LAST_CHAT_KEY, chatId);
+      // Messages kept for the chat being left go back in the box rather than into another chat.
+      const kept = get().queued;
       set({
         chatId,
         title: "",
-        autoApprove: false,
         pinned: false,
         messages: [],
         tools: {},
         partial: null,
         run: null,
         pending: null,
+        steering: null,
+        queued: [],
         error: null,
         loadingChat: chatId !== null,
+        ...(kept.length
+          ? {
+              draft: [get().draft, ...kept.map((q) => q.text)].filter(Boolean).join("\n\n"),
+              draftImages: [...get().draftImages, ...kept.flatMap((q) => q.images)].slice(0, MAX_IMAGES),
+              draftClips: [...get().draftClips, ...kept.flatMap((q) => q.clips)].slice(0, MAX_CLIPS),
+            }
+          : {}),
       });
       if (!chatId) {
         set(chooseModel(get().model, get().thinking));
@@ -419,7 +570,7 @@ export const useSeelie = create<SeelieState>((set, get) => {
       if (!chatId) return;
       if (s.chatId !== chatId || !s.messages.length) return get().openChat(chatId);
       // A reply being sent shows as pending; leave it to its own stream.
-      if (s.pending) return;
+      if (s.pending || s.steering) return;
       const gen = ++generation;
       streamAbort?.abort();
       streamAbort = null;
@@ -432,49 +583,37 @@ export const useSeelie = create<SeelieState>((set, get) => {
 
     async send() {
       const s = get();
-      const text = s.draft.trim();
+      const text = withMentions(s.draft.trim(), s.draftMentions);
       const images = s.draftImages;
       const clips = s.draftClips;
       if (!text && images.length === 0 && clips.length === 0) return;
       if (clips.some((c) => c.assetId === null)) return;
-      if (s.run && ACTIVE_RUN.includes(s.run.status)) return;
-      const gen = generation;
-      set({ pending: { text, images, clips }, draft: "", draftImages: [], draftClips: [], error: null });
-      streamAbort?.abort();
-      const abort = new AbortController();
-      streamAbort = abort;
-      let res: Response;
-      try {
-        res = await fetch(withBasePath("/api/seelie/runs"), {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            chatId: s.chatId,
-            text,
-            images: images.map(({ data, mimeType }) => ({ data, mimeType })),
-            assets: clips.map((c) => c.assetId),
-            model: s.model ?? undefined,
-            thinking: s.thinking ?? undefined,
-            // Switched on before the chat existed.
-            autoApprove: s.chatId ? undefined : s.autoApprove,
-          }),
-          signal: abort.signal,
-          cache: "no-store",
-        });
-      } catch {
-        if (gen === generation) set({ pending: null, draft: text, draftImages: images, draftClips: clips, error: "Couldn't reach the server. Check the connection and send again." });
-        return;
-      }
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string; offline?: boolean } | null;
-        if (body?.offline) markOffline();
-        if (gen === generation) set({ pending: null, draft: text, draftImages: images, draftClips: clips, error: body?.error ?? `Couldn't send (${res.status}).` });
-        return;
-      }
-      // The first event names the run; until then there's nothing to reconnect to.
-      await consume(res, gen, "", 0);
+      set({ draft: "", draftImages: [], draftClips: [], draftMentions: [] });
+      // While Seelie works, the message goes into its reply (it reads it before its next step).
+      if (s.run && ACTIVE_RUN.includes(s.run.status)) return steer({ text, images, clips });
+      await post({ text, images, clips });
+    },
+
+    async say(text) {
+      const msg: PendingSend = { text, images: [], clips: [] };
       const run = get().run;
-      if (gen === generation && run && ACTIVE_RUN.includes(run.status)) void follow(run.id, gen, 1);
+      if (run && ACTIVE_RUN.includes(run.status)) return steer(msg);
+      if (get().pending) return;
+      await post(msg);
+    },
+
+    unqueue(index) {
+      const queued = [...get().queued];
+      const [gone] = queued.splice(index, 1);
+      if (!gone) return;
+      // Back in the box, to change or send again.
+      const s = get();
+      set({
+        queued,
+        draft: [s.draft, gone.text].filter(Boolean).join("\n\n"),
+        draftImages: [...s.draftImages, ...gone.images].slice(0, MAX_IMAGES),
+        draftClips: [...s.draftClips, ...gone.clips].slice(0, MAX_CLIPS),
+      });
     },
 
     async stop() {
@@ -483,19 +622,18 @@ export const useSeelie = create<SeelieState>((set, get) => {
       await fetch(withBasePath(`/api/seelie/runs/${run.id}/abort`), { method: "POST" }).catch(() => {});
     },
 
-    async decide(row, approve, alwaysThisChat = false) {
+    async decide(row, approve, edits) {
       const s = get();
       set({
         tools: {
           ...s.tools,
           [row.callId]: { ...row, status: approve ? "queued" : "denied", approval: approve ? "approved" : "denied" },
         },
-        ...(alwaysThisChat ? { autoApprove: true } : {}),
       });
       const res = await fetch(withBasePath("/api/seelie/tool-calls"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId: row.runId, callId: row.callId, approve, alwaysThisChat }),
+        body: JSON.stringify({ runId: row.runId, callId: row.callId, approve, ...(approve && edits ? { edits } : {}) }),
       }).catch(() => null);
       if (!res?.ok) {
         const body = (await res?.json().catch(() => null)) as { error?: string } | null;
@@ -503,12 +641,30 @@ export const useSeelie = create<SeelieState>((set, get) => {
       }
     },
 
-    async setAutoApprove(on) {
-      const chatId = get().chatId;
-      set({ autoApprove: on });
-      if (!chatId) return;
-      const res = await autoApproveAction(chatId, on);
-      if (!res.ok) set({ autoApprove: !on, error: res.error });
+    async react(input) {
+      // A reply's thumb shows at once; it goes back if the server says no.
+      const before = get().messages;
+      if (input.on === "reply") {
+        const reaction: Reaction = { liked: input.liked, note: input.note ?? null, ...(input.remember && input.note ? { remembered: true } : {}), at: new Date().toISOString() };
+        set({
+          messages: before.map((m) => (m.seq === input.seq && m.message.role === "assistant" ? { ...m, message: { ...m.message, reaction } as typeof m.message } : m)),
+        });
+      }
+      const res = await reactAction(input).catch(() => null);
+      if (res?.ok) return true;
+      if (input.on === "reply") set({ messages: before });
+      set({ error: res && !res.ok ? res.error : "That didn't reach the server. Try again." });
+      return false;
+    },
+
+    addMention(mention) {
+      const s = get();
+      if (s.draftMentions.some((m) => m.token === mention.token)) return;
+      set({ draftMentions: [...s.draftMentions, mention] });
+    },
+
+    clearFinished() {
+      set({ finished: null });
     },
 
     async rename(chatId, title) {
@@ -603,6 +759,17 @@ export const useSeelie = create<SeelieState>((set, get) => {
     },
   };
 });
+
+/** The message with each product or order picked with @ as its token (`@Blue kurta` → `@[Blue kurta](product:PB-KU-101)`). */
+export function withMentions(text: string, mentions: Mention[]) {
+  let out = text;
+  for (const m of mentions) {
+    const at = `@${m.label}`;
+    const i = out.indexOf(at);
+    if (i >= 0) out = `${out.slice(0, i)}${m.token}${out.slice(i + at.length)}`;
+  }
+  return out;
+}
 
 export const MAX_DRAFT_IMAGES = MAX_IMAGES;
 export const MAX_DRAFT_CLIPS = MAX_CLIPS;

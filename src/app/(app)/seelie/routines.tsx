@@ -217,7 +217,6 @@ export function RoutineModal({ routine, onClose, onSaved }: { routine: RoutineVi
   const [day, setDay] = useState(String(s0?.every === "month" ? s0.day : 1));
   const [model, setModel] = useState<string | null>(routine?.model ?? useSeelie.getState().model ?? catalog?.defaultModel ?? null);
   const [thinking, setThinking] = useState<string | null>(routine?.thinking ?? useSeelie.getState().thinking ?? catalog?.defaultThinking ?? null);
-  const [autoApprove, setAutoApprove] = useState(routine?.autoApprove ?? false);
   const [enabled, setEnabled] = useState(routine?.enabled ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -244,7 +243,7 @@ export function RoutineModal({ routine, onClose, onSaved }: { routine: RoutineVi
     if (!schedule || !ready) return;
     setBusy(true);
     setError(null);
-    const res = await saveRoutineAction({ id: routine?.id ?? null, name, prompt, schedule, model, thinking, autoApprove, enabled });
+    const res = await saveRoutineAction({ id: routine?.id ?? null, name, prompt, schedule, model, thinking, enabled });
     setBusy(false);
     if (res.ok) onSaved(res.data);
     else setError(res.error);
@@ -340,12 +339,11 @@ export function RoutineModal({ routine, onClose, onSaved }: { routine: RoutineVi
         </div>
 
         <Toggle
-          checked={autoApprove}
-          onChange={setAutoApprove}
-          label="Make changes to the OMS without asking"
-          hint="Ads, Instagram posts, marketplace and paribelle.in changes always wait for you; a waiting run pops up when you open the OMS."
+          checked={enabled}
+          onChange={setEnabled}
+          label="On"
+          hint="Off keeps the routine without running it. Instagram posts, ad spend and photoshoots wait for you; a waiting run pops up when you open the OMS."
         />
-        <Toggle checked={enabled} onChange={setEnabled} label="On" hint="Off keeps the routine without running it." />
 
         {error ? <Notice tone="danger">{error}</Notice> : null}
 

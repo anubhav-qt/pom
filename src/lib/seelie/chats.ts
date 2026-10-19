@@ -6,8 +6,8 @@ import { db } from "@/db";
 import { seelieChats, seelieMessages, seelieRoutines, seelieRuns, seelieToolCalls, users, type User } from "@/db/schema";
 import type { AssistantMessage, Message } from "@paribelle/pi-ai";
 
-import { leanEntry, reapStaleRuns, SeelieRunError, setLiveAutoApprove, toolRowFrom } from "./engine";
-import { markRoutinesSeen, routineAutoApprove } from "./routines";
+import { leanEntry, reapStaleRuns, SeelieRunError, toolRowFrom } from "./engine";
+import { markRoutinesSeen } from "./routines";
 import { toolLabels } from "./tools";
 import { ACTIVE_RUN, type ChatSummary, type ChatView, type RunInfo, type RunStatus } from "./types";
 
@@ -78,7 +78,6 @@ export async function getChatView(user: User, chatId: string): Promise<ChatView>
     title: chat.title || "New chat",
     model: chat.model,
     thinking: chat.thinking,
-    autoApprove: chat.autoApprove,
     pinned: chat.pinned,
     messages: messages.map((m) =>
       leanEntry({ seq: m.seq, runId: m.runId, message: m.message as Message, createdAt: m.createdAt.toISOString() }),
@@ -100,13 +99,6 @@ export async function renameChat(user: User, chatId: string, title: string) {
 export async function pinChat(user: User, chatId: string, pinned: boolean) {
   await ownChat(user, chatId);
   await db.update(seelieChats).set({ pinned }).where(eq(seelieChats.id, chatId));
-}
-
-export async function setAutoApprove(user: User, chatId: string, on: boolean) {
-  await ownChat(user, chatId);
-  await db.update(seelieChats).set({ autoApprove: on }).where(eq(seelieChats.id, chatId));
-  await routineAutoApprove(chatId, on);
-  setLiveAutoApprove(chatId, on);
 }
 
 export async function deleteChats(user: User, chatIds: string[]) {

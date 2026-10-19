@@ -883,7 +883,7 @@ export const seelieChats = pgTable(
     title: text("title").notNull().default(""),
     model: text("model"),
     thinking: text("thinking"),
-    /** Changes to the OMS run without an approval card. Changes to a marketplace or to paribelle.in still ask. */
+    /** Unused since 2026-10-19: only posts, ad spend and photoshoots ask, in every chat (types.ts ASKS). Drop in a later migration. */
     autoApprove: boolean("auto_approve").notNull().default(false),
     pinned: boolean("pinned").notNull().default(false),
     /**
@@ -1183,7 +1183,7 @@ export const seelieRoutines = pgTable(
     schedule: jsonb("schedule").notNull(),
     model: text("model"),
     thinking: text("thinking"),
-    /** Ordinary writes run without asking; ads, posts, marketplaces and paribelle.in still wait. Kept in step with the chat's switch. */
+    /** Unused since 2026-10-19, like the chat's (types.ts ASKS). Drop in a later migration. */
     autoApprove: boolean("auto_approve").notNull().default(false),
     enabled: boolean("enabled").notNull().default(true),
     /** Null while switched off. */

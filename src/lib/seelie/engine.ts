@@ -19,29 +19,37 @@ import {
 import { and, asc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { seelieAssets, seelieChats, seelieMessages, seelieRoutines, seelieRuns, seelieToolCalls, users, type User } from "@/db/schema";
+import { seelieAssets, seelieChats, seelieMessages, seelieRuns, seelieToolCalls, users, type User } from "@/db/schema";
 
 import { effectiveThinking, getCatalog, resolveModel } from "./catalog";
 import { DEFAULT_THINKING, requireSeelieConfig } from "./config";
 import { summarySection } from "./compact";
 import { HELPER_MAX_CALLS, helperModel, helperSection, helpersReport, helpersSection, helpersTool, type HelperJob } from "./helpers";
 import { assetSummary } from "./media/files";
+import { MENTION_NOTE } from "./mentions";
 import { hydrateVideos } from "./media/watch";
 import { nameChat, provisionalTitle } from "./naming";
 import { PROCESS_TAG, processAlive } from "./proc";
 import { buildSystemPrompt } from "./prompt";
 import { toolsFor } from "./tools";
+import { planSection } from "./tools/plan";
 import { kindOf, ToolError, type SeelieTool, type ToolContext } from "./tools/types";
+import { applyEdits, describeEdits, editsBetween } from "./edits";
 import {
   ACTIVE_RUN,
-  ALWAYS_ASK,
+  ASKS,
+  PLAN_TOOL,
+  STEER_NOTE,
   type Approval,
+  type ApprovalEdits,
   type ChatMessage,
   type HelperState,
   type RunInfo,
   type RunStatus,
   type StartRunInput,
+  type SteerInput,
   type StreamEvent,
+  type ThinkingTimes,
   type ToolKind,
   type ToolRow,
   type ToolStatus,
@@ -93,8 +101,11 @@ interface LiveRun {
   waiters: Map<string, (approved: boolean | null) => void>;
   /** Decisions that arrived before the run got to waiting on them. */
   decided: Map<string, boolean>;
-  autoApprove: boolean;
+  /** What the owner changed on approvals before saying yes, by call. */
+  edits: Map<string, ApprovalEdits>;
   abortRequested: boolean;
+  /** Its end is being written: a message sent now waits for the next reply instead of steering this one. */
+  ending: boolean;
   /** Another process ended it as interrupted (reapStaleRuns): it stops, and its end stays as written. */
   endedElsewhere: boolean;
   nextSeq: number;
@@ -106,6 +117,8 @@ interface LiveRun {
   watchCache: Map<string, string>;
   /** The model takes video and sound. */
   canWatch: boolean;
+  /** The reply being written: when each thinking block started and how long it took, by content index. */
+  thinking: Map<number, { start: number; ms?: number }>;
   /** A new chat being named: the title it shows now and the first naming under way. */
   naming: { title: string; message: string; attachments: string | null; first: Promise<string | null> } | null;
   /** What helpers start from: Seelie's system prompt (without this run's own parts), its tools, and the model to fall back on. */
@@ -250,19 +263,20 @@ async function saveMessage(run: LiveRun, full: Message): Promise<ChatMessage> {
 /* Approvals                                                                  */
 /* -------------------------------------------------------------------------- */
 
-function needsApproval(kind: ToolKind, autoApprove: boolean) {
-  if (kind === "read") return false;
-  if (ALWAYS_ASK.includes(kind)) return true;
-  return !autoApprove;
+function needsApproval(kind: ToolKind) {
+  return ASKS.includes(kind);
 }
 
-/** Apply a decision already written to the database to the run in memory. */
-function applyDecision(run: LiveRun, callId: string, approved: boolean, by: { id: number; name: string } | null) {
+/** Apply a decision already written to the database to the run in memory (`args`: as the owner edited them). */
+function applyDecision(run: LiveRun, callId: string, approved: boolean, by: { id: number; name: string } | null, args?: unknown) {
   const row = run.tools.get(callId);
   if (row && row.status === "awaiting") {
+    const edits = approved && args !== undefined ? editsBetween(row.tool, row.args, args) : null;
+    if (edits) run.edits.set(callId, edits);
     const now = new Date().toISOString();
     const next: ToolRow = {
       ...row,
+      ...(approved && args !== undefined ? { args } : {}),
       approval: approved ? "approved" : "denied",
       status: approved ? "queued" : "denied",
       decidedBy: by?.name ?? row.decidedBy,
@@ -323,14 +337,6 @@ async function beforeToolCall(run: LiveRun, callId: string, signal?: AbortSignal
   }
   const row = run.tools.get(callId);
   if (!row || row.status !== "awaiting") return undefined;
-
-  // Auto-approve may have been switched on since the call was made.
-  if (row.kind === "write" && run.autoApprove) {
-    const next: ToolRow = { ...row, status: "queued", approval: "auto" };
-    run.tools.set(callId, next);
-    await saveTool(run, next);
-    return undefined;
-  }
 
   await setStatus(run, "waiting");
   const approved = await waitForDecision(run, callId, signal);
@@ -409,6 +415,11 @@ function agentTool(run: LiveRun, tool: SeelieTool, scope?: Scope): AgentTool {
     execute: async (modelCallId, params, signal, onUpdate) => {
       const toolCallId = scopedId(scope, modelCallId);
       const row = run.tools.get(toolCallId);
+      // Approved with changes (a caption, a budget, fewer looks): the owner's version runs, and the model is told.
+      const asked = withoutAsk(params);
+      const ownerEdits = row?.approval === "approved" ? run.edits.get(toolCallId) : undefined;
+      const args = ownerEdits ? applyEdits(tool.name, asked, ownerEdits) : asked;
+      const edits = ownerEdits ? describeEdits(tool.name, ownerEdits, asked) : [];
       if (row) {
         const next: ToolRow = {
           ...row,
@@ -437,8 +448,11 @@ function agentTool(run: LiveRun, tool: SeelieTool, scope?: Scope): AgentTool {
         canWatch: run.canWatch,
       };
       try {
-        const out = await tool.execute(withoutAsk(params) as never, ctx);
-        const text = [out.text, out.data === undefined ? null : JSON.stringify(out.data)].filter(Boolean).join("\n") || "Done.";
+        const out = await tool.execute(args as never, ctx);
+        const text =
+          [edits.length ? `The owner approved this with changes: ${edits.join("; ")}.` : null, out.text, out.data === undefined ? null : JSON.stringify(out.data)]
+            .filter(Boolean)
+            .join("\n") || "Done.";
         const content: (TextContent | ImageContent | VideoContent)[] = [
           { type: "text", text: capText(text) },
           ...(out.images ?? []),
@@ -475,7 +489,7 @@ async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: M
         // Arguments it can't summarise: the card shows them as they are.
       }
     }
-    const asks = needsApproval(kind, run.autoApprove);
+    const asks = needsApproval(kind);
     rows.push({
       runId: run.id,
       callId: scopedId(scope, call.id),
@@ -525,14 +539,30 @@ async function recordToolCalls(run: LiveRun, message: AssistantMessage, tools: M
 function snapshot(run: LiveRun, message: AssistantMessage) {
   run.partial = message;
   run.partialDirty = true;
-  emit(run, { t: "partial", message: structuredClone(message) });
+  emit(run, { t: "partial", message: { ...structuredClone(message), ...thinkingTimes(run) } });
+}
+
+/** Thinking blocks still open end when the reply moves on (to text, a tool call, the next block). */
+function closeThinking(run: LiveRun) {
+  const now = Date.now();
+  for (const t of run.thinking.values()) t.ms ??= now - t.start;
+}
+
+/** How long the reply's finished thinking blocks took, for the chat's "Thought for 12 s". */
+function thinkingTimes(run: LiveRun): ThinkingTimes {
+  const ms: Record<string, number> = {};
+  for (const [i, t] of run.thinking) if (t.ms !== undefined) ms[i] = t.ms;
+  return Object.keys(ms).length ? { thinkingMs: ms } : {};
 }
 
 function onEvent(run: LiveRun, tools: Map<string, SeelieTool>, prompt: UserMessage) {
   return async (event: AgentEvent) => {
     switch (event.type) {
       case "message_start": {
-        if (event.message.role === "assistant") snapshot(run, event.message as AssistantMessage);
+        if (event.message.role === "assistant") {
+          run.thinking = new Map();
+          snapshot(run, event.message as AssistantMessage);
+        }
         return;
       }
       case "message_update": {
@@ -540,6 +570,12 @@ function onEvent(run: LiveRun, tools: Map<string, SeelieTool>, prompt: UserMessa
         const message = event.message as AssistantMessage;
         run.partial = message;
         run.partialDirty = true;
+        if (e.type === "thinking_start") {
+          closeThinking(run);
+          run.thinking.set(e.contentIndex, { start: Date.now() });
+        } else if (e.type === "thinking_end" || e.type === "text_start" || e.type === "toolcall_start") {
+          closeThinking(run);
+        }
         if (e.type === "text_delta" || e.type === "thinking_delta") {
           emit(run, { t: "delta", i: e.contentIndex, k: e.type === "text_delta" ? "text" : "thinking", d: e.delta });
         } else if (e.type === "toolcall_delta") {
@@ -560,13 +596,18 @@ function onEvent(run: LiveRun, tools: Map<string, SeelieTool>, prompt: UserMessa
         if (message.role === "user") {
           run.history.push(message);
         }
+        let kept: Message = message;
         if (message.role === "assistant") {
           run.partial = null;
           run.partialDirty = true;
           emit(run, { t: "partial", message: null });
+          // Kept with the chat only: the model's own copy stays as it was.
+          closeThinking(run);
+          kept = { ...message, ...thinkingTimes(run) } as AssistantMessage;
+          run.thinking = new Map();
         }
         if (message.role === "assistant" || message.role === "toolResult" || message.role === "user") {
-          const entry = await saveMessage(run, message);
+          const entry = await saveMessage(run, kept);
           emit(run, { t: "msg", m: leanEntry(entry) });
         }
         if (message.role === "assistant") await recordToolCalls(run, message, tools);
@@ -609,6 +650,7 @@ function sumUsage(messages: Message[]): Usage | null {
 }
 
 async function finish(run: LiveRun, failure?: unknown) {
+  run.ending = true;
   for (const timer of run.timers) clearInterval(timer);
   run.timers = [];
   for (const [callId, waiter] of run.waiters) {
@@ -719,13 +761,8 @@ function startTimers(run: LiveRun) {
           run.agent.abort();
         }
         if (run.waiters.size > 0) {
-          const [chat] = await db
-            .select({ autoApprove: seelieChats.autoApprove })
-            .from(seelieChats)
-            .where(eq(seelieChats.id, run.chatId));
-          run.autoApprove = chat?.autoApprove ?? run.autoApprove;
           const decided = await db
-            .select({ callId: seelieToolCalls.callId, approval: seelieToolCalls.approval, by: users.id, name: users.name })
+            .select({ callId: seelieToolCalls.callId, approval: seelieToolCalls.approval, args: seelieToolCalls.args, by: users.id, name: users.name })
             .from(seelieToolCalls)
             .leftJoin(users, eq(users.id, seelieToolCalls.decidedBy))
             .where(
@@ -736,7 +773,7 @@ function startTimers(run: LiveRun) {
               ),
             );
           for (const d of decided) {
-            applyDecision(run, d.callId, d.approval !== "denied", d.by ? { id: d.by, name: d.name ?? "" } : null);
+            applyDecision(run, d.callId, d.approval !== "denied", d.by ? { id: d.by, name: d.name ?? "" } : null, d.args);
           }
         }
       } catch {
@@ -829,7 +866,8 @@ async function runHelper(
       systemPrompt: [run.basePrompt, helperSection(job, scope.helper, total)].join("\n\n"),
       model: pick.model,
       thinkingLevel: pick.thinking as never,
-      tools: run.seelieTools.map((t) => agentTool(run, t, scope)),
+      // The plan is the reply's own: a helper's steps show under its helpers call.
+      tools: run.seelieTools.filter((t) => t.name !== PLAN_TOOL).map((t) => agentTool(run, t, scope)),
       messages: [],
     },
     streamFn: streamSimple,
@@ -938,7 +976,7 @@ function routineSection(r: NonNullable<StartRunInput["routine"]>) {
   return [
     `This message is the routine "${r.name}" (${r.schedule}, India time), ${r.manual ? "started by hand from the routines list" : "sent on its schedule"}; nobody is watching as you reply, and earlier runs of it are above in this chat.`,
     "- Do the job and report it the way the owner would want to read it later: lead with what matters or changed since the last run, with the numbers.",
-    "- Changes that ask (and, unless this routine auto-approves, changes to the OMS) wait as approval cards until the owner opens the chat; make the call anyway, don't hold the report back for it, and say in the reply what's waiting.",
+    "- Instagram posts, ad spend and photoshoots wait as approval cards until the owner opens the chat; make the call anyway, don't hold the report back for it, and say in the reply what's waiting. Everything else runs straight away.",
     "- If something stops the job (a tool failing, a missing connection), say so plainly so the owner can fix it before the next run.",
   ].join("\n");
 }
@@ -967,14 +1005,12 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
 
   // The chat: an existing one of this user's, or a new one.
   let chatId = input.chatId ?? null;
-  let autoApprove = false;
   let isNew = false;
   // A compacted chat (compact.ts): Seelie reads the summary in place of the messages up to `through`.
   let compacted: { summary: string; through: number } | null = null;
   if (chatId) {
     const [chat] = await db.select().from(seelieChats).where(eq(seelieChats.id, chatId)).limit(1);
     if (!chat || chat.userId !== user.id) throw new SeelieRunError("That chat doesn't exist.", 404);
-    autoApprove = chat.autoApprove;
     isNew = !chat.title;
     if (chat.summary && chat.summaryThrough !== null) compacted = { summary: chat.summary, through: chat.summaryThrough };
     await reapStaleRuns(chatId);
@@ -985,10 +1021,9 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
       .limit(1);
     if (active) throw new SeelieRunError("Seelie is still replying in this chat. Stop it or wait.", 409);
   } else {
-    autoApprove = input.autoApprove === true;
     const [chat] = await db
       .insert(seelieChats)
-      .values({ userId: user.id, title: "", model: modelId, thinking, autoApprove })
+      .values({ userId: user.id, title: "", model: modelId, thinking })
       .returning({ id: seelieChats.id });
     chatId = chat.id;
     isNew = true;
@@ -1053,8 +1088,9 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
     listeners: new Set(),
     waiters: new Map(),
     decided: new Map(),
-    autoApprove,
+    edits: new Map(),
     abortRequested: false,
+    ending: false,
     endedElsewhere: false,
     nextSeq,
     history: [...history, prompt],
@@ -1062,6 +1098,7 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
     lastToolSnapshot: 0,
     watchCache: new Map(),
     canWatch: model.input.includes("video"),
+    thinking: new Map(),
     naming: null,
     basePrompt,
     seelieTools,
@@ -1072,6 +1109,8 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
   const systemPrompt = [
     basePrompt,
     helpersSection(),
+    planSection(),
+    MENTION_NOTE,
     input.routine ? routineSection(input.routine) : "",
     compacted ? summarySection(compacted.summary) : "",
   ]
@@ -1131,9 +1170,13 @@ export async function startRun(user: User, input: StartRunInput): Promise<Starte
   void entry;
 
   startTimers(run);
-  // Detached: the run outlives the request that started it.
-  void run.agent
-    .prompt(prompt)
+  // Detached: the run outlives the request that started it. Messages sent while it works
+  // (steerRun) are read before its next step; one sent as it was stopping gets its own turn.
+  const go = async () => {
+    await run.agent.prompt(prompt);
+    while (run.agent.hasQueuedMessages() && !run.abortRequested) await run.agent.continue();
+  };
+  void go()
     .then(() => finish(run))
     .catch((err: unknown) => finish(run, err));
 
@@ -1174,15 +1217,47 @@ export async function stopRun(user: User, runId: string) {
 }
 
 /**
- * Approve or deny a change Seelie is waiting on. `alwaysThisChat` also switches
- * the chat to auto-approve and approves its other waiting changes to the OMS
- * (changes to a marketplace or paribelle.in still ask one by one).
+ * Tell Seelie something while it works ("make it 15 s instead"): it reads the message before
+ * its next step. Only the process holding the run can: elsewhere (409) the screen keeps the
+ * message and sends it as the next one when the reply ends.
  */
-export async function decideToolCall(
-  user: User,
-  input: { runId: string; callId: string; approve: boolean; alwaysThisChat?: boolean },
-) {
-  const runRow = await ownedRun(user, input.runId);
+export async function steerRun(user: User, runId: string, input: SteerInput) {
+  const row = await ownedRun(user, runId);
+  const text = (input.text ?? "").trim();
+  const images = (input.images ?? []).filter((i) => i.data && /^image\/(png|jpeg|webp|gif)$/.test(i.mimeType)).slice(0, 6);
+  if (!text && images.length === 0) throw new SeelieRunError("Say something first.");
+  const run = registry.get(runId);
+  if (!run || run.ending || run.abortRequested || !ACTIVE_RUN.includes(row.status as RunStatus)) {
+    throw new SeelieRunError("Seelie can't take this mid-reply here; it goes as the next message.", 409);
+  }
+  if (images.length > 0 && !run.model.input.includes("image")) {
+    throw new SeelieRunError(`${run.model.name} can't see images. Send text only.`);
+  }
+  const message: UserMessage = {
+    role: "user",
+    content: [
+      ...(text ? [{ type: "text" as const, text }] : []),
+      ...images.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType })),
+      { type: "text", text: STEER_NOTE },
+    ],
+    timestamp: Date.now(),
+  };
+  run.agent.steer(message);
+  return { ok: true };
+}
+
+/** Approve or deny a change Seelie is waiting on (a post, ad spend or a photoshoot), as asked or with the owner's changes. */
+export async function decideToolCall(user: User, input: { runId: string; callId: string; approve: boolean; edits?: ApprovalEdits | null }) {
+  await ownedRun(user, input.runId);
+  let args: unknown;
+  if (input.approve && input.edits && Object.keys(input.edits).length > 0) {
+    const [row] = await db
+      .select({ tool: seelieToolCalls.tool, args: seelieToolCalls.args })
+      .from(seelieToolCalls)
+      .where(and(eq(seelieToolCalls.runId, input.runId), eq(seelieToolCalls.callId, input.callId)))
+      .limit(1);
+    if (row) args = applyEdits(row.tool, row.args, input.edits);
+  }
   const now = new Date();
   const decided = await db
     .update(seelieToolCalls)
@@ -1192,6 +1267,7 @@ export async function decideToolCall(
       decidedBy: user.id,
       decidedAt: now,
       ...(input.approve ? {} : { endedAt: now }),
+      ...(args !== undefined ? { args } : {}),
       updatedAt: now,
     })
     .where(
@@ -1206,35 +1282,8 @@ export async function decideToolCall(
 
   const run = registry.get(input.runId);
   const by = { id: user.id, name: user.name };
-  if (decided.length > 0 && run) applyDecision(run, input.callId, input.approve, by);
-
-  if (input.approve && input.alwaysThisChat) {
-    await db.update(seelieChats).set({ autoApprove: true }).where(eq(seelieChats.id, runRow.chatId));
-    // A routine's switch is its chat's.
-    await db.update(seelieRoutines).set({ autoApprove: true }).where(eq(seelieRoutines.chatId, runRow.chatId));
-    const others = await db
-      .update(seelieToolCalls)
-      .set({ approval: "approved", status: "queued", decidedBy: user.id, decidedAt: now, updatedAt: now })
-      .where(
-        and(
-          eq(seelieToolCalls.runId, input.runId),
-          eq(seelieToolCalls.kind, "write"),
-          eq(seelieToolCalls.status, "awaiting"),
-          isNull(seelieToolCalls.approval),
-        ),
-      )
-      .returning({ callId: seelieToolCalls.callId });
-    if (run) {
-      run.autoApprove = true;
-      for (const o of others) applyDecision(run, o.callId, true, by);
-    }
-  }
+  if (decided.length > 0 && run) applyDecision(run, input.callId, input.approve, by, args);
   return { ok: decided.length > 0 };
-}
-
-/** Switch a run's chat to auto-approve (or back), telling the run if this process holds it. */
-export function setLiveAutoApprove(chatId: string, on: boolean) {
-  for (const run of registry.values()) if (run.chatId === chatId) run.autoApprove = on;
 }
 
 /* -------------------------------------------------------------------------- */

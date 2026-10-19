@@ -14,7 +14,7 @@ export const memory = defineTool({
   description: [
     "What the person you're talking with asked you to remember, kept across all their chats until they delete it (everything kept is already in your instructions with its id).",
     "action 'remember': text (one standalone line, their words; several separate things go in texts). 'list': everything kept. 'update': id and the new text.",
-    "'forget': ids to delete; it always asks them first.",
+    "'forget': ids to delete.",
   ].join(" "),
   parameters: Type.Object({
     action: StringEnum(["remember", "list", "update", "forget"]),
@@ -23,7 +23,7 @@ export const memory = defineTool({
     id: optional(Type.Integer({ minimum: 1 })),
     ids: optional(Type.Array(Type.Integer({ minimum: 1 }), { minItems: 1, maxItems: 100 })),
   }),
-  // Saving is what they just asked for, so it doesn't wait; forgetting always asks.
+  // Neither waits; forgetting is tagged as its own kind on the step.
   kind: (a) => (a.action === "forget" ? "forget" : a.action === "update" ? "write" : "read"),
   summary: async (a, { user }) => {
     switch (a.action) {

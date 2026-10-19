@@ -32,7 +32,6 @@ export interface RoutineInput {
   schedule: RoutineSchedule;
   model?: string | null;
   thinking?: string | null;
-  autoApprove?: boolean;
   enabled?: boolean;
 }
 
@@ -45,7 +44,6 @@ export interface RoutineView {
   when: string;
   model: string | null;
   thinking: string | null;
-  autoApprove: boolean;
   enabled: boolean;
   nextRunAt: string | null;
   lastRunAt: string | null;
@@ -68,7 +66,6 @@ function view(r: Row, lastStatus: RunStatus | null): RoutineView {
     when: describeSchedule(schedule),
     model: r.model,
     thinking: r.thinking,
-    autoApprove: r.autoApprove,
     enabled: r.enabled,
     nextRunAt: r.nextRunAt?.toISOString() ?? null,
     lastRunAt: r.lastRunAt?.toISOString() ?? null,
@@ -126,7 +123,6 @@ export async function saveRoutine(user: User, input: RoutineInput & { id?: numbe
     schedule,
     model: input.model?.trim() || null,
     thinking: input.thinking?.trim() || null,
-    autoApprove: input.autoApprove ?? false,
     enabled: input.enabled ?? true,
     updatedAt: now,
   };
@@ -139,8 +135,6 @@ export async function saveRoutine(user: User, input: RoutineInput & { id?: numbe
       .set({ ...fields, nextRunAt, lastNote: before.enabled === fields.enabled ? before.lastNote : null })
       .where(eq(seelieRoutines.id, input.id))
       .returning();
-    // The routine's switch is its chat's switch.
-    if (row.chatId) await db.update(seelieChats).set({ autoApprove: row.autoApprove }).where(eq(seelieChats.id, row.chatId));
     return view(row, null);
   }
 
@@ -170,11 +164,6 @@ export async function deleteRoutine(user: User, id: number) {
   await db.delete(seelieRoutines).where(eq(seelieRoutines.id, id));
 }
 
-/** Kept in step with a chat's auto-approve switch, flipped in the chat. */
-export async function routineAutoApprove(chatId: string, on: boolean) {
-  await db.update(seelieRoutines).set({ autoApprove: on }).where(eq(seelieRoutines.chatId, chatId));
-}
-
 /* -------------------------------------------------------------------------- */
 /* Running                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -198,11 +187,10 @@ async function startRoutine(r: Row, manual: boolean): Promise<StartedRun> {
         409,
       );
     }
-    await db.update(seelieChats).set({ autoApprove: r.autoApprove }).where(eq(seelieChats.id, chatId));
   } else {
     const [chat] = await db
       .insert(seelieChats)
-      .values({ userId: r.userId, title: r.name, model: r.model, thinking: r.thinking, autoApprove: r.autoApprove })
+      .values({ userId: r.userId, title: r.name, model: r.model, thinking: r.thinking })
       .returning({ id: seelieChats.id });
     chatId = chat.id;
     await db.update(seelieRoutines).set({ chatId }).where(eq(seelieRoutines.id, r.id));

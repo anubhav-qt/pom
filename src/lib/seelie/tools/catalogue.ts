@@ -616,7 +616,7 @@ export const amazonApi = defineTool({
     "catalog items (/catalog/2022-04-01/items/{asin}?marketplaceIds=…&includedData=attributes,images,summaries,relationships),",
     "a listing (/listings/2021-08-01/items/{sellerId}/{sku}?marketplaceIds=…&includedData=summaries,attributes,issues,offers,fulfillmentAvailability),",
     "pricing, fees estimates, reports, notifications. {marketplaceId} and {sellerId} in the path or query are filled in.",
-    "GET only reads. Any other method CHANGES Amazon (prices, listings, stock) and always asks first; prefer a PATCH with a narrow",
+    "GET only reads. Any other method CHANGES Amazon (prices, listings, stock) straight away, without asking; prefer a PATCH with a narrow",
     "JSON Patch, and read the listing first so the change is exact.",
   ].join(" "),
   parameters: Type.Object({

@@ -1,7 +1,11 @@
 "use server";
 
+import { and, eq } from "drizzle-orm";
+
+import { db } from "@/db";
+import { seelieChats, seelieToolCalls } from "@/db/schema";
 import { requireOwner, requireUser } from "@/lib/auth";
-import { deleteChats, getChatView, listChats, pinChat, renameChat, setAutoApprove } from "@/lib/seelie/chats";
+import { deleteChats, getChatView, listChats, pinChat, renameChat } from "@/lib/seelie/chats";
 import { forgetCatalog, getCatalog, type Catalog } from "@/lib/seelie/catalog";
 import {
   cancelLogin,
@@ -33,7 +37,10 @@ import {
 } from "@/lib/seelie/routines";
 import { signInStore, signOutStore, storeStatus, type StoreStatus } from "@/lib/seelie/store";
 import { imageBudget, imageReset, type ImageBudget, type ImageReset } from "@/lib/seelie/studio/budget";
-import type { ChatSummary, ChatView } from "@/lib/seelie/types";
+import { approvalCard } from "@/lib/seelie/cards";
+import { findMentions } from "@/lib/seelie/mentions";
+import { react } from "@/lib/seelie/reactions";
+import type { ApprovalCard, ChatSummary, ChatView, Mention, ReactionInput } from "@/lib/seelie/types";
 
 /**
  * Seelie's screen's server calls. Expected failures come back as `{ ok: false, error }`
@@ -87,9 +94,32 @@ export async function deleteChatsAction(chatIds: string[]): Promise<Result<null>
   return attempt(async () => (await deleteChats(user, chatIds), null));
 }
 
-export async function autoApproveAction(chatId: string, on: boolean): Promise<Result<null>> {
+/** What an approval card shows (the post, the ad and its room under the cap, the shoot's looks). */
+export async function approvalCardAction(runId: string, callId: string): Promise<Result<ApprovalCard | null>> {
   const user = await requireUser();
-  return attempt(async () => (await setAutoApprove(user, chatId, on), null));
+  if (!seelieConfig()) return offline();
+  return attempt(async () => {
+    const [row] = await db
+      .select({ tool: seelieToolCalls.tool, args: seelieToolCalls.args, chatId: seelieToolCalls.chatId, owner: seelieChats.userId })
+      .from(seelieToolCalls)
+      .innerJoin(seelieChats, eq(seelieChats.id, seelieToolCalls.chatId))
+      .where(and(eq(seelieToolCalls.runId, runId), eq(seelieToolCalls.callId, callId)))
+      .limit(1);
+    if (!row || row.owner !== user.id) return null;
+    return approvalCard(row.chatId, row.tool, row.args);
+  });
+}
+
+/** Products and orders for @ in the box: by name, SKU, order number or buyer. */
+export async function mentionAction(q: string): Promise<Result<Mention[]>> {
+  await requireUser();
+  return attempt(() => findMentions(q));
+}
+
+/** A thumbs up or down (and a note) on what Seelie made or said, which it learns from. */
+export async function reactAction(input: ReactionInput): Promise<Result<null>> {
+  const user = await requireUser();
+  return attempt(async () => (await react(user, input), null));
 }
 
 /* Models and limits ------------------------------------------------------- */

@@ -12,6 +12,7 @@ import { cancellations, findOrders, fulfilment, orderDetails, ordersOverview, sc
 import { pdfEdit, pdfRead } from "./pdf";
 import { imageSpecs, photoEdit } from "./photo";
 import { photoshoot } from "./photoshoot";
+import { plan } from "./plan";
 import { photoPublish, videoPublish } from "./publish";
 import { returnsDesk, returnsUpdate } from "./returns";
 import { routines } from "./routines";
@@ -37,6 +38,8 @@ import { fetchUrl, webSearch, youtube } from "./web";
 
 /** Every tool, in the order the model sees them. */
 const ALL = [
+  // The job's checklist, which the chat draws as its plan
+  plan,
   // Orders and the floor
   findOrders,
   orderDetails,

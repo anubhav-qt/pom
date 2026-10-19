@@ -16,7 +16,6 @@ function brief(r: RoutineView) {
     schedule: r.schedule,
     when: r.when,
     on: r.enabled,
-    autoApprove: r.autoApprove,
     model: r.model ?? "the default",
     thinking: r.thinking ?? "the default",
     next: r.nextRunAt ? whenLabel(r.nextRunAt) : null,
@@ -41,7 +40,7 @@ export const routines = defineTool({
     "Seelie's routines: a message you get on a schedule (India time), each run replying in the routine's own chat while nobody watches; the owner manages them in Routines on this screen too.",
     "Use it when the owner wants something done regularly (\"every Monday morning send me the ads report\", \"check stock daily at 8\").",
     "action 'list': every routine with its schedule, next and last run. 'create': name, prompt (the message, written as the owner would ask it, complete on its own: the run sees this chat's history only if it's the routine's chat),",
-    "schedule ({every: 'hours', hours: 1|2|3|4|6|8|12, time: first slot 'HH:MM'} | {every: 'day', time} | {every: 'week', days: [0 Sun … 6 Sat], time} | {every: 'month', day: 1–31, time}), optional model, thinking, autoApprove (ordinary OMS changes run without asking; ads, posts, marketplaces and paribelle.in always wait).",
+    "schedule ({every: 'hours', hours: 1|2|3|4|6|8|12, time: first slot 'HH:MM'} | {every: 'day', time} | {every: 'week', days: [0 Sun … 6 Sat], time} | {every: 'month', day: 1–31, time}), optional model, thinking. Its changes run as they would in a chat: only Instagram posts, ad spend and photoshoots wait for the owner's OK.",
     "'update': id plus the fields to change. 'enable' / 'disable' / 'delete' (the chat stays) / 'run_now': id.",
   ].join(" "),
   parameters: Type.Object({
@@ -60,7 +59,6 @@ export const routines = defineTool({
     ),
     model: optional(Type.String({ maxLength: 120 })),
     thinking: optional(Type.String({ maxLength: 20 })),
-    autoApprove: optional(Type.Boolean()),
   }),
   kind: (a) => (a.action === "list" ? "read" : "write"),
   summary: (a) => {
@@ -68,9 +66,9 @@ export const routines = defineTool({
       case "list":
         return "List routines";
       case "create":
-        return `New routine "${a.name ?? "?"}": ${a.schedule ? scheduleText(a.schedule) : "no schedule"}${a.autoApprove ? ", OMS changes without asking" : ""}`;
+        return `New routine "${a.name ?? "?"}": ${a.schedule ? scheduleText(a.schedule) : "no schedule"}`;
       case "update":
-        return `Change routine ${a.id ?? "?"}${a.name ? ` to "${a.name}"` : ""}${a.schedule ? `: ${scheduleText(a.schedule)}` : ""}${a.prompt ? " (new message)" : ""}${a.autoApprove !== undefined ? `, auto-approve ${a.autoApprove ? "on" : "off"}` : ""}`;
+        return `Change routine ${a.id ?? "?"}${a.name ? ` to "${a.name}"` : ""}${a.schedule ? `: ${scheduleText(a.schedule)}` : ""}${a.prompt ? " (new message)" : ""}`;
       case "run_now":
         return `Run routine ${a.id ?? "?"} now`;
       default:
@@ -87,7 +85,6 @@ export const routines = defineTool({
         schedule: a.schedule as RoutineSchedule,
         model: a.model,
         thinking: a.thinking,
-        autoApprove: a.autoApprove ?? false,
       }).catch(fail);
       return { text: `Made. It first runs ${made.nextRunAt ? whenLabel(made.nextRunAt) : "when switched on"}.`, data: brief(made) };
     }
@@ -104,7 +101,6 @@ export const routines = defineTool({
           schedule: (a.schedule as RoutineSchedule | undefined) ?? r.schedule,
           model: a.model ?? r.model,
           thinking: a.thinking ?? r.thinking,
-          autoApprove: a.autoApprove ?? r.autoApprove,
           enabled: r.enabled,
         }).catch(fail);
         return { data: brief(saved) };
