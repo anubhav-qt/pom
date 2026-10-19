@@ -2,7 +2,7 @@
 
 import type { TextContent, ToolResultMessage } from "@paribelle/pi-ai";
 import { AlertTriangle, AtSign, Check, Copy, FileText, MessageSquareText, Music, Package, Paperclip, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { ZoomImg } from "@/components/image-lightbox";
 import { Spinner } from "@/components/ui";
@@ -16,7 +16,7 @@ import { ChipLine, LiveCard, PlanView, useWide, type Ctx } from "./job";
 import { Markdown } from "./markdown";
 import { Documents, MadeStrip, Pictures, Thumb, VideoBlock } from "./media";
 import { ItemLines, ThoughtLine } from "./steps";
-import { buildTurns, changesOf, chatChanges, chatMade, madeAnything, madeBy, nowOf, rowsOf, type Results, type Turn } from "./turns";
+import { buildTurns, changesOf, chatChanges, chatMade, madeAnything, madeBy, nowOf, rowsOf, type Made, type Results, type Turn } from "./turns";
 
 /**
  * The open chat: each request, then what Seelie did for it (on a phone a live card, from
@@ -78,6 +78,7 @@ function TurnView({ turn, ctx, wide }: { turn: Turn; ctx: Ctx; wide: boolean }) 
   // A phone shows a live card for real work; a lookup or two stays one line.
   const big = !!turn.plan || turn.calls >= 3 || asks || madeAnything(made) || turn.work.some((it) => it.type === "steer");
   const thoughts = turn.work.filter((it) => it.type === "thinking");
+  const outcome = wide && turn.plan && !turn.live && madeAnything(made) ? <Outcome made={made} /> : null;
 
   return (
     <>
@@ -99,23 +100,22 @@ function TurnView({ turn, ctx, wide }: { turn: Turn; ctx: Ctx; wide: boolean }) 
         <ChipLine turn={turn} ctx={ctx} />
       )}
       {turn.live && !turn.items.length ? <Waiting /> : null}
-      {turn.reply ? <Reply turn={turn} /> : null}
-      {!turn.live && steps ? (
-        <WrapBox turn={turn} changes={changes}>
-          {wide && turn.plan && madeAnything(made) ? (
-            <div>
-              {made.videos.map((v) => (
-                <div key={v.src} className="mt-1">
-                  <VideoBlock video={v} />
-                </div>
-              ))}
-              {made.pictures.length ? <Pictures pictures={made.pictures} /> : null}
-              {made.documents.length ? <Documents documents={made.documents} /> : null}
-            </div>
-          ) : null}
-        </WrapBox>
-      ) : null}
+      {turn.reply ? <Reply turn={turn}>{outcome}</Reply> : outcome}
+      {!turn.live && steps ? <WrapBox turn={turn} changes={changes} /> : null}
     </>
+  );
+}
+
+/** What a finished job made, under its reply (a phone's live card already shows it). */
+function Outcome({ made }: { made: Made }) {
+  return (
+    <div className="space-y-2 pt-1">
+      {made.videos.map((v) => (
+        <VideoBlock key={v.src} video={v} />
+      ))}
+      {made.pictures.length ? <Pictures pictures={made.pictures} /> : null}
+      {made.documents.length ? <Documents documents={made.documents} /> : null}
+    </div>
   );
 }
 
@@ -146,11 +146,12 @@ function Working({ turn, ctx }: { turn: Turn; ctx: Ctx }) {
 /* The reply                                                                  */
 /* -------------------------------------------------------------------------- */
 
-function Reply({ turn }: { turn: Turn }) {
+function Reply({ turn, children }: { turn: Turn; children?: ReactNode }) {
   const reply = turn.reply!;
   return (
     <div>
       <Markdown text={reply.text} />
+      {children}
       {!turn.live && reply.seq ? <ReplyActions seq={reply.seq} text={reply.text} /> : null}
     </div>
   );
