@@ -366,6 +366,35 @@ export function PinBar({ turn, ctx }: { turn: Turn; ctx: Ctx }) {
     const el = live.asking ? document.getElementById(`approval-${live.asking.callId}`) : null;
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
+  // One loader on screen: the bar shows only while the chat's own spinner (or the card
+  // waiting for a yes) is out of sight, above the header or behind the box.
+  const waiting = live.asking?.callId ?? null;
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const look = () => {
+      const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--seelie-top")) || 0;
+      const bottom = document.querySelector(".sl-dock .sl-box1, .sl-dock .sl-box2")?.getBoundingClientRect().top ?? window.innerHeight;
+      const marks = waiting
+        ? [document.getElementById(`approval-${waiting}`)]
+        : Array.from(document.querySelectorAll(".sl-spin, .dot-spinner")).filter((el) => !el.closest(".sl-dock"));
+      setSeen(
+        marks.some((el) => {
+          const r = el?.getBoundingClientRect();
+          return !!r && r.height > 0 && r.bottom > top && r.top < bottom;
+        }),
+      );
+    };
+    look();
+    const t = setInterval(look, 400);
+    window.addEventListener("scroll", look, { passive: true });
+    window.addEventListener("resize", look);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("scroll", look);
+      window.removeEventListener("resize", look);
+    };
+  }, [waiting]);
+  if (seen && !open) return null;
   return (
     <div className={cn("sl-pin", live.asking && "asking")}>
       {open && plan ? (

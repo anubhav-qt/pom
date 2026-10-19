@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, ArrowUp, AtSign, Brain, Check, ChevronDown, Clock3, FileText, Music, Package, Paperclip, Plus, Square, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
 import { contextTokens, formatTokens } from "@/lib/seelie/context";
@@ -115,18 +115,38 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
   const canSend = !disabled && reading === 0 && clipsReady && hasDraft && (seesImages || images.length === 0);
   const full = images.length >= MAX_DRAFT_IMAGES && clips.length >= MAX_DRAFT_CLIPS;
 
-  // Grows with the text up to four lines, then scrolls.
-  useLayoutEffect(() => {
+  // A phone's capsule has room for one short line.
+  const placeholder = disabled ?? (running ? (wide ? "Tell Seelie something while it works…" : "Tell Seelie more…") : chatId ? "Reply to Seelie…" : "Ask Seelie anything…");
+
+  // Grows with the text up to four lines, then scrolls; an empty box is one line (a
+  // placeholder measured while the box was still narrow left it four lines tall).
+  const fit = useCallback(() => {
     const el = textRef.current;
     if (!el) return;
     el.style.height = "auto";
     const cs = getComputedStyle(el);
     const line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5;
-    const max = line * MAX_LINES + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
-    el.style.overflowY = el.scrollHeight > max + 1 ? "auto" : "hidden";
-    setTall(el.scrollHeight > line * 1.6 + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom));
-  }, [draft, wide]);
+    const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const max = line * MAX_LINES + pad;
+    const need = el.value || el.disabled ? el.scrollHeight : line + pad;
+    el.style.height = `${Math.min(need, max)}px`;
+    el.style.overflowY = need > max + 1 ? "auto" : "hidden";
+    setTall(need > line * 1.6 + pad);
+  }, []);
+  useLayoutEffect(fit, [draft, wide, placeholder, fit]);
+  // And again when the box's width changes (a turned phone, a resized window).
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const watch = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit();
+    });
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [wide, fit]);
 
   // A fresh chat, or a switch to another, puts the cursor in the box (not on phones,
   // where it would pop the keyboard over the chat).
@@ -179,9 +199,6 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
 
   const usage = usageFor(limits, model?.provider ?? null);
   const context = model ? contextFor(messages, model.contextWindow, model.name) : null;
-  // A phone's capsule has room for one short line.
-  const placeholder = disabled ?? (running ? (wide ? "Tell Seelie something while it works…" : "Tell Seelie more…") : chatId ? "Reply to Seelie…" : "Ask Seelie anything…");
-
   const textarea = (
     <textarea
       ref={textRef}
@@ -700,17 +717,15 @@ function contextFor(messages: ReturnType<typeof useSeelie.getState>["messages"],
   };
 }
 
-/** A ring that fills as the chat's context does, with the count beside it. */
+/** How full the chat's context is, as a count (a ring here read as one more spinner). */
 function ContextMeter({ context }: { context: NonNullable<ReturnType<typeof contextFor>> }) {
-  const r = 7;
-  const c = 2 * Math.PI * r;
-  const color = context.used > 0.85 ? "var(--danger)" : context.used > 0.6 ? "var(--warn)" : "var(--accent)";
   return (
-    <span className="mr-0.5 flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-[11px] tabular-nums" style={{ color: context.used > 0.85 ? "var(--danger)" : "var(--muted-2)" }} title={context.title} aria-label={context.title}>
-      <svg width="18" height="18" viewBox="0 0 18 18" className="shrink-0 -rotate-90">
-        <circle cx="9" cy="9" r={r} fill="none" stroke="var(--panel-2)" strokeWidth="2.5" />
-        <circle cx="9" cy="9" r={r} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${Math.max(0.02, context.used) * c} ${c}`} />
-      </svg>
+    <span
+      className="mr-0.5 rounded-lg px-1.5 py-1 text-[11px] tabular-nums"
+      style={{ color: context.used > 0.85 ? "var(--danger)" : context.used > 0.6 ? "var(--warn-ink)" : "var(--muted-2)" }}
+      title={context.title}
+      aria-label={context.title}
+    >
       {context.label}
     </span>
   );
