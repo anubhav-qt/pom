@@ -27,7 +27,7 @@ import { optional, plural, StringEnum } from "./util";
  * Sending finished work out. A video: to a paribelle.in product page (the video goes last
  * in the product's gallery and in each colour's, where the storefront plays it). A photo:
  * to the OMS catalogue or an Amazon listing's image slots. Instagram has its own tool
- * (instagram.ts). All of it always asks first.
+ * (instagram.ts), which asks first; these don't.
  */
 
 /** The store's product-video upload takes up to this. */
@@ -154,7 +154,7 @@ export const videoPublish = defineTool({
   name: "video_publish",
   label: "Publish a video",
   description: [
-    "Send a final version of a library video to paribelle.in. Always asks the owner first; publish only what they asked for.",
+    "Send a final version of a library video to paribelle.in. It goes live straight away, so publish only what they asked for.",
     "to 'paribelle': adds it to a paribelle.in product (product: id or slug), last in the product's gallery and in each colour's own gallery,",
     "where the storefront plays it. colours: which colours with their own photos get it (default every one; [] for the product's gallery only).",
     "The product needs at least 2 photos.",
@@ -305,7 +305,7 @@ export const photoPublish = defineTool({
   name: "photo_publish",
   label: "Publish photos",
   description: [
-    "Send finished photos (chat:N or asset:N) out. Always asks the owner first; publish only what they asked for.",
+    "Send finished photos (chat:N or asset:N) out. They go live straight away, so publish only what they asked for.",
     "to 'oms': the OMS catalogue photo of a product (product: OMS SKU or id; ref): uploaded to paribelle.in's image host, with a copy kept on this server that the OMS shows.",
     "to 'amazon': an Amazon listing's image slots (sku: the seller SKU; images: slot main or 1-8, and ref), uploaded to paribelle.in's host and set on the listing",
     "(main_product_image_locator / other_product_image_locator_N by JSON Patch). The main slot is refused unless code finds a pure white background to the edges,",

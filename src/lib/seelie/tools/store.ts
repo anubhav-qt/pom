@@ -248,7 +248,7 @@ export const storeUpdateProducts = defineTool({
     "Change products on paribelle.in: name, description, status (active/draft/inactive/out_of_stock/archived), price, MRP, a discount % off the MRP,",
     "stock, categories, photos, and per-variant price/MRP/stock/active/photos (by variant id or SKU, or allVariants for every one). New photos replace the old; product videos (video_publish) stay.",
     "A product with variants shows its lowest variant price and highest MRP; that's kept in step. GST is worked out by the store.",
-    "`preview: true` works out and shows the before → after without changing anything (do this first for anything broad). Without it, it always asks.",
+    "`preview: true` works out and shows the before → after without changing anything (do this first for anything broad). Without it, the change goes live straight away.",
   ].join(" "),
   parameters: Type.Object({
     changes: Type.Array(StoreChange, { minItems: 1, maxItems: 200 }),
@@ -933,7 +933,7 @@ export const storeApi = defineTool({
   label: "paribelle.in API",
   description: [
     "Call any paribelle.in API route as the store's admin, for what the other store tools don't cover (orders, promotions, reviews,",
-    "customers, analytics, ...). Path is under /api/v1, e.g. /orders?page=1. GET only reads; any other method changes the store and always asks.",
+    "customers, analytics, ...). Path is under /api/v1, e.g. /orders?page=1. GET only reads; any other method changes the store straight away.",
     "Check store_api_routes first. Never use it for product deletes or edits the store_* product tools can do.",
   ].join(" "),
   parameters: Type.Object({

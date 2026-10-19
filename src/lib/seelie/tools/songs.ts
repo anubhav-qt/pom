@@ -27,7 +27,7 @@ export const songs = defineTool({
   description: [
     "The song library that reels and videos use (each song makes one reel or video, then it's used); it keeps ~70 s around each song's hook with its beat map.",
     "known: every song the library has or had (used ones too); read it before suggesting songs, never suggest one it has. vet: check candidates against it (nothing fetched).",
-    "check: fetch and measure one song (tempo, beats, hook, the stretch it would keep) without saving. add: fetch, measure and save up to 5 vetted songs (asks first).",
+    "check: fetch and measure one song (tempo, beats, hook, the stretch it would keep) without saving. add: fetch, measure and save up to 5 vetted songs.",
     "Find candidates with web_search (what's trending on Reels now) and youtube (search, and watch to hear the hook); give each its hook as m:ss when you know it.",
   ].join(" "),
   parameters: Type.Object({

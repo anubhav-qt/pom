@@ -1,24 +1,29 @@
 "use client";
 
-import { CalendarClock, Clapperboard, IndianRupee, MoreHorizontal, Package, Pin, Plus, Settings2, Sparkles, SquarePen, TrendingUp, Undo2, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowDown, CalendarClock, Clapperboard, IndianRupee, MoreHorizontal, Package, Pin, Plus, Settings2, Sparkles, SquarePen, TrendingUp, Undo2, type LucideIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DropdownMenu, type DropdownOption } from "@/components/dropdown-menu";
 import { Modal } from "@/components/modal";
 import { RailCrumb } from "@/components/rail-crumb";
-import { Toggle } from "@/components/toggle";
 import { CenteredSpinner, Empty } from "@/components/ui";
 import { lastChatId, useSeelie } from "@/lib/stores/seelie-store";
 
 import { Composer } from "./composer";
+import { PinBar } from "./job";
 import { RoutinesModal } from "./routines";
 import { SettingsModal } from "./settings";
-import { Notice, Timeline } from "./timeline";
+import { Notice, Timeline, useTurns } from "./timeline";
 
 /**
  * Seelie's screen: the chats in the rail under the header, the open chat, and the
  * box to write in. Its state lives in `useSeelie`, so a reply keeps coming in while
  * another screen is up.
+ *
+ * The box is pinned to the foot of the screen in one place, empty chat or long one: above
+ * the phone's nav bar, at the window's foot from `sm` up and while a phone's keyboard is up
+ * (on an iPhone it rides up on the keyboard, which covers the page instead of shrinking it).
+ * A spacer as tall as the box ends the chat, so the latest message stops just above it.
  */
 
 const NEW = "__new";
@@ -45,7 +50,6 @@ export function Seelie() {
   const chatId = useSeelie((s) => s.chatId);
   const title = useSeelie((s) => s.title);
   const pinned = useSeelie((s) => s.pinned);
-  const autoApprove = useSeelie((s) => s.autoApprove);
   const loadingChat = useSeelie((s) => s.loadingChat);
   const messages = useSeelie((s) => s.messages);
   const tools = useSeelie((s) => s.tools);
@@ -60,6 +64,8 @@ export function Seelie() {
 
   useEffect(() => {
     const s = useSeelie.getState();
+    // On this screen, a finished reply needs no note.
+    s.clearFinished();
     void s.loadChats();
     if (!s.status) void s.loadStatus().then(() => useSeelie.getState().loadLimits());
     // Back from another screen after a blip: catch up on what happened meanwhile.
@@ -86,6 +92,54 @@ export function Seelie() {
   // then a button by the box takes them back down.
   const stick = useRef(true);
   const [behind, setBehind] = useState(false);
+
+  // The box's height and where the chat starts, for the spacer and a new chat's welcome
+  // (globals.css: --dock-h, --seelie-top); `data-seelie` while this screen is up.
+  const dockRef = useRef<HTMLDivElement>(null);
+  const topRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.setAttribute("data-seelie", "");
+    const dock = dockRef.current;
+    const measure = () => {
+      if (dock) root.style.setProperty("--dock-h", `${Math.round(dock.getBoundingClientRect().height)}px`);
+      const top = topRef.current;
+      if (top) root.style.setProperty("--seelie-top", `${Math.round(top.getBoundingClientRect().top + window.scrollY)}px`);
+      if (stick.current) toEnd();
+    };
+    const ro = new ResizeObserver(measure);
+    if (dock) ro.observe(dock);
+    window.addEventListener("resize", measure);
+    measure();
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      root.removeAttribute("data-seelie");
+      root.style.removeProperty("--dock-h");
+      root.style.removeProperty("--seelie-top");
+      root.style.removeProperty("--kb");
+    };
+  }, []);
+
+  // An iPhone's keyboard covers the page rather than shrinking it: the box rides up by
+  // the part of the window the keyboard hides (--kb). Android shrinks the page (zero here).
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement;
+    const place = () => {
+      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      root.style.setProperty("--kb", `${kb}px`);
+    };
+    vv.addEventListener("resize", place);
+    vv.addEventListener("scroll", place);
+    place();
+    return () => {
+      vv.removeEventListener("resize", place);
+      vv.removeEventListener("scroll", place);
+    };
+  }, []);
+
   useEffect(() => {
     const onScroll = () => {
       stick.current = visibleBottom() >= document.documentElement.scrollHeight - 160;
@@ -139,6 +193,12 @@ export function Seelie() {
 
   const empty = !chatId && !messages.length && !pending && !partial;
   const online = status?.online ?? true;
+
+  // The running job, for the bar pinned above the box.
+  const { turns, results, tools: rows } = useTurns();
+  const last = turns[turns.length - 1];
+  const working = !!last?.live && (!!last.plan || last.items.some((it) => it.type === "tool"));
+  const pinCtx = useMemo(() => ({ tools: rows, results, chatId }), [rows, results, chatId]);
 
   // Seelie runs on the ThinkPad; for a moment now and then (catching up, restarting) the
   // page is answered from the cloud, where it's offline. Look again until it's back, then
@@ -213,20 +273,6 @@ export function Seelie() {
         }}
         actions={
           <>
-            {/* Also before a chat's first message: the new chat starts with it. */}
-            <div className="flex shrink-0" title="OMS edits run without asking in this chat. Amazon, paribelle.in, posts and ads always ask.">
-              <Toggle
-                className="items-center gap-2 sm:gap-3 [&>button]:mt-0"
-                checked={autoApprove}
-                onChange={(v) => void useSeelie.getState().setAutoApprove(v)}
-                label={
-                  <>
-                    <span className="whitespace-nowrap text-[13px] sm:hidden">Auto-approve</span>
-                    <span className="hidden sm:inline">Auto-approve OMS edits</span>
-                  </>
-                }
-              />
-            </div>
             {/* Phones: a new chat one tap away (from `sm` up the chat list is close enough). */}
             {!empty ? (
               <button
@@ -260,10 +306,9 @@ export function Seelie() {
         }
       />
 
-      {/* Tall enough that the box starts at the foot of the screen (on phones the spacer under it included). */}
-      <div className="mx-auto flex min-h-[calc(100dvh-184px+env(safe-area-inset-bottom))] w-full max-w-3xl flex-col sm:min-h-[calc(100dvh-11rem)]">
+      <div ref={topRef} className="mx-auto w-full max-w-3xl">
         {/* A new chat's welcome sits in the middle of the space above the box. */}
-        <div className={!loadingChat && online && empty ? "flex flex-1 flex-col justify-center py-4" : "flex-1 pt-4"}>
+        <div className={!loadingChat && online && empty ? "sl-fill flex flex-col justify-center py-4" : "pt-4"}>
           {loadingChat ? (
             <CenteredSpinner />
           ) : !online && !messages.length && !pending ? (
@@ -281,40 +326,46 @@ export function Seelie() {
             </div>
           ) : null}
         </div>
+        {/* As tall as the box (and the nav bar under it on a phone), so the chat ends above it. */}
+        <div aria-hidden className="sl-spacer" />
+      </div>
 
-        {!online ? (
-          !messages.length && !pending ? null : (
-            <p className="muted sticky bottom-[calc(56px+env(safe-area-inset-bottom))] py-4 text-center text-xs sm:bottom-0" style={{ background: "var(--bg)" }}>
-              Seelie is away for a moment (it runs on the ThinkPad). Reconnecting…
-            </p>
-          )
-        ) : (
-          <>
-            {status?.error ? (
-              <Notice tone="warn">
-                {status.error}{" "}
-                <button type="button" className="font-medium underline" onClick={() => void useSeelie.getState().loadStatus(true)}>
-                  Try again
-                </button>
-              </Notice>
-            ) : null}
-            <Composer
-              disabled={disabled}
-              onOpenSettings={() => setSettings(true)}
-              onJump={
-                behind && !empty
-                  ? () => {
-                      stick.current = true;
-                      toEnd("smooth");
-                    }
-                  : undefined
-              }
-            />
-          </>
-        )}
-        {/* Phones: room below the docked box for the nav bar under it (the page's own bottom
-            padding is less), so the box never has to ride up over the latest message. */}
-        <div aria-hidden className="dock-spacer h-[calc(56px+env(safe-area-inset-bottom)-2rem)] shrink-0 sm:hidden" />
+      {/* Pinned to the foot of the screen, in the same place whatever the chat holds. */}
+      <div ref={dockRef} className="sl-dock">
+        <div className="sl-dock-in mx-auto w-full max-w-3xl px-4 sm:px-6">
+          {behind && !empty ? (
+            <div className="pointer-events-none absolute inset-x-0 -top-11 flex justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  stick.current = true;
+                  toEnd("smooth");
+                }}
+                aria-label="Down to the latest"
+                className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border transition-transform active:scale-95"
+                style={{ background: "var(--panel)", borderColor: "var(--border-strong)", boxShadow: "var(--shadow-md)", color: "var(--muted)", animation: "rise-in 0.28s var(--ease-apple)" }}
+              >
+                <ArrowDown className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
+          {!online ? (
+            <p className="muted py-3 text-center text-xs">Seelie is away for a moment (it runs on the ThinkPad). Reconnecting…</p>
+          ) : (
+            <div className="space-y-2">
+              {working && last ? <PinBar turn={last} ctx={pinCtx} /> : null}
+              {status?.error ? (
+                <Notice tone="warn">
+                  {status.error}{" "}
+                  <button type="button" className="font-medium underline" onClick={() => void useSeelie.getState().loadStatus(true)}>
+                    Try again
+                  </button>
+                </Notice>
+              ) : null}
+              <Composer disabled={disabled} onOpenSettings={() => setSettings(true)} />
+            </div>
+          )}
+        </div>
       </div>
 
       {settings ? <SettingsModal onClose={() => setSettings(false)} /> : null}

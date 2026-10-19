@@ -13,7 +13,7 @@ import { plural, StringEnum } from "./util";
  * categories and their filters (store_categories) and HSN codes (store_hsn). Each
  * reads and writes exactly what the admin screen does, through the same API routes;
  * products and the homepage hero have their own tools in store.ts. Every change is a
- * "store" call, so it always asks.
+ * "store" call, tagged as a paribelle.in change on its step.
  */
 
 const SITE = "https://paribelle.in";
