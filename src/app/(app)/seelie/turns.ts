@@ -478,28 +478,45 @@ export interface Made {
   documents: CardDocument[];
 }
 
-/** What a run of items made, newest last: each video once (its latest render), pictures and PDFs once. */
+/** Tools that make things for the owner. What a lookup returns (a library video, the cut-outs video_assets lists) wasn't made here. */
+const MAKERS = new Set(["photo_edit", "photoshoot", "pdf_edit", "video_render"]);
+const makes = (name: string, args: unknown) => MAKERS.has(name) || (name === "video_library" && (args as { action?: unknown } | null)?.action === "show");
+
+/**
+ * What a run of items made, newest last: each video once (its latest render), pictures and
+ * PDFs once. Only what came out shows: a picture a later one was made from is a step on the
+ * way, and so are the photo edits of a job that rendered a video (they went into it).
+ */
 export function madeBy(items: Item[], results: Results, tools: Record<string, ToolRow>): Made {
   const vids = new Map<string, CardVideo>();
   const pics = new Map<number, CardPicture>();
   const docs = new Map<number, CardDocument>();
-  const take = (data: unknown) => {
+  const edits = new Set<number>();
+  let rendered = false;
+  const take = (name: string, args: unknown, data: unknown) => {
+    if (!makes(name, args)) return;
     const v = videoOf(data);
     if (v) {
       const key = v.id ? `video:${v.id}` : v.src.split("?")[0];
       vids.delete(key);
       vids.set(key, v);
+      if (name === "video_render") rendered = true;
     }
-    for (const p of picturesOf(data)) pics.set(p.id, p);
+    for (const p of picturesOf(data)) {
+      pics.set(p.id, p);
+      if (name === "photo_edit") edits.add(p.id);
+    }
     for (const d of documentsOf(data)) docs.set(d.id, d);
   };
   for (const it of items) {
     if (it.type !== "tool") continue;
-    take(readResult(resultOf(it.call.id, results, tools))?.data);
+    take(it.call.name, it.call.arguments, readResult(resultOf(it.call.id, results, tools))?.data);
     // A helper's pictures and videos count too.
-    if (it.call.name === "helpers") for (const r of Object.values(tools)) if (r.parent === it.call.id) take(readResult(r.result)?.data);
+    if (it.call.name === "helpers") for (const r of Object.values(tools)) if (r.parent === it.call.id) take(r.tool, r.args, readResult(r.result)?.data);
   }
-  return { videos: [...vids.values()], pictures: [...pics.values()], documents: [...docs.values()] };
+  const sources = new Set([...pics.values()].map((p) => Number(/^asset:(\d+)$/.exec(p.from ?? "")?.[1])));
+  const pictures = [...pics.values()].filter((p) => !sources.has(p.id) && !(rendered && edits.has(p.id)));
+  return { videos: [...vids.values()], pictures, documents: [...docs.values()] };
 }
 
 export const madeAnything = (m: Made) => m.videos.length + m.pictures.length + m.documents.length > 0;
@@ -615,14 +632,32 @@ export function chatChanges(turns: Turn[], tools: Record<string, ToolRow>, resul
   return turns.flatMap((t) => changesOf(t.items, tools, results)).reverse();
 }
 
-/** Every video, picture and PDF made in the chat, newest first. */
+/** Every video, picture and PDF made in the chat, newest first (each turn's own results, so a later video doesn't hide an earlier turn's photos). */
 export function chatMade(turns: Turn[], results: Results, tools: Record<string, ToolRow>): Made {
-  const all = madeBy(
-    turns.flatMap((t) => t.items),
-    results,
-    tools,
-  );
-  return { videos: [...all.videos].reverse(), pictures: [...all.pictures].reverse(), documents: [...all.documents].reverse() };
+  const each = turns.map((t) => madeBy(t.items, results, tools));
+  // Each once, where it last came (a video's latest render), newest first.
+  const once = <T>(list: T[], key: (x: T) => unknown) => {
+    const seen = new Map<unknown, T>();
+    for (const x of list) {
+      seen.delete(key(x));
+      seen.set(key(x), x);
+    }
+    return [...seen.values()].reverse();
+  };
+  return {
+    videos: once(
+      each.flatMap((m) => m.videos),
+      (v) => (v.id ? `video:${v.id}` : v.src.split("?")[0]),
+    ),
+    pictures: once(
+      each.flatMap((m) => m.pictures),
+      (p) => p.id,
+    ),
+    documents: once(
+      each.flatMap((m) => m.documents),
+      (d) => d.id,
+    ),
+  };
 }
 
 /* -------------------------------------------------------------------------- */
