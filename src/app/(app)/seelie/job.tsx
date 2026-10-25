@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 
 import { ApprovalCard } from "./cards";
 import { Documents, Pictures, VideoBlock } from "./media";
+import { Spinner } from "@/components/ui";
 import { Bar, ItemLines, KindTag, PlanIcon, SteerBubble } from "./steps";
 import { lasted, madeBy, madeAnything, nowOf, rowFor, rowsOf, splitAsk, userText, type Item, type Results, type Turn } from "./turns";
 
@@ -245,6 +246,7 @@ export function LiveCard({ turn, ctx }: { turn: Turn; ctx: Ctx }) {
             {elapsed(turn, now)} · {turn.calls} step{turn.calls === 1 ? "" : "s"} so far
           </small>
         </span>
+        {asking.length ? null : <Spinner size="1.1rem" className="ml-auto shrink-0" />}
       </header>
       {plan ? <Stepper turn={turn} /> : null}
       {asking.length ? (
@@ -256,8 +258,7 @@ export function LiveCard({ turn, ctx }: { turn: Turn; ctx: Ctx }) {
       ) : (
         <div className="sl-now">
           <div className="sl-now-line">
-            <span className="sl-spin" />
-            <span className="sl-now-t">{live.text}</span>
+            <span className="sl-now-t sl-shimmer">{live.text}</span>
             {live.pct !== null ? <span className="pct">{Math.round(live.pct * 100)}%</span> : null}
           </div>
           {live.pct !== null ? <Bar pct={live.pct} /> : null}
@@ -319,7 +320,6 @@ export function ChipLine({ turn, ctx }: { turn: Turn; ctx: Ctx }) {
   if (!rows.length && thinking) {
     return (
       <span className="sl-chip-line">
-        <span className="sl-spin sm" />
         <span className="sl-shimmer">Thinking…</span>
       </span>
     );
@@ -332,8 +332,7 @@ export function ChipLine({ turn, ctx }: { turn: Turn; ctx: Ctx }) {
       <button type="button" className="sl-chip-line" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         {running ? (
           <>
-            <span className="sl-spin sm" />
-            <span className="truncate">{running.label}…</span>
+            <span className="sl-shimmer truncate">{running.label}…</span>
           </>
         ) : (
           <>
@@ -376,7 +375,7 @@ export function PinBar({ turn, ctx }: { turn: Turn; ctx: Ctx }) {
       const bottom = document.querySelector(".sl-dock .sl-box1, .sl-dock .sl-box2")?.getBoundingClientRect().top ?? window.innerHeight;
       const marks = waiting
         ? [document.getElementById(`approval-${waiting}`)]
-        : Array.from(document.querySelectorAll(".sl-spin, .dot-spinner")).filter((el) => !el.closest(".sl-dock"));
+        : Array.from(document.querySelectorAll(".sl-shimmer, .dot-spinner")).filter((el) => !el.closest(".sl-dock"));
       setSeen(
         marks.some((el) => {
           const r = el?.getBoundingClientRect();
@@ -411,7 +410,6 @@ export function PinBar({ turn, ctx }: { turn: Turn; ctx: Ctx }) {
         <button type="button" className="sl-pin-main" onClick={() => (plan ? setOpen((v) => !v) : review())} aria-expanded={plan ? open : undefined}>
           {plan && !wide ? <Stepper turn={turn} mini /> : null}
           <span className="sl-pin-t">
-            {live.asking ? null : <span className="sl-spin sm mr-1.5 inline-block align-[-2px]" />}
             {wide && plan && at >= 0 ? (
               <>
                 <span style={{ color: live.asking ? "var(--warn-ink)" : "var(--accent-ink)", fontWeight: 600 }}>
@@ -425,6 +423,7 @@ export function PinBar({ turn, ctx }: { turn: Turn; ctx: Ctx }) {
             )}
           </span>
         </button>
+        {live.asking ? null : <Spinner size="1rem" className="shrink-0" />}
         {live.pct !== null && !live.asking ? <span className="pct">{Math.round(live.pct * 100)}%</span> : null}
         {live.asking ? (
           <button type="button" className="btn btn-blue px-2.5 py-1 text-xs" onClick={review}>

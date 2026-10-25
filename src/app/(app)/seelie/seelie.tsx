@@ -229,7 +229,7 @@ export function Seelie() {
       label: c.title || "Untitled chat",
       dividerBefore: i === 0 || (all[i - 1].pinned && !c.pinned),
       icon: c.active ? (
-        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full" style={{ background: "var(--accent)" }} title="Replying" />
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--accent)" }} title="Replying" />
       ) : c.pinned ? (
         <Pin className="h-3 w-3 shrink-0" style={{ color: "var(--muted-2)" }} />
       ) : c.routine ? (

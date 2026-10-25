@@ -5,7 +5,6 @@ import { AlertTriangle, AtSign, Check, Copy, FileText, MessageSquareText, Music,
 import { useMemo, useState, type ReactNode } from "react";
 
 import { ZoomImg } from "@/components/image-lightbox";
-import { Spinner } from "@/components/ui";
 import { withBasePath } from "@/lib/base-path";
 import { MENTION, STEER_NOTE, type ChatMessage, type Reaction } from "@/lib/seelie/types";
 import { useSeelie, type PendingSend } from "@/lib/stores/seelie-store";
@@ -124,7 +123,6 @@ function Waiting() {
   const run = useSeelie((s) => s.run);
   return (
     <div className="flex items-center gap-2.5 py-1">
-      <Spinner size="1.05rem" />
       <span className="sl-shimmer text-sm">{run?.status === "waiting" ? "Waiting for your answer…" : "Seelie is on it…"}</span>
     </div>
   );
@@ -136,7 +134,6 @@ function Working({ turn, ctx }: { turn: Turn; ctx: Ctx }) {
   if (now.asking || turn.items.some((it) => it.type === "tool" && ctx.tools[it.call.id]?.status === "running")) return null;
   return (
     <div className="mt-2.5 flex items-center gap-2 pl-[17px] text-[12.5px]">
-      <span className="sl-spin sm" />
       <span className="sl-shimmer">{now.text}</span>
     </div>
   );
