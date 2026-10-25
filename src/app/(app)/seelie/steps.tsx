@@ -40,7 +40,6 @@ export function Bar({ pct, className }: { pct: number; className?: string }) {
 
 /** A plan step's mark. */
 export function PlanIcon({ state, small }: { state: StepState; small?: boolean }) {
-  if (state === "active") return <span className={cn("sl-spin", small && "sm")} aria-label="Working on it" />;
   return (
     <span className={cn("sl-pi", state, small && "xs")} aria-label={state}>
       {state === "done" ? <Check className={small ? "h-2 w-2" : "h-2.5 w-2.5"} strokeWidth={3.4} /> : state === "ask" ? <span className="text-[10px] font-bold">!</span> : null}

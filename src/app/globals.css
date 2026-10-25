@@ -951,7 +951,7 @@ html[data-typing] .sl-spacer {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: sl-shimmer 1.6s linear infinite;
+  animation: sl-shimmer 3.2s linear infinite;
 }
 @keyframes sl-shimmer {
   from {
@@ -1042,7 +1042,6 @@ ul.sl-tls {
 }
 .sl-dot.running {
   background: var(--accent);
-  animation: sl-blink 1s ease-in-out infinite;
 }
 .sl-dot.queued {
   background: transparent;
@@ -1289,6 +1288,12 @@ ul.sl-helpers {
   border-radius: 50%;
   color: #fff;
 }
+.sl-pi.active {
+  width: 15px;
+  height: 15px;
+  margin: 1.5px;
+  border: 1.5px solid var(--accent);
+}
 .sl-pi.pending {
   width: 15px;
   height: 15px;
@@ -1300,7 +1305,6 @@ ul.sl-helpers {
 }
 .sl-pi.ask {
   background: var(--warn);
-  animation: sl-pulse 1.6s ease-in-out infinite;
 }
 .sl-pi.skipped,
 .sl-pi.ended {
@@ -1419,29 +1423,10 @@ ul.sl-helpers {
   background: var(--ok);
 }
 .sl-sg.active {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-}
-.sl-sg.active::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 45%;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  animation: sl-slide 1.4s var(--ease-apple) infinite;
-}
-@keyframes sl-slide {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(230%);
-  }
+  background: var(--accent);
 }
 .sl-sg.ask {
   background: var(--warn);
-  animation: sl-pulse 1.6s ease-in-out infinite;
 }
 .sl-sg.skipped,
 .sl-sg.ended {
@@ -1660,15 +1645,8 @@ ul.sl-helpers {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sl-spin,
-  .sl-shimmer,
-  .sl-dot.running,
-  .sl-pi.ask,
-  .sl-sg.ask,
-  .sl-sg.active::after {
-    animation: none !important;
-  }
   .sl-shimmer {
+    animation: none !important;
     color: var(--muted);
     background: none;
   }
