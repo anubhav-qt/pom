@@ -1220,6 +1220,47 @@ export const seelieMemories = pgTable(
   (t) => [index("seelie_memories_user_idx").on(t.userId, t.createdAt)],
 );
 
+/**
+ * A paribelle.in order on its way through Logixmitra, the courier aggregator
+ * (src/lib/logixmitra): pushed there, booked with the cheapest courier, then
+ * followed by its AWB until it's delivered or back. Keyed by the order, so the
+ * ThinkPad's and the cloud's copies can't each mint a row for the same parcel.
+ */
+export const logixmitraShipments = pgTable(
+  "logixmitra_shipments",
+  {
+    orderId: integer("order_id")
+      .primaryKey()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** new → pushed → booked → done; or cancelled. */
+    state: text("state").notNull().default("new"),
+    /** Logixmitra's id for the order (a UUID) and its reference, used on cancelling. */
+    lmOrderId: text("lm_order_id"),
+    referenceId: text("reference_id"),
+    courier: text("courier"),
+    awb: text("awb"),
+    /** What the courier charged from the Logixmitra wallet. */
+    rate: numeric("rate", { precision: 10, scale: 2 }),
+    /** Cash the courier collects at the door (0 for prepaid). */
+    codAmount: numeric("cod_amount", { precision: 12, scale: 2 }),
+    /** The courier's last word on the parcel, from the hourly tracking. */
+    trackingStatus: text("tracking_status"),
+    /** What's been written back to the store: shipped, delivered. */
+    storeState: text("store_state"),
+    /** Why the last try failed (shown on the order), cleared on success. */
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(0),
+    nextTryAt: timestamp("next_try_at", { withTimezone: true }),
+    /** One run at a time works on a row. */
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    bookedAt: timestamp("booked_at", { withTimezone: true }),
+    trackedAt: timestamp("tracked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("logixmitra_shipments_state_idx").on(t.state), index("logixmitra_shipments_awb_idx").on(t.awb)],
+);
+
 export type User = typeof users.$inferSelect;
 export type ChannelAccount = typeof channelAccounts.$inferSelect;
 export type RestockPlanItem = typeof restockPlanItems.$inferSelect;
@@ -1227,6 +1268,7 @@ export type Product = typeof products.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type Shipment = typeof shipments.$inferSelect;
+export type LogixmitraShipment = typeof logixmitraShipments.$inferSelect;
 export type Return = typeof returns.$inferSelect;
 export type Channel = (typeof channelEnum.enumValues)[number];
 export type OrderStatus = (typeof orderStatusEnum.enumValues)[number];

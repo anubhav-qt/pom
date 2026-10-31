@@ -35,6 +35,7 @@ import {
   type RoutineNotes,
   type RoutineView,
 } from "@/lib/seelie/routines";
+import { logixmitraStatus, signInLogixmitra, signOutLogixmitra, type LogixmitraStatus } from "@/lib/logixmitra/client";
 import { signInStore, signOutStore, storeStatus, type StoreStatus } from "@/lib/seelie/store";
 import { imageBudget, imageReset, type ImageBudget, type ImageReset } from "@/lib/seelie/studio/budget";
 import { approvalCard } from "@/lib/seelie/cards";
@@ -290,6 +291,26 @@ export async function storeSignOutAction(): Promise<Result<StoreStatus>> {
   return attempt(async () => {
     await signOutStore();
     return storeStatus();
+  });
+}
+
+/* Logixmitra: the courier aggregator paribelle.in's orders ship through (owner) */
+
+export async function logixmitraStatusAction(): Promise<Result<LogixmitraStatus>> {
+  await requireOwner();
+  return attempt(() => logixmitraStatus());
+}
+
+export async function logixmitraSignInAction(email: string, password: string): Promise<Result<LogixmitraStatus>> {
+  const user = await requireOwner();
+  return attempt(() => signInLogixmitra(user, email, password));
+}
+
+export async function logixmitraSignOutAction(): Promise<Result<LogixmitraStatus>> {
+  await requireOwner();
+  return attempt(async () => {
+    await signOutLogixmitra();
+    return logixmitraStatus();
   });
 }
 

@@ -1,8 +1,11 @@
 import "server-only";
 
+import { and, eq, inArray } from "drizzle-orm";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 
-import type { ChannelAccount, OrderStatus } from "@/db/schema";
+import { db } from "@/db";
+import { logixmitraShipments, orders, type ChannelAccount, type OrderStatus } from "@/db/schema";
+import { code128Bars } from "@/lib/code128";
 import { STORE_VENDOR_ID, StoreError, storeApiUrl, storeFetch, type StoreMethod, type StoreRequest } from "@/lib/seelie/store";
 
 import {
@@ -24,8 +27,9 @@ import {
  * saved in Seelie's settings (lib/seelie/store), and the OMS's stock is published to
  * the store's variants by SKU.
  *
- * The store ships with whatever courier the owner books (it has no courier link), so
- * its labels are made here: an address label with the order, COD amount and items.
+ * The store has no courier link: its parcels are booked through Logixmitra
+ * (lib/logixmitra), and its labels are made here: an address label with the
+ * order, COD amount, the courier's AWB as a barcode, and the items.
  * Writing back (shipped with AWB, delivered, cancelled, exchanges) lives in
  * lib/paribelle.ts, called from the OMS's screens.
  */
@@ -415,6 +419,21 @@ export async function paribelleLabel(o: ParibelleRaw, from: LabelSender): Promis
   page.drawText(plain(tag), { x: LABEL_W - M - regular.widthOfTextAtSize(plain(tag), 9), y: y + 5, size: 9, font: regular, color: ink });
   rule();
 
+  // The courier's AWB as a barcode the pickup boy scans, under the courier's name.
+  const awb = o.trackingNumber ? plain(o.trackingNumber).trim() : "";
+  if (awb) {
+    block(o.carrier ?? "Courier", 11, bold);
+    const { bars, modules } = code128Bars(awb);
+    const module = Math.min(2, W / modules);
+    const left = M + (W - modules * module) / 2;
+    const height = 46;
+    y -= height + 2;
+    for (const b of bars) page.drawRectangle({ x: left + b.x * module, y, width: b.w * module, height, color: ink });
+    y -= 11;
+    page.drawText(awb, { x: M + (W - bold.widthOfTextAtSize(awb, 10)) / 2, y, size: 10, font: bold, color: ink });
+    rule();
+  }
+
   block("SHIP TO", 8, bold);
   block(o.address.name, 14, bold);
   block(o.address.line, 11, regular);
@@ -423,17 +442,15 @@ export async function paribelleLabel(o: ParibelleRaw, from: LabelSender): Promis
   if (o.address.phone) block(`Phone ${o.address.phone}`, 11, regular);
   rule();
 
+  // With a barcode there's room for four lines of items above the sender.
+  const shown = o.trackingNumber ? 4 : 6;
   block("ITEMS", 8, bold);
-  for (const it of o.items.slice(0, 6)) {
+  for (const it of o.items.slice(0, shown)) {
     const attrs = it.attributes ? Object.values(it.attributes).join(", ") : "";
     block(`${it.quantity} x ${it.name}${attrs ? ` (${attrs})` : ""}`, 9, regular, 1);
     block(`SKU ${it.sku}`, 7, regular, 3);
   }
-  if (o.items.length > 6) block(`and ${o.items.length - 6} more`, 9, regular);
-  if (o.trackingNumber) {
-    rule();
-    block(`${o.carrier ?? "Courier"} AWB ${o.trackingNumber}`, 11, bold);
-  }
+  if (o.items.length > shown) block(`and ${o.items.length - shown} more`, 9, regular);
 
   // The sender at the foot, where returns go.
   y = M + 52;
@@ -508,8 +525,31 @@ export class ParibelleAdapter implements ChannelAdapter {
     const wanted = new Set(externalOrderIds);
     const found = (await paribelleOrders()).filter((o) => wanted.has(o.orderNumber));
     const from = await labelSender();
+    // Booked through Logixmitra and not picked up yet: the AWB is the OMS's, not the store's.
+    const booked = new Map(
+      found.length
+        ? (
+            await db
+              .select({ orderNumber: orders.externalOrderId, courier: logixmitraShipments.courier, awb: logixmitraShipments.awb })
+              .from(logixmitraShipments)
+              .innerJoin(orders, eq(orders.id, logixmitraShipments.orderId))
+              .where(
+                and(
+                  eq(orders.channelAccountId, this.account.id),
+                  inArray(orders.externalOrderId, found.map((o) => o.orderNumber)),
+                  inArray(logixmitraShipments.state, ["booked", "done"]),
+                ),
+              )
+          ).map((r) => [r.orderNumber, r] as const)
+        : [],
+    );
     const out: LabelResult[] = [];
-    for (const o of found) out.push({ externalOrderId: o.orderNumber, pdf: Buffer.from(await paribelleLabel(rawOf(o), from)) });
+    for (const o of found) {
+      const raw = rawOf(o);
+      const lm = booked.get(o.orderNumber);
+      const onLabel = !raw.trackingNumber && lm?.awb ? { ...raw, trackingNumber: lm.awb, carrier: lm.courier ?? raw.carrier } : raw;
+      out.push({ externalOrderId: o.orderNumber, pdf: Buffer.from(await paribelleLabel(onLabel, from)) });
+    }
     return out;
   }
 

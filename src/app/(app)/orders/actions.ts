@@ -9,6 +9,7 @@ import {
   batchOrders,
   batches,
   catalogImages,
+  logixmitraShipments,
   orderItems,
   orders,
   orderStatusEvents,
@@ -88,6 +89,18 @@ export interface StoreOrderInfo {
   shippedAt: string | null;
   /** The exchange this order replaces, if it's a replacement. */
   replacementFor: string | null;
+  /** Its booking through Logixmitra, once the cron has picked it up. */
+  logixmitra: {
+    /** new, pushed, booked, done, cancelled */
+    state: string;
+    courier: string | null;
+    awb: string | null;
+    rate: number | null;
+    codAmount: number | null;
+    trackingStatus: string | null;
+    error: string | null;
+    nextTryAt: string | null;
+  } | null;
 }
 
 function storeOrderInfo(raw: unknown): StoreOrderInfo | null {
@@ -107,6 +120,22 @@ function storeOrderInfo(raw: unknown): StoreOrderInfo | null {
     cancellationReason: r.cancellationReason,
     shippedAt: r.shippedAt,
     replacementFor: r.replacementFor?.returnNumber ?? null,
+    logixmitra: null,
+  };
+}
+
+async function logixmitraOf(orderId: number): Promise<StoreOrderInfo["logixmitra"]> {
+  const [row] = await db.select().from(logixmitraShipments).where(eq(logixmitraShipments.orderId, orderId)).limit(1);
+  if (!row) return null;
+  return {
+    state: row.state,
+    courier: row.courier,
+    awb: row.awb,
+    rate: row.rate === null ? null : Number(row.rate),
+    codAmount: row.codAmount === null ? null : Number(row.codAmount),
+    trackingStatus: row.trackingStatus,
+    error: row.error,
+    nextTryAt: row.nextTryAt?.toISOString() ?? null,
   };
 }
 
@@ -166,6 +195,7 @@ export async function getOrderDetail(orderId: number): Promise<OrderDetail | nul
     .where(eq(returns.orderId, orderId))
     .limit(1);
 
+  const store = order.channel === "paribelle" ? storeOrderInfo(order.raw) : null;
   return {
     id: order.id,
     channel: order.channel,
@@ -205,7 +235,7 @@ export async function getOrderDetail(orderId: number): Promise<OrderDetail | nul
     returnRecord: returnRow
       ? { ...returnRow, receivedAt: returnRow.receivedAt?.toISOString() ?? null }
       : null,
-    store: order.channel === "paribelle" ? storeOrderInfo(order.raw) : null,
+    store: store ? { ...store, logixmitra: await logixmitraOf(order.id) } : null,
     viewerIsOwner: user.role === "owner",
   };
 }

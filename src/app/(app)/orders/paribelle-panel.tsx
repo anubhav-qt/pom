@@ -92,6 +92,8 @@ export function ParibellePanel({
           <div className="muted">{store.address}</div>
         </div>
 
+        {store.logixmitra ? <LogixmitraLine lm={store.logixmitra} /> : null}
+
         {store.notes ? <p className="text-[13px]">Note from the customer: {store.notes}</p> : null}
         {s === "cancelled" && store.cancellationReason ? <p className="muted text-[13px]">{store.cancellationReason}</p> : null}
 
@@ -268,5 +270,39 @@ function RefusedForm({
         </button>
       </div>
     </form>
+  );
+}
+
+const LM_WORDS: Record<string, string> = {
+  new: "Booking with Logixmitra…",
+  pushed: "Sent to Logixmitra, booking a courier…",
+  booked: "Booked",
+  done: "Finished",
+  cancelled: "Logixmitra shipment cancelled",
+};
+
+/** Where the order is with Logixmitra: the courier booked by itself, its AWB and the courier's last word. */
+function LogixmitraLine({ lm }: { lm: NonNullable<StoreOrderInfo["logixmitra"]> }) {
+  const booked = lm.state === "booked" || lm.state === "done";
+  return (
+    <div className="text-[13px] leading-snug">
+      <div>
+        <span className="font-medium">Logixmitra</span>
+        <span className="muted">
+          {" · "}
+          {booked && lm.courier ? lm.courier : (LM_WORDS[lm.state] ?? lm.state)}
+          {booked && lm.awb ? <span className="font-mono"> {lm.awb}</span> : null}
+          {booked && lm.rate !== null ? ` · ${money(lm.rate)}` : ""}
+          {lm.codAmount ? ` · collects ${money(lm.codAmount)}` : ""}
+        </span>
+      </div>
+      {lm.trackingStatus ? <div className="muted">Courier: {lm.trackingStatus}</div> : null}
+      {lm.error ? (
+        <div style={{ color: "var(--danger)" }}>
+          {lm.error}
+          {lm.nextTryAt && !booked ? ` Trying again ${new Date(lm.nextTryAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}.` : ""}
+        </div>
+      ) : null}
+    </div>
   );
 }

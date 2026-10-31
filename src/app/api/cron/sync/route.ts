@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { runLogixmitra } from "@/lib/logixmitra/ship";
 import { syncAllAccounts } from "@/lib/sync";
 
 export const runtime = "nodejs";
@@ -19,6 +20,10 @@ export const maxDuration = 60;
  * busy morning simply spreads across several runs instead of timing out.
  * Nothing here is allowed to throw — a failed channel is reported in the
  * response and in the sync_runs table, and the schedule carries on.
+ *
+ * After the sync, paribelle.in's new orders go to Logixmitra and booked parcels
+ * are tracked (lib/logixmitra/ship). Only here, on the ThinkPad's schedule, so
+ * the cloud fallback never books a parcel too.
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -30,10 +35,12 @@ export async function GET(request: Request) {
 
   const startedAt = Date.now();
   const results = await syncAllAccounts();
+  const logixmitra = await runLogixmitra();
 
   return NextResponse.json({
     ok: true,
     durationMs: Date.now() - startedAt,
     results,
+    logixmitra,
   });
 }
