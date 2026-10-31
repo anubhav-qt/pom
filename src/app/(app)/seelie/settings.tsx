@@ -9,6 +9,7 @@ import { CenteredSpinner, Spinner } from "@/components/ui";
 import type { AccountLimits, LimitWindow } from "@/lib/seelie/limits";
 import type { MemoryView } from "@/lib/seelie/memories";
 import type { MetaStatus } from "@/lib/seelie/meta";
+import type { LogixmitraStatus } from "@/lib/logixmitra/client";
 import type { StoreStatus } from "@/lib/seelie/store";
 import type { ImageBudget } from "@/lib/seelie/studio/budget";
 import { useSeelie } from "@/lib/stores/seelie-store";
@@ -21,6 +22,9 @@ import {
   finishLoginAction,
   imageBudgetAction,
   loginStatusAction,
+  logixmitraSignInAction,
+  logixmitraSignOutAction,
+  logixmitraStatusAction,
   memoriesAction,
   metaChooseAction,
   metaConnectAction,
@@ -63,6 +67,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         {online ? <Accounts owner={owner} /> : null}
         {online ? <ImageGeneration /> : null}
         {owner ? <Store /> : null}
+        {owner ? <Logixmitra /> : null}
         {owner ? <Meta /> : null}
       </div>
     </Modal>
@@ -633,6 +638,87 @@ function Store() {
           />
           <button type="submit" className="btn btn-primary" disabled={busy || !email.trim() || !password}>
             {busy ? <Spinner size="1rem" color="currentColor" /> : "Sign in"}
+          </button>
+        </form>
+      ) : null}
+      {error ? <div className="mt-2"><Notice tone="danger">{error}</Notice></div> : null}
+    </section>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Logixmitra                                                                 */
+/* -------------------------------------------------------------------------- */
+
+function Logixmitra() {
+  const [status, setStatus] = useState<LogixmitraStatus | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void logixmitraStatusAction().then((res) => (res.ok ? setStatus(res.data) : setError(res.error)));
+  }, []);
+
+  async function signIn(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    const res = await logixmitraSignInAction(email.trim(), password);
+    setBusy(false);
+    setPassword("");
+    if (res.ok) setStatus(res.data);
+    else setError(res.error);
+  }
+
+  async function signOut() {
+    setBusy(true);
+    setError(null);
+    const res = await logixmitraSignOutAction();
+    setBusy(false);
+    if (res.ok) setStatus(res.data);
+    else setError(res.error);
+  }
+
+  return (
+    <section>
+      <Heading>Logixmitra shipping</Heading>
+      {!status && !error ? <CenteredSpinner className="py-6" /> : null}
+      {status?.signedIn ? (
+        <div className="surface-2 flex flex-wrap items-center gap-3 p-3.5">
+          <div className="min-w-0 flex-1 text-sm">
+            <p className="font-medium">Connected as {status.name ?? status.email}</p>
+            <p className="muted text-xs">
+              {status.email}
+              {status.savedAt ? ` · new paribelle.in orders since ${new Date(status.savedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} are booked by themselves` : ""}
+            </p>
+          </div>
+          <button type="button" className="btn btn-white text-[13px]" disabled={busy} onClick={() => void signOut()}>
+            {busy ? <Spinner size="1rem" /> : null}
+            Disconnect
+          </button>
+        </div>
+      ) : null}
+      {status && !status.signedIn ? (
+        <form onSubmit={signIn} className="space-y-2.5">
+          {status.needsSignIn ? <Notice tone="warn">The saved Logixmitra login stopped working, so orders aren&apos;t being booked. Sign in again.</Notice> : null}
+          <p className="muted text-xs">
+            With your Logixmitra panel login saved, every new paribelle.in order (COD or prepaid) is booked with the cheapest courier on its own, its AWB goes on
+            the label, and the parcel is tracked until it&apos;s delivered. The password is kept encrypted on this server.
+          </p>
+          <input className="input text-base sm:text-sm" type="email" autoComplete="username" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input
+            className="input text-base sm:text-sm"
+            type="password"
+            autoComplete="current-password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          <button type="submit" className="btn btn-primary" disabled={busy || !email.trim() || !password}>
+            {busy ? <Spinner size="1rem" color="currentColor" /> : "Connect"}
           </button>
         </form>
       ) : null}

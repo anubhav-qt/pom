@@ -20,6 +20,7 @@ import {
   channelAccounts,
   channelListings,
   inventory,
+  logixmitraShipments,
   orderFulfilment,
   orderItems,
   orders,
@@ -320,7 +321,16 @@ async function takeOffShelf(orderId: number, userId: number | null) {
 /** A paribelle.in order's shipping label, made here from what the sync kept. */
 export async function paribelleLabelFor(orderId: number) {
   const { raw } = await storeOrderOf(orderId);
-  return { orderNumber: raw.orderNumber, pdf: await paribelleLabel(raw, await labelSender()) };
+  // Booked through Logixmitra but not picked up yet: the store doesn't have the AWB, the label does.
+  const [lm] = raw.trackingNumber
+    ? []
+    : await db
+        .select({ courier: logixmitraShipments.courier, awb: logixmitraShipments.awb })
+        .from(logixmitraShipments)
+        .where(and(eq(logixmitraShipments.orderId, orderId), inArray(logixmitraShipments.state, ["booked", "done"])))
+        .limit(1);
+  const onLabel = lm?.awb ? { ...raw, trackingNumber: lm.awb, carrier: lm.courier ?? raw.carrier } : raw;
+  return { orderNumber: raw.orderNumber, pdf: await paribelleLabel(onLabel, await labelSender()) };
 }
 
 /* -------------------------------------------------------------------------- */
