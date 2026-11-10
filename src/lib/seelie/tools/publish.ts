@@ -310,7 +310,7 @@ export const photoPublish = defineTool({
     "to 'amazon': an Amazon listing's image slots (sku: the seller SKU; images: slot main or 1-8, and ref), uploaded to paribelle.in's host and set on the listing",
     "(main_product_image_locator / other_product_image_locator_N by JSON Patch). The main slot is refused unless code finds a pure white background to the edges,",
     "and refused for a picture the image model made (or one edited from it) unless the owner says otherwise (allowGenerated). preview: what would be sent, nothing uploaded.",
-    "paribelle.in product photos go through store_update_products (images take asset:N). Flipkart and Meesho have no API here: make the files in their sizes and the owner downloads them.",
+    "paribelle.in product photos go through store_update_products (images take asset:N). Flipkart, Meesho and JioMart have no API here: make the files in their sizes and the owner downloads them.",
   ].join(" "),
   parameters: Type.Object({
     to: StringEnum(["oms", "amazon"]),

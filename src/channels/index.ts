@@ -2,6 +2,7 @@ import type { ChannelAccount } from "@/db/schema";
 
 import { AmazonAdapter } from "./amazon";
 import { FlipkartAdapter } from "./flipkart";
+import { JiomartAdapter } from "./jiomart";
 import { MeeshoAdapter } from "./meesho";
 import { ParibelleAdapter } from "./paribelle";
 import type { ChannelAdapter } from "./types";
@@ -16,6 +17,8 @@ export function adapterFor(account: ChannelAccount): ChannelAdapter {
       return new MeeshoAdapter(account);
     case "paribelle":
       return new ParibelleAdapter(account);
+    case "jiomart":
+      return new JiomartAdapter(account);
   }
 }
 

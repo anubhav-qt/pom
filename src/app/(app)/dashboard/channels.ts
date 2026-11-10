@@ -2,11 +2,11 @@
  * Which marketplaces Finance counts. Pure data, no imports, so client
  * components can use it (the same reason as range.ts).
  *
- * Amazon's money comes from its Finances API; Flipkart's and Meesho's from
+ * Amazon's money comes from its Finances API; Flipkart's, Meesho's and JioMart's from
  * the reports downloaded off their seller portals (docs/portals/procedure.md).
- * All three land in the same tables, so Finance adds them up or shows one.
+ * All of them land in the same tables, so Finance adds them up or shows one.
  */
-export const MARKETPLACES = ["amazon", "flipkart", "meesho"] as const;
+export const MARKETPLACES = ["amazon", "flipkart", "meesho", "jiomart"] as const;
 export type Marketplace = (typeof MARKETPLACES)[number];
 
 /** A marketplace, or every one of them together. */
@@ -19,6 +19,7 @@ export const CHANNEL_LABEL: Record<FinanceChannel, string> = {
   amazon: "Amazon",
   flipkart: "Flipkart",
   meesho: "Meesho",
+  jiomart: "JioMart",
 };
 
 export function isFinanceChannel(v: string | undefined | null): v is FinanceChannel {

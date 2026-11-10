@@ -25,6 +25,7 @@ import { adjustStock, pushInventoryToChannels, sellableQuantity } from "@/lib/in
 import { recomputeReserved } from "@/lib/sync";
 import { editRestockItems, fillRestockItems, rebuildRestockPlan, restockPlan as currentRestockPlan } from "@/app/(app)/orders/planner";
 
+import { AMAZON_BRAND, withOurBrand } from "./amazon-brand";
 import { defineTool, ToolError } from "./types";
 import { accountsFor, ist, listRefs, num, plural, StringEnum } from "./util";
 
@@ -618,6 +619,7 @@ export const amazonApi = defineTool({
     "pricing, fees estimates, reports, notifications. {marketplaceId} and {sellerId} in the path or query are filled in.",
     "GET only reads. Any other method CHANGES Amazon (prices, listings, stock) straight away, without asking; prefer a PATCH with a narrow",
     "JSON Patch, and read the listing first so the change is exact.",
+    `Our listings are under the brand ${AMAZON_BRAND}, never Generic: a listing PUT or PATCH that sets a brand has it set to ${AMAZON_BRAND} for you.`,
   ].join(" "),
   parameters: Type.Object({
     method: StringEnum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
@@ -642,8 +644,11 @@ export const amazonApi = defineTool({
       return out;
     };
     const query = Object.fromEntries(Object.entries(a.query ?? {}).map(([k, v]) => [k, fill(v)]));
+    const path = fill(a.path);
+    const branded = withOurBrand(a.method, path, a.body, adapter.marketplace);
     try {
-      return { data: await adapter.call(a.method, fill(a.path), { query, body: a.body }) };
+      const data = await adapter.call(a.method, path, { query, body: branded.body });
+      return { data: branded.was ? { brandSetTo: `${AMAZON_BRAND} (the call said ${branded.was})`, response: data } : data };
     } catch (err) {
       const e = err as { message?: string; body?: string };
       throw new ToolError(`${e.message ?? String(err)}${e.body ? `: ${e.body.slice(0, 2000)}` : ""}`);

@@ -177,7 +177,7 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
     [
       `Now: ${nowIst()}.`,
       `You're talking with ${user.name}, ${user.role === "owner" ? "the owner" : "a staff member"}.`,
-      `Channels live in the app: ${ENABLED_CHANNELS.join(", ")} (Amazon synced from its SP-API; paribelle, the shop's own paribelle.in, from the store's admin API: its orders and exchanges, its SKUs joined to POM's products, its labels made in POM, and shipping, delivery, cancellations, COD refusals and exchange steps written back from the order popup and the Returns desk's Exchanges tab). Flipkart and Meesho orders and payments come in from their seller-portal sheets, so finance and sales can include them; orders.channel says which channel an order is from.`,
+      `Channels live in the app: ${ENABLED_CHANNELS.join(", ")} (Amazon synced from its SP-API; paribelle, the shop's own paribelle.in, from the store's admin API: its orders and exchanges, its SKUs joined to POM's products, its labels made in POM, and shipping, delivery, cancellations, COD refusals and exchange steps written back from the order popup and the Returns desk's Exchanges tab). Flipkart, Meesho and JioMart orders and payments come in from their seller-portal sheets, so finance and sales can include them; orders.channel says which channel an order is from.`,
       lastSync ? `Orders were last synced from Amazon at ${ist(lastSync)} IST; anything newer isn't in the OMS until a sync runs.` : "No order sync has finished yet.",
       off.length ? `Switched off in this app (don't offer them): ${off.join("; ")}.` : "",
       store,
@@ -239,6 +239,7 @@ export async function buildSystemPrompt(user: User, tools: SeelieTool[]): Promis
   if (names.has("catalogue_link")) {
     flows.push(
       "- New Amazon listings to OMS products: amazon_listings shows what Amazon has and which listings aren't mapped; catalogue_link maps them, making OMS products for new ones.",
+      "- Listings you put on Amazon are under the brand PariBelle (brand and manufacturer), never Generic. If Amazon refuses the brand (it needs PariBelle's brand approval or a GTIN exemption for it), say so and stop; don't fall back to Generic.",
     );
   }
   if (names.has("routines")) {

@@ -48,8 +48,8 @@ export function ProfitOverview({ view }: { view: DashboardView }) {
   const p = view.profit;
 
   if (view.lineCount === 0) {
-    // Amazon's money comes with a sync; Flipkart's and Meesho's from the seller portal procedure.
-    const fromPortal = view.channel === "flipkart" || view.channel === "meesho";
+    // Amazon's money comes with a sync; Flipkart's, Meesho's and JioMart's from the seller portal procedure.
+    const fromPortal = view.channel === "flipkart" || view.channel === "meesho" || view.channel === "jiomart";
     return (
       <div className="panel">
         <Empty

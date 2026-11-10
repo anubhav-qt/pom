@@ -20,7 +20,7 @@ const ID = /^[^)\s]{1,80}$/;
 const label = (s: string) => s.replace(/[[\]()\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
 const like = (q: string) => `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
 
-const CHANNEL: Record<string, string> = { amazon: "Amazon", flipkart: "Flipkart", meesho: "Meesho", paribelle: "paribelle.in" };
+const CHANNEL: Record<string, string> = { amazon: "Amazon", flipkart: "Flipkart", meesho: "Meesho", jiomart: "JioMart", paribelle: "paribelle.in" };
 
 export async function findMentions(q: string): Promise<Mention[]> {
   const term = q.trim().slice(0, 60);
