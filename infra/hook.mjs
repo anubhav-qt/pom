@@ -1,4 +1,4 @@
-// The deploy hook. Each repo's CI calls it once its image is published:
+// The deploy hook. infra/ship.sh calls it once the images are published:
 //   POST https://laptop.paribelle.in/_paribelle/deploy   Authorization: Bearer <deploy key>
 // and it leaves a note in ./.deploy/requested, which the ThinkPad's systemd path unit
 // (update.sh --install) turns into an update straight away, instead of at the next

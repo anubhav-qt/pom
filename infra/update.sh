@@ -1,6 +1,6 @@
 #!/bin/sh
-# Keeps the ThinkPad on the latest images and settings. It runs as soon as CI says a new
-# image is up (each repo's workflow calls the deploy hook, hook.mjs, whose note a systemd
+# Keeps the ThinkPad on the latest images and settings. It runs as soon as ship.sh says a new
+# image is up (infra/ship.sh calls the deploy hook, hook.mjs, whose note a systemd
 # path unit watches), and every 5 minutes anyway (a systemd timer), in case a call was missed.
 #   infra/update.sh --install     start updating (both; re-running it is harmless)
 #   infra/update.sh --uninstall   stop

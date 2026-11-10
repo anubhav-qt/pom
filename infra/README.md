@@ -141,16 +141,15 @@ nameservers at GoDaddy are this account's pair).
    after 30 days and `weekly/` after 400. R2 › Manage API tokens › *Object Read & Write* on
    that bucket only → `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; the S3 endpoint →
    `R2_ENDPOINT`.
-3. **API token for GitHub**: My Profile › API Tokens › Create › template *Edit Cloudflare
-   Workers*, this account and the `paribelle.in` zone → pom's `CLOUDFLARE_API_TOKEN`; the
-   account id (Workers & Pages, right side) → `CLOUDFLARE_ACCOUNT_ID`. Run pom's *deploy*
-   workflow: it creates `paribelle-edge`, puts it on `www.paribelle.in/*`, and gives it
+3. **API token for shipping**: My Profile › API Tokens › Create › template *Edit Cloudflare
+   Workers*, this account and the `paribelle.in` zone → `CLOUDFLARE_API_TOKEN` in
+   `infra/.env.ship`. `infra/ship.sh edge`: it creates `paribelle-edge`, puts it on `www.paribelle.in/*`, and gives it
    `api.paribelle.in`. Without its key it sends everything to Vercel and Render, so the site
    is unchanged.
 4. **Fail open**, once the deploy has made the route (the setting belongs to the route):
    paribelle.in › Workers Routes › `www.paribelle.in/*` › Edit › Request limit failure mode:
    **Fail open (proceed)**. Then a day past the free allowance means Vercel serves, not an
-   error page. Each deploy rewrites the route, so the workflow turns this back on after
+   error page. Each deploy rewrites the route, so `ship.sh` turns this back on after
    `wrangler deploy`; setting it by hand is only needed the first time.
 5. **Go live**, once the ThinkPad is up (4): Workers & Pages › paribelle-edge › Settings ›
    Variables and Secrets › Add › type **Secret**, `EDGE_KEY`, the value from `infra/.env`.
@@ -206,28 +205,29 @@ docker compose logs -f --tail=100 sync api web oms
 ./update.sh                                          # check for new images now (log: update.log)
 ```
 
-Pushing deploys everything by itself: CI publishes the images and the Worker, Vercel and
-Render build as before, and each repo's workflow then calls the ThinkPad's deploy hook, which
-pulls this folder and the new images and restarts what changed straight away. A 5-minute
-check catches anything a call missed. The stock images (Postgres, Caddy, cloudflared) aren't
+Shipping runs from the owner's machine, not GitHub (as breader does): from POM's `dev`, in
+Git Bash, `infra/ship.sh` checks the three repos, runs the tests, pushes POM's dev and
+production and the storefront's `main` (Vercel and Render build those as before), builds and
+publishes the ThinkPad's five images from clean LF checkouts, deploys the Worker when
+`infra/edge` changed, calls the ThinkPad's deploy hook, which pulls this folder and the new
+images and restarts what changed straight away, and waits until the OMS and the API report the
+new commits. A 5-minute check catches anything a call missed. Its settings are in
+`infra/.env.ship` (from `.env.ship.example`); it needs Docker running and `gh` signed in with
+`gh auth refresh -s write:packages`. The stock images (Postgres, Caddy, cloudflared) aren't
 updated that way; now and then: `docker compose pull db gate tunnel && docker compose up -d`.
 CLIProxyAPI is pinned (see Seelie above).
 
 ### The deploy hook
 
-CI calls `POST https://laptop.paribelle.in/_paribelle/deploy` with its key. The gate lets that
+`ship.sh` calls `POST https://laptop.paribelle.in/_paribelle/deploy` with its key. The gate lets that
 one path through without the edge key, to `hook.mjs`, which checks the key and leaves a note
 in `.deploy/`; a systemd path unit (`update.sh --install`, added by itself on a ThinkPad set
 up before the hook) sees the note and runs `update.sh` at once.
 
-The key is derived from `EDGE_KEY`, so the ThinkPad needs nothing new. Once, and again after
-changing `EDGE_KEY`, give it to the three repos' CI from any machine where `gh` is signed in:
-
-```sh
-infra/deploy-key.sh /path/to/infra/.env    # sets THINKPAD_DEPLOY_KEY; prints only its length
-```
-
-Without that secret CI skips the call, and updates wait for the 5-minute check as before.
+The key is derived from `EDGE_KEY`, so the ThinkPad needs nothing new: `ship.sh` derives it
+from the copy of the ThinkPad's `.env` that `THINKPAD_ENV` in `infra/.env.ship` points at (or
+takes `THINKPAD_DEPLOY_KEY`). Without either it skips the call, and updates wait for the
+5-minute check.
 
 ### Schema changes
 
@@ -313,9 +313,9 @@ When a Supabase database passes `PRUNE_AT_MB` (400), the sync deletes its oldest
 | `compose.yml` | the stack |
 | `.env.example` | every setting; filled in, it's `.env` (never committed) |
 | `first-start.sh` | the first start on a ThinkPad |
-| `update.sh` | the updater: on CI's call and every 5 minutes (`--install`, `--uninstall`) |
-| `hook.mjs` | the deploy hook CI calls |
-| `deploy-key.sh` | gives the three repos' CI the hook's key |
+| `update.sh` | the updater: on `ship.sh`'s call and every 5 minutes (`--install`, `--uninstall`) |
+| `hook.mjs` | the deploy hook `ship.sh` calls |
+| `ship.sh` | ships all three repos from this machine (no GitHub CI) |
 | `cluster.cjs` | one process per core, for the storefront and the OMS |
 | `Caddyfile` | the gate |
 | `oms-schema.sh` | an OMS schema change on both sides, by hand (normally automatic) |

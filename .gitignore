@@ -35,3 +35,6 @@ tmp/
 
 # Seelie's media on a dev machine (clips, cut-outs, renders, fonts, the cut-out model)
 /.seelie-media/
+
+# infra/ship.sh settings
+infra/.env.ship
