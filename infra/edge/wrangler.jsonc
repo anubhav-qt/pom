@@ -1,5 +1,5 @@
 // paribelle-edge (edge.ts): the ThinkPad first, Vercel or Render when it can't answer.
-// Deployed by .github/workflows/deploy.yml when the CLOUDFLARE_API_TOKEN secret is set.
+// Deployed by infra/ship.sh (its edge step) with CLOUDFLARE_API_TOKEN from infra/.env.ship.
 // Its one secret, EDGE_KEY, is set in the dashboard (infra/README.md); until then it
 // passes every request straight to Vercel and Render.
 {

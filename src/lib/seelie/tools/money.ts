@@ -53,7 +53,7 @@ export const finance = defineTool({
     from: Type.Optional(Type.String({ description: "YYYY-MM-DD" })),
     to: Type.Optional(Type.String({ description: "YYYY-MM-DD, inclusive" })),
     basis: Type.Optional(StringEnum(["paid", "ordered"])),
-    channel: Type.Optional(Type.String({ description: "all (default), amazon, flipkart or meesho." })),
+    channel: Type.Optional(Type.String({ description: "all (default), amazon, flipkart, meesho or jiomart." })),
     status: Type.Optional(Type.String({ description: "orders: delivered, returned, rto, cancelled, shipped or in_progress." })),
     query: Type.Optional(Type.String({ description: "orders/products: filter by order id, item or SKU." })),
     sort: Type.Optional(StringEnum(["profit", "loss", "net", "date"])),

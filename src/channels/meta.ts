@@ -8,4 +8,5 @@ export const CHANNEL_META = {
   flipkart: { name: "Flipkart", color: "#2874f0", live: true },
   meesho: { name: "Meesho", color: "#f43397", live: false },
   paribelle: { name: "paribelle.in", color: "#b8456b", live: true },
+  jiomart: { name: "JioMart", color: "#0078ad", live: false },
 } as const;

@@ -119,7 +119,7 @@ Nothing is done yet. The plan:
    seconds of errors (two missed checks, then Cloudflare applying the DNS change), where
    the Worker today switches per request, instantly. Seelie is offline on the fallback,
    the same as now.
-7. **Deploys.** Change `.github/workflows/deploy.yml`: it deploys `paribelle-edge` and
+7. **Deploys.** Change `infra/ship.sh`: it deploys `paribelle-edge` and
    re-sets the www route's fail-open today. It should deploy `paribelle-failover`
    instead. Update `infra/README.md`.
 8. **Remove `paribelle-edge` last.** Until then, turning its route back on is the

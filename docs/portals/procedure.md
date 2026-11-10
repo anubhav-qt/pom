@@ -1,10 +1,10 @@
-# Seller portals: fetching Flipkart and Meesho data
+# Seller portals: fetching Flipkart, Meesho and JioMart data
 
 Finance (Overview and Ledger) and the in-app assistant count every
 marketplace Paribelle sells on. Amazon's orders and money come in by
-themselves (its API, every 10 minutes). Flipkart and Meesho give us no API we
-can use, so their orders, returns and payments are read off their seller
-portals. This is the procedure for that.
+themselves (its API, every 10 minutes). Flipkart, Meesho and JioMart give us
+no API we can use yet, so their orders, returns and payments are read off
+their seller portals. This is the procedure for that.
 
 It is written for **Claude Code with its built-in browser**: the owner logs
 in, Claude reads the portals in the browser and writes what it read into the
@@ -55,7 +55,7 @@ Hand it this file and say "run the seller portal procedure" (the prompt is
      (SELECT count(*) FROM finance_transactions t WHERE t.channel_account_id = ca.id) AS money_lines,
      (SELECT max(posted_at) FROM finance_transactions t WHERE t.channel_account_id = ca.id AND t.type <> 'Transfer') AS last_money,
      (SELECT max(posted_at) FROM finance_transactions t WHERE t.channel_account_id = ca.id AND t.type = 'Transfer') AS last_payout
-   FROM channel_accounts ca WHERE ca.channel IN ('flipkart', 'meesho');
+   FROM channel_accounts ca WHERE ca.channel IN ('flipkart', 'meesho', 'jiomart');
    ```
 
    Running a SQL file (PowerShell, from `E:\oms`; the same line works in Git
@@ -76,9 +76,11 @@ Hand it this file and say "run the seller portal procedure" (the prompt is
 
 ## Logging in
 
-1. Open the built-in browser on the two portals, one tab each:
+1. Open the built-in browser on the portals, one tab each:
    - Flipkart Seller Hub: https://seller.flipkart.com/
    - Meesho Supplier Panel: https://supplier.meesho.com/
+   - JioMart seller panel: https://seller.jiomart.com/ (if it sends you to
+     another Jio host to log in, follow it and note the host in the plan)
 2. If either shows its login page, ask the owner to log in there (they type
    in the browser pane) and wait until they say they're in. A login usually
    lasts between runs, so often there is nothing to do.
@@ -128,7 +130,8 @@ SELECT 'meesho', 'Paribelle — Meesho (Supplier Panel)', '{}'::jsonb, true
 WHERE NOT EXISTS (SELECT 1 FROM channel_accounts WHERE channel = 'meesho');
 ```
 
-(`'flipkart'`, `'Paribelle — Flipkart (Seller Hub)'` for Flipkart.) Run it on
+(`'flipkart'`, `'Paribelle — Flipkart (Seller Hub)'` for Flipkart;
+`'jiomart'`, `'Paribelle — JioMart (seller panel)'` for JioMart.) Run it on
 its own first, read back the id, and write it in the plan. The cron sync
 leaves these accounts alone: it only syncs the channels in
 `ENABLED_CHANNELS` (src/config/features.ts), and the Orders, Returns and
@@ -378,7 +381,7 @@ rules for money lines, the script follows them), and log it below.
 
 ## Known limits
 
-- Flipkart and Meesho orders show only in Finance and the assistant, not on
+- Flipkart, Meesho and JioMart orders show only in Finance and the assistant, not on
   the Orders screen: they are shipped from their own portals.
 - Orders delivered but not yet paid for have no payment line until the
   portal lists them, so read upcoming payments where the portal has them.
@@ -485,6 +488,14 @@ Notes:
 - The returns list only goes back 180 days ("Orders in last 180 days").
 - None of the 18 Meesho SKUs match a product yet; the owner links them.
 
+### JioMart seller panel
+
+Not read yet. The first JioMart run reads everything (orders in every
+status, returns and RTO, settlements and payouts), records here how the
+panel's pages load their data the way the Flipkart and Meesho sections do,
+and keys rows the same way: order ids as the panel shows them, return ids
+prefixed `jm-`, money lines `jm:<order item id>:sale|return|<kind>`.
+
 ## Run log
 
 | Date | Run by | Marketplace | What was read, and the range | Written (orders / returns / money lines / payouts) | Notes |
@@ -495,4 +506,5 @@ Notes:
 ## Prompt to paste
 
 > Read docs/portals/procedure.md and run it. I'll log in to Flipkart Seller
-> Hub and the Meesho Supplier Panel in your browser when you ask.
+> Hub, the Meesho Supplier Panel and the JioMart seller panel in your browser
+> when you ask.

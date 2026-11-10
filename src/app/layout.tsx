@@ -14,7 +14,7 @@ const logo = Italiana({ subsets: ["latin"], weight: "400", variable: "--font-log
 
 export const metadata: Metadata = {
   title: "POM",
-  description: "Order management across Amazon, Flipkart and Meesho",
+  description: "Order management across Amazon, Flipkart, Meesho, JioMart and paribelle.in",
 };
 
 export const viewport: Viewport = {

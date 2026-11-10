@@ -63,7 +63,7 @@ export const findOrders = defineTool({
     query: Type.Optional(Type.String()),
     queue: Type.Optional(StringEnum(QUEUES)),
     statuses: Type.Optional(Type.Array(StringEnum(STATUSES), { description: "Marketplace statuses." })),
-    channel: Type.Optional(Type.String({ description: "amazon, flipkart or meesho." })),
+    channel: Type.Optional(Type.String({ description: "amazon, flipkart, meesho or jiomart." })),
     orderedFrom: Type.Optional(Type.String({ description: "YYYY-MM-DD, India time, inclusive." })),
     orderedTo: Type.Optional(Type.String({ description: "YYYY-MM-DD, inclusive." })),
     dispatchByBefore: Type.Optional(Type.String({ description: "YYYY-MM-DD: dispatch-by earlier than this day." })),

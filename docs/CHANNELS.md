@@ -204,3 +204,16 @@ as a one-off script.
 
 The sync engine, queue, packing screen, label printer and inventory push all
 pick it up with no further changes.
+
+---
+
+## JioMart — seller panel
+
+**There is no self-serve seller API (checked 2026-11-10).** JioMart sellers work
+in the seller panel; programmatic order and inventory sync is only offered
+through Jio's onboarded partners (Fynd Konnect, Unicommerce), which are paid.
+
+So `JiomartAdapter` reports `supportsLiveSync: false`, like Meesho, and JioMart's
+orders, returns and payments are read off the seller panel by the portal
+procedure (`docs/portals/procedure.md`). Finance counts them and Seelie reads
+them. If JioMart ever issues credentials, only `src/channels/jiomart.ts` changes.

@@ -39,6 +39,7 @@ const CREDENTIAL_FIELDS: Record<Channel, CredentialField[]> = {
     { key: "locationId", label: "Location ID", hint: "Warehouse used for stock updates" },
   ],
   meesho: [],
+  jiomart: [],
   // Signs in with the paribelle.in admin login saved in Seelie's settings.
   paribelle: [],
 };
