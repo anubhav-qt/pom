@@ -5,14 +5,12 @@ import { generateContent, HELPER_MODEL } from "./gemini";
 import { HELPER_FAMILY } from "./helpers";
 
 /**
- * Voice input: a spoken piece of a message (a WAV the composer recorded and cut at a
- * pause) written out as text by Gemini Flash through CLIProxyAPI. The composer sends
- * each piece as it is spoken, a growing piece again every few seconds so words show up
- * while the person still talks, and the whole recording once more when they stop, so
- * the joins between pieces come out clean. Nothing here keeps the audio.
+ * Voice input: a spoken message (the WAV the composer recorded, sent whole once the
+ * person taps Done) written out as text by Gemini Flash through CLIProxyAPI. Nothing
+ * here keeps the audio.
  */
 
-/** The longest recording the composer sends whole (it stops by itself at this length). */
+/** The longest recording the composer sends (it stops by itself at this length). */
 export const MAX_VOICE_SECONDS = 180;
 /** 16 kHz, 16-bit mono WAV is 32 KB a second; a little room for the header. */
 export const MAX_VOICE_BYTES = MAX_VOICE_SECONDS * 32_000 + 4096;
@@ -46,13 +44,8 @@ export function cleanTranscript(answer: string) {
   return text;
 }
 
-/**
- * The words in `wav`. `before` is what was said just before this piece (for names and
- * spelling; it is never repeated in the answer).
- */
-export async function transcribe(wav: Buffer, opts: { before?: string; signal: AbortSignal }): Promise<string> {
-  const before = opts.before?.trim().slice(-400);
-  const ask = before ? `This piece follows straight on from: "${before}"\nWrite out only this piece, without repeating that.` : "Write out this recording.";
+/** The words in `wav`. */
+export async function transcribe(wav: Buffer, opts: { signal: AbortSignal }): Promise<string> {
   const { text } = await generateContent(
     await voiceModel(),
     {
@@ -67,13 +60,14 @@ export async function transcribe(wav: Buffer, opts: { before?: string; signal: A
                 data: wav.toString("base64"),
               },
             },
-            { text: ask },
+            { text: "Write out this recording." },
           ],
         },
       ],
       generationConfig: { temperature: 0 },
     },
-    { signal: opts.signal, timeoutMs: 30_000 },
+    // Up to 3 minutes of speech to write out.
+    { signal: opts.signal, timeoutMs: 60_000 },
   );
   return cleanTranscript(text);
 }
