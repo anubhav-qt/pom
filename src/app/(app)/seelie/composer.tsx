@@ -118,19 +118,11 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
   };
   const voice = useVoice({ onDone: (words) => setDraft(withVoice(words)) });
   const speaking = voice.state !== "idle";
-  useEffect(() => {
-    if (voice.state === "listening" || voice.state === "finishing") setDraft(withVoice(voice.text));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voice.text, voice.state]);
   function startVoice() {
     voiceBase.current = draft;
     voice.clearError();
     if (coarse()) textRef.current?.blur();
     void voice.start();
-  }
-  function cancelVoice() {
-    voice.cancel();
-    setDraft(voiceBase.current);
   }
 
   const running = !!run && ACTIVE_RUN.includes(run.status);
@@ -142,7 +134,7 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
   const full = images.length >= MAX_DRAFT_IMAGES && clips.length >= MAX_DRAFT_CLIPS;
 
   // A phone's capsule has room for one short line.
-  const placeholder = disabled ?? (speaking ? "Listening…" : running ?(wide ? "Tell Seelie something while it works…" : "Tell Seelie more…") : chatId ? "Reply to Seelie…" : "Ask Seelie anything…");
+  const placeholder = disabled ?? (speaking ? "Listening…" : running ? (wide ? "Tell Seelie something while it works…" : "Tell Seelie more…") : chatId ? "Reply to Seelie…" : "Ask Seelie anything…");
 
   // Grows with the text up to four lines, then scrolls; an empty box is one line (a
   // placeholder measured while the box was still narrow left it four lines tall).
@@ -330,7 +322,7 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
     );
 
   const micButton = mic && !speaking ? <MicButton onClick={startVoice} disabled={!!disabled} compact={!wide} /> : null;
-  const recording = speaking ? <RecordingBar voice={voice} onCancel={cancelVoice} className={wide ? "flex-1 px-1" : "px-1 pb-1"} /> : null;
+  const recording = speaking ? <RecordingBar voice={voice} onCancel={voice.cancel}className={wide ? "flex-1 px-1" : "px-1 pb-1"} /> : null;
 
   const dragProps = {
     onDragOver: (e: React.DragEvent) => {

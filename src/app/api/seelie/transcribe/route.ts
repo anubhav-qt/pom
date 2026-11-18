@@ -7,15 +7,14 @@ import { MAX_VOICE_BYTES, transcribe } from "@/lib/seelie/voice";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 
 /**
- * Voice input: one spoken piece (16 kHz mono WAV, the body) written out as text.
+ * Voice input: a spoken message (16 kHz mono WAV, the body) written out as text.
  *
- *   headers: content-type audio/wav, x-before (optional, encodeURIComponent of what
- *            was said just before this piece)
+ *   headers: content-type audio/wav
  *   → { text } ("" when nothing was said)
  */
 export async function POST(request: Request) {
@@ -28,15 +27,8 @@ export async function POST(request: Request) {
   if (wav.length < 44 || wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE") return bad("That isn't a WAV recording.");
   if (wav.length > MAX_VOICE_BYTES) return bad("That recording is too long.", 413);
 
-  let before = "";
   try {
-    before = decodeURIComponent(request.headers.get("x-before") ?? "");
-  } catch {
-    // Not valid URI encoding: write the piece out without it.
-  }
-
-  try {
-    const text = await transcribe(wav, { before, signal: request.signal });
+    const text = await transcribe(wav, { signal: request.signal });
     return NextResponse.json({ text });
   } catch (err) {
     if (request.signal.aborted) return bad("Cancelled", 499);
