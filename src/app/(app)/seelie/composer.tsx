@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 
 import { mentionAction } from "./actions";
 import { useWide } from "./job";
+import { canRecord, MicButton, RecordingBar, useVoice } from "./voice";
 
 /**
  * Where a message is written: the text (up to four lines, then it scrolls), the photos,
@@ -107,16 +108,41 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
     return () => root.removeAttribute("data-typing");
   }, [typing]);
 
+  // Voice: the words go after whatever was in the box when the mic went on.
+  const [mic, setMic] = useState(false);
+  useEffect(() => setMic(canRecord()), []);
+  const voiceBase = useRef("");
+  const withVoice = (words: string) => {
+    const base = voiceBase.current;
+    return !words ? base : !base ? words : `${base}${/\s$/.test(base) ? "" : " "}${words}`;
+  };
+  const voice = useVoice({ onDone: (words) => setDraft(withVoice(words)) });
+  const speaking = voice.state !== "idle";
+  useEffect(() => {
+    if (voice.state === "listening" || voice.state === "finishing") setDraft(withVoice(voice.text));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.text, voice.state]);
+  function startVoice() {
+    voiceBase.current = draft;
+    voice.clearError();
+    if (coarse()) textRef.current?.blur();
+    void voice.start();
+  }
+  function cancelVoice() {
+    voice.cancel();
+    setDraft(voiceBase.current);
+  }
+
   const running = !!run && ACTIVE_RUN.includes(run.status);
   const model = catalog?.models.find((m) => m.id === modelId) ?? null;
   const seesImages = model?.images ?? true;
   const clipsReady = clips.every((c) => c.assetId !== null);
   const hasDraft = draft.trim().length > 0 || images.length > 0 || clips.length > 0;
-  const canSend = !disabled && reading === 0 && clipsReady && hasDraft && (seesImages || images.length === 0);
+  const canSend = !disabled && !speaking && reading === 0 && clipsReady && hasDraft && (seesImages || images.length === 0);
   const full = images.length >= MAX_DRAFT_IMAGES && clips.length >= MAX_DRAFT_CLIPS;
 
   // A phone's capsule has room for one short line.
-  const placeholder = disabled ?? (running ? (wide ? "Tell Seelie something while it works…" : "Tell Seelie more…") : chatId ? "Reply to Seelie…" : "Ask Seelie anything…");
+  const placeholder = disabled ?? (speaking ? "Listening…" : running ?(wide ? "Tell Seelie something while it works…" : "Tell Seelie more…") : chatId ? "Reply to Seelie…" : "Ask Seelie anything…");
 
   // Grows with the text up to four lines, then scrolls; an empty box is one line (a
   // placeholder measured while the box was still narrow left it four lines tall).
@@ -205,6 +231,7 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
       value={draft}
       rows={1}
       disabled={!!disabled}
+      readOnly={speaking}
       onChange={(e) => {
         setDraft(e.target.value);
         setCaret(e.target.selectionStart ?? e.target.value.length);
@@ -302,6 +329,9 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
       </button>
     );
 
+  const micButton = mic && !speaking ? <MicButton onClick={startVoice} disabled={!!disabled} compact={!wide} /> : null;
+  const recording = speaking ? <RecordingBar voice={voice} onCancel={cancelVoice} className={wide ? "flex-1 px-1" : "px-1 pb-1"} /> : null;
+
   const dragProps = {
     onDragOver: (e: React.DragEvent) => {
       if (disabled || !e.dataTransfer.types.includes("Files")) return;
@@ -328,52 +358,58 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
           {textarea}
           {/* A tap on these leaves the cursor in the box, so nothing moves under the pointer before it lands. */}
           <div className="flex items-center gap-1 px-2 pb-2 pt-0.5" onMouseDown={(e) => e.preventDefault()}>
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={!!disabled || full}
-              className="nav-icon-btn h-8 w-8 disabled:opacity-40"
-              style={{ color: "var(--muted)" }}
-              aria-label="Add photos, clips, sounds or PDFs"
-              title={`${seesImages ? `Photos (up to ${MAX_DRAFT_IMAGES}), clips` : "Clips"}, sounds and PDFs (up to ${MAX_DRAFT_CLIPS}, 300 MB each)`}
-            >
-              <Paperclip className="h-[18px] w-[18px]" />
-            </button>
-            <button type="button" onClick={() => insertAt(textRef.current, draft, setDraft, setCaret)} className="nav-icon-btn h-8 w-8" style={{ color: "var(--muted)" }} aria-label="Pick a product or an order" title="@ a product or an order">
-              <AtSign className="h-[17px] w-[17px]" />
-            </button>
-            <ModelPicker value={modelId} onChange={setModel} side="up" />
-            <ThinkingPicker model={modelId} value={thinking} onChange={setThinking} side="up" />
-            <div className="flex-1" />
-            {context ? <ContextMeter context={context} /> : null}
-            {usage ? (
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="mr-1 flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-[11px] tabular-nums hover:bg-[var(--tint-hover)]"
-                style={{ color: usage.used > 0.85 ? "var(--danger)" : "var(--muted-2)" }}
-                title={usage.title}
-              >
-                <span className="relative h-1.5 w-10 overflow-hidden rounded-full" style={{ background: "var(--panel-2)" }}>
-                  <span
-                    className="absolute inset-y-0 left-0 rounded-full"
-                    style={{ width: `${Math.round(usage.used * 100)}%`, background: usage.used > 0.85 ? "var(--danger)" : usage.used > 0.6 ? "var(--warn)" : "var(--accent)" }}
-                  />
-                </span>
-                {Math.round(usage.used * 100)}%
-              </button>
-            ) : null}
-            {running && hasDraft ? (
-              <button type="button" onClick={() => void stop()} aria-label="Stop" title="Stop" className="sl-send stop mr-1 h-8 w-8">
-                <Square className="h-3 w-3" fill="currentColor" />
-              </button>
-            ) : null}
-            {action}
+            {recording ?? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={!!disabled || full}
+                  className="nav-icon-btn h-8 w-8 disabled:opacity-40"
+                  style={{ color: "var(--muted)" }}
+                  aria-label="Add photos, clips, sounds or PDFs"
+                  title={`${seesImages ? `Photos (up to ${MAX_DRAFT_IMAGES}), clips` : "Clips"}, sounds and PDFs (up to ${MAX_DRAFT_CLIPS}, 300 MB each)`}
+                >
+                  <Paperclip className="h-[18px] w-[18px]" />
+                </button>
+                <button type="button" onClick={() => insertAt(textRef.current, draft, setDraft, setCaret)} className="nav-icon-btn h-8 w-8" style={{ color: "var(--muted)" }} aria-label="Pick a product or an order" title="@ a product or an order">
+                  <AtSign className="h-[17px] w-[17px]" />
+                </button>
+                <ModelPicker value={modelId} onChange={setModel} side="up" />
+                <ThinkingPicker model={modelId} value={thinking} onChange={setThinking} side="up" />
+                <div className="flex-1" />
+                {context ? <ContextMeter context={context} /> : null}
+                {usage ? (
+                  <button
+                    type="button"
+                    onClick={onOpenSettings}
+                    className="mr-1 flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-[11px] tabular-nums hover:bg-[var(--tint-hover)]"
+                    style={{ color: usage.used > 0.85 ? "var(--danger)" : "var(--muted-2)" }}
+                    title={usage.title}
+                  >
+                    <span className="relative h-1.5 w-10 overflow-hidden rounded-full" style={{ background: "var(--panel-2)" }}>
+                      <span
+                        className="absolute inset-y-0 left-0 rounded-full"
+                        style={{ width: `${Math.round(usage.used * 100)}%`, background: usage.used > 0.85 ? "var(--danger)" : usage.used > 0.6 ? "var(--warn)" : "var(--accent)" }}
+                      />
+                    </span>
+                    {Math.round(usage.used * 100)}%
+                  </button>
+                ) : null}
+                {running && hasDraft ? (
+                  <button type="button" onClick={() => void stop()} aria-label="Stop" title="Stop" className="sl-send stop mr-1 h-8 w-8">
+                    <Square className="h-3 w-3" fill="currentColor" />
+                  </button>
+                ) : null}
+                {micButton}
+                {action}
+              </>
+            )}
           </div>
         </div>
       ) : (
-        <div className={cn("sl-box1", (tall || attachments) && "tall", dragging && "dragging", disabled && "opacity-60")} {...dragProps}>
+        <div className={cn("sl-box1", (tall || attachments || recording) && "tall", dragging && "dragging", disabled && "opacity-60")} {...dragProps}>
           {attachments}
+          {recording}
           <div className="flex items-end gap-1.5">
             <div className="relative shrink-0" onMouseDown={(e) => e.preventDefault()}>
               <button
@@ -407,10 +443,17 @@ export function Composer({ disabled, onOpenSettings }: { disabled?: string | nul
               ) : null}
             </div>
             {textarea}
-            {action}
+            {micButton}
+            {speaking ? null : action}
           </div>
         </div>
       )}
+      {voice.error ? (
+        <p className="mt-1.5 flex items-center gap-1.5 px-2 text-xs" style={{ color: "var(--warn)" }}>
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          {voice.error}
+        </p>
+      ) : null}
       {!seesImages && images.length ? (
         <p className="mt-1.5 px-2 text-xs" style={{ color: "var(--warn)" }}>
           {model?.name} can&apos;t see photos. Pick another model or remove them.
